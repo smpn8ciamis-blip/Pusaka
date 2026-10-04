@@ -1,0 +1,11 @@
+{ "name": "Pusaka SMPN 8 Ciamis", 
+  "packageId": "com.smpn8ciamis.pusaka", 
+  "version": "1.0.0", "entry": 
+  "https://pusaka.smpn8ciamis.sch.id", 
+  "permissions": ["INTERNET"], "network": {
+    "cleartext": false
+  },
+  "orientation": "portrait", "statusBar": { 
+    "visible": true, "color": "#ffffff"
+  }
+}

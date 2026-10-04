@@ -1,0 +1,1 @@
+ALTER TABLE public.school_settings ADD COLUMN IF NOT EXISTS enable_captcha boolean NOT NULL DEFAULT true;

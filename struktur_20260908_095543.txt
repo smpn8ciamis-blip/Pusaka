@@ -1,0 +1,789 @@
+======================================
+     STRUKTUR FOLDER APLIKASI
+======================================
+Tanggal: 2026-09-08 09:55:43
+Hostname: srv1351636
+User: root
+Direktori: /srv/app/app
+======================================
+
+📊 INFORMASI SISTEM:
+─────────────────────
+OS: Ubuntu 22.04.5 LTS
+Kernel: 5.15.0-190-generic
+Total RAM: 7.8Gi
+Disk usage: 24% (24G digunakan dari 97G)
+
+📁 STATISTIK DIREKTORI:
+─────────────────────────
+Total folder: 8525
+Total file: 56032
+Total ukuran: 1.3G
+
+📂 STRUKTUR FOLDER (kedalaman 2 level):
+─────────────────────────────────────────────
+[ 26M]  .
+├── [1.1M]  15.zip
+├── [1.2M]  18.zip
+├── [1.2M]  19.zip
+├── [1.2M]  20.zip
+├── [1.2M]  21.zip
+├── [1.2M]  22.zip
+├── [1.3M]  23.zip
+├── [1.3M]  24.zip
+├── [1.3M]  25.zip
+├── [2.6M]  26.zip
+├── [ 208]  CHANGELOG.md
+├── [ 17K]  DEPLOYMENT.md
+├── [ 64K]  Pusaka_Nedelcis
+│   ├── [ 13K]  index.css
+│   ├── [1.3K]  index.html
+│   ├── [ 103]  main.js
+│   ├── [ 312]  nitron.config.json
+│   ├── [4.0K]  node_modules
+│   ├── [ 37K]  package-lock.json
+│   ├── [3.7K]  package.json
+│   └── [ 756]  style.css
+├── [2.1K]  README.md
+├── [1.2M]  TS.zip
+├── [1.1M]  Xx.zip
+├── [2.3K]  all-subfolders-structure.sh
+├── [9.0K]  android
+│   ├── [1.0K]  AndroidManifest.xml
+│   └── [4.0K]  res
+├── [5.5K]  backup.sh
+├── [ 16K]  backups
+│   ├── [4.0K]  20260823_185821
+│   ├── [4.0K]  backup_2026-08-30_16-33-02
+│   └── [4.0K]  backup_2026-08-30_16-57-21
+├── [218K]  bun.lock
+├── [196K]  bun.lockb
+├── [1.2M]  bun.zip
+├── [ 414]  components.json
+├── [ 76K]  deploy
+│   └── [ 72K]  install.sh
+├── [1.3M]  dist
+│   ├── [ 20K]  assets
+│   ├── [7.5K]  favicon.ico
+│   ├── [325K]  favicon.png
+│   ├── [ 935]  firebase-messaging-sw.js
+│   ├── [ 33K]  icon-192.png
+│   ├── [474K]  icon-512.png
+│   ├── [474K]  icon.png
+│   ├── [1.4K]  index.html
+│   ├── [ 536]  manifest.json
+│   ├── [3.2K]  placeholder.svg
+│   ├── [ 160]  robots.txt
+│   └── [4.0K]  website
+├── [ 765]  eslint.config.js
+├── [  33]  fix-build.sh
+├── [1.9K]  full_structure_20260830_120724.txt
+├── [2.8K]  generate-og-html.js
+├── [2.3K]  google-services.json
+├── [1.3K]  index.html
+├── [1.1K]  index.htmll
+├── [ 489]  nitron.config.json
+├── [2.3M]  node_modules
+│   ├── [4.0K]  @ai-sdk
+│   ├── [4.0K]  @alloc
+│   ├── [4.0K]  @babel
+│   ├── [4.0K]  @dimforge
+│   ├── [4.0K]  @emnapi
+│   ├── [4.0K]  @esbuild
+│   ├── [4.0K]  @eslint
+│   ├── [4.0K]  @eslint-community
+│   ├── [4.0K]  @fastify
+│   ├── [4.0K]  @firebase
+│   ├── [4.0K]  @floating-ui
+│   ├── [4.0K]  @grpc
+│   ├── [4.0K]  @hookform
+│   ├── [4.0K]  @humanfs
+│   ├── [4.0K]  @humanwhocodes
+│   ├── [4.0K]  @img
+│   ├── [4.0K]  @isaacs
+│   ├── [4.0K]  @jridgewell
+│   ├── [4.0K]  @mapbox
+│   ├── [4.0K]  @mediapipe
+│   ├── [4.0K]  @monogrid
+│   ├── [4.0K]  @nodelib
+│   ├── [4.0K]  @opentelemetry
+│   ├── [4.0K]  @pkgjs
+│   ├── [4.0K]  @protobufjs
+│   ├── [4.0K]  @radix-ui
+│   ├── [4.0K]  @react-spring
+│   ├── [4.0K]  @react-three
+│   ├── [4.0K]  @remix-run
+│   ├── [4.0K]  @rolldown
+│   ├── [4.0K]  @rollup
+│   ├── [4.0K]  @standard-schema
+│   ├── [4.0K]  @supabase
+│   ├── [4.0K]  @swc
+│   ├── [4.0K]  @tailwindcss
+│   ├── [4.0K]  @tanstack
+│   ├── [4.0K]  @tiptap
+│   ├── [4.0K]  @tweenjs
+│   ├── [4.0K]  @types
+│   ├── [4.0K]  @typescript-eslint
+│   ├── [4.0K]  @ungap
+│   ├── [4.0K]  @use-gesture
+│   ├── [4.0K]  @vercel
+│   ├── [4.0K]  @vitejs
+│   ├── [4.0K]  @webgpu
+│   ├── [4.0K]  @xobotyi
+│   ├── [4.0K]  abbrev
+│   ├── [4.0K]  acorn
+│   ├── [4.0K]  acorn-jsx
+│   ├── [4.0K]  adler-32
+│   ├── [4.0K]  adm-zip
+│   ├── [4.0K]  agent-base
+│   ├── [4.0K]  ai
+│   ├── [4.0K]  ajv
+│   ├── [4.0K]  ansi-regex
+│   ├── [4.0K]  ansi-styles
+│   ├── [4.0K]  any-promise
+│   ├── [4.0K]  anymatch
+│   ├── [4.0K]  aproba
+│   ├── [4.0K]  are-we-there-yet
+│   ├── [4.0K]  arg
+│   ├── [4.0K]  argparse
+│   ├── [4.0K]  aria-hidden
+│   ├── [4.0K]  autoprefixer
+│   ├── [4.0K]  bail
+│   ├── [4.0K]  balanced-match
+│   ├── [4.0K]  base64-arraybuffer
+│   ├── [4.0K]  base64-js
+│   ├── [4.0K]  bidi-js
+│   ├── [4.0K]  binary-extensions
+│   ├── [4.0K]  brace-expansion
+│   ├── [4.0K]  braces
+│   ├── [4.0K]  browserslist
+│   ├── [4.0K]  buffer
+│   ├── [4.0K]  bundle-name
+│   ├── [4.0K]  bytes
+│   ├── [4.0K]  callsites
+│   ├── [4.0K]  camelcase
+│   ├── [4.0K]  camelcase-css
+│   ├── [4.0K]  camera-controls
+│   ├── [4.0K]  caniuse-lite
+│   ├── [4.0K]  canvas
+│   ├── [4.0K]  canvg
+│   ├── [4.0K]  ccount
+│   ├── [4.0K]  cfb
+│   ├── [4.0K]  chalk
+│   ├── [4.0K]  character-entities
+│   ├── [4.0K]  character-entities-html4
+│   ├── [4.0K]  character-entities-legacy
+│   ├── [4.0K]  character-reference-invalid
+│   ├── [4.0K]  chokidar
+│   ├── [4.0K]  chownr
+│   ├── [4.0K]  class-variance-authority
+│   ├── [4.0K]  cliui
+│   ├── [4.0K]  clsx
+│   ├── [4.0K]  cmdk
+│   ├── [4.0K]  codepage
+│   ├── [4.0K]  color-convert
+│   ├── [4.0K]  color-name
+│   ├── [4.0K]  color-support
+│   ├── [4.0K]  comma-separated-tokens
+│   ├── [4.0K]  commander
+│   ├── [4.0K]  concat-map
+│   ├── [4.0K]  console-control-strings
+│   ├── [4.0K]  content-disposition
+│   ├── [4.0K]  copy-to-clipboard
+│   ├── [4.0K]  core-js
+│   ├── [4.0K]  core-util-is
+│   ├── [4.0K]  crc-32
+│   ├── [4.0K]  cross-env
+│   ├── [4.0K]  cross-spawn
+│   ├── [4.0K]  crypto-js
+│   ├── [4.0K]  css-in-js-utils
+│   ├── [4.0K]  css-line-break
+│   ├── [4.0K]  css-tree
+│   ├── [4.0K]  cssesc
+│   ├── [4.0K]  csstype
+│   ├── [4.0K]  d3-array
+│   ├── [4.0K]  d3-color
+│   ├── [4.0K]  d3-ease
+│   ├── [4.0K]  d3-format
+│   ├── [4.0K]  d3-interpolate
+│   ├── [4.0K]  d3-path
+│   ├── [4.0K]  d3-scale
+│   ├── [4.0K]  d3-shape
+│   ├── [4.0K]  d3-time
+│   ├── [4.0K]  d3-time-format
+│   ├── [4.0K]  d3-timer
+│   ├── [ 36K]  date-fns
+│   ├── [4.0K]  debug
+│   ├── [4.0K]  decamelize
+│   ├── [4.0K]  decimal.js-light
+│   ├── [4.0K]  decode-named-character-reference
+│   ├── [4.0K]  decompress-response
+│   ├── [4.0K]  deep-is
+│   ├── [4.0K]  default-browser
+│   ├── [4.0K]  default-browser-id
+│   ├── [4.0K]  define-lazy-prop
+│   ├── [4.0K]  delegates
+│   ├── [4.0K]  dequal
+│   ├── [4.0K]  detect-gpu
+│   ├── [4.0K]  detect-libc
+│   ├── [4.0K]  detect-node-es
+│   ├── [4.0K]  devlop
+│   ├── [4.0K]  didyoumean
+│   ├── [4.0K]  dijkstrajs
+│   ├── [4.0K]  dlv
+│   ├── [4.0K]  dom-helpers
+│   ├── [4.0K]  dompurify
+│   ├── [4.0K]  dotenv
+│   ├── [4.0K]  draco3d
+│   ├── [4.0K]  eastasianwidth
+│   ├── [4.0K]  electron-to-chromium
+│   ├── [4.0K]  embla-carousel
+│   ├── [4.0K]  embla-carousel-react
+│   ├── [4.0K]  embla-carousel-reactive-utils
+│   ├── [4.0K]  emoji-regex
+│   ├── [4.0K]  error-stack-parser
+│   ├── [4.0K]  esbuild
+│   ├── [4.0K]  escalade
+│   ├── [4.0K]  escape-string-regexp
+│   ├── [4.0K]  eslint
+│   ├── [4.0K]  eslint-plugin-react-hooks
+│   ├── [4.0K]  eslint-plugin-react-refresh
+│   ├── [4.0K]  eslint-scope
+│   ├── [4.0K]  eslint-visitor-keys
+│   ├── [4.0K]  espree
+│   ├── [4.0K]  esquery
+│   ├── [4.0K]  esrecurse
+│   ├── [4.0K]  estraverse
+│   ├── [4.0K]  estree-util-is-identifier-name
+│   ├── [4.0K]  estree-walker
+│   ├── [4.0K]  esutils
+│   ├── [4.0K]  eventemitter3
+│   ├── [4.0K]  eventsource-parser
+│   ├── [4.0K]  extend
+│   ├── [4.0K]  fast-deep-equal
+│   ├── [4.0K]  fast-equals
+│   ├── [4.0K]  fast-glob
+│   ├── [4.0K]  fast-json-stable-stringify
+│   ├── [4.0K]  fast-levenshtein
+│   ├── [4.0K]  fast-png
+│   ├── [4.0K]  fast-shallow-equal
+│   ├── [4.0K]  fastest-stable-stringify
+│   ├── [4.0K]  fastq
+│   ├── [4.0K]  faye-websocket
+│   ├── [4.0K]  fflate
+│   ├── [4.0K]  file-entry-cache
+│   ├── [4.0K]  fill-range
+│   ├── [4.0K]  find-up
+│   ├── [4.0K]  firebase
+│   ├── [4.0K]  flat-cache
+│   ├── [4.0K]  flatted
+│   ├── [4.0K]  foreground-child
+│   ├── [4.0K]  frac
+│   ├── [4.0K]  fraction.js
+│   ├── [4.0K]  framer-motion
+│   ├── [4.0K]  fs-minipass
+│   ├── [4.0K]  fs.realpath
+│   ├── [4.0K]  function-bind
+│   ├── [4.0K]  gauge
+│   ├── [4.0K]  get-caller-file
+│   ├── [4.0K]  get-nonce
+│   ├── [4.0K]  glob
+│   ├── [4.0K]  glob-parent
+│   ├── [4.0K]  globals
+│   ├── [4.0K]  glsl-noise
+│   ├── [4.0K]  graphemer
+│   ├── [4.0K]  has-flag
+│   ├── [4.0K]  has-unicode
+│   ├── [4.0K]  hasown
+│   ├── [4.0K]  hast-util-to-jsx-runtime
+│   ├── [4.0K]  hast-util-whitespace
+│   ├── [4.0K]  hls.js
+│   ├── [4.0K]  hoist-non-react-statics
+│   ├── [4.0K]  html-url-attributes
+│   ├── [4.0K]  html2canvas
+│   ├── [4.0K]  html5-qrcode
+│   ├── [4.0K]  http-parser-js
+│   ├── [4.0K]  https-proxy-agent
+│   ├── [4.0K]  hyphenate-style-name
+│   ├── [4.0K]  iceberg-js
+│   ├── [4.0K]  idb
+│   ├── [4.0K]  ieee754
+│   ├── [4.0K]  ignore
+│   ├── [4.0K]  immediate
+│   ├── [4.0K]  import-fresh
+│   ├── [4.0K]  imurmurhash
+│   ├── [4.0K]  inflight
+│   ├── [4.0K]  inherits
+│   ├── [4.0K]  inline-style-parser
+│   ├── [4.0K]  inline-style-prefixer
+│   ├── [4.0K]  input-otp
+│   ├── [4.0K]  internmap
+│   ├── [4.0K]  invariant
+│   ├── [4.0K]  iobuffer
+│   ├── [4.0K]  is-alphabetical
+│   ├── [4.0K]  is-alphanumerical
+│   ├── [4.0K]  is-binary-path
+│   ├── [4.0K]  is-core-module
+│   ├── [4.0K]  is-decimal
+│   ├── [4.0K]  is-docker
+│   ├── [4.0K]  is-extglob
+│   ├── [4.0K]  is-fullwidth-code-point
+│   ├── [4.0K]  is-glob
+│   ├── [4.0K]  is-hexadecimal
+│   ├── [4.0K]  is-in-ssh
+│   ├── [4.0K]  is-inside-container
+│   ├── [4.0K]  is-number
+│   ├── [4.0K]  is-plain-obj
+│   ├── [4.0K]  is-promise
+│   ├── [4.0K]  is-wsl
+│   ├── [4.0K]  isarray
+│   ├── [4.0K]  isexe
+│   ├── [4.0K]  its-fine
+│   ├── [4.0K]  jackspeak
+│   ├── [4.0K]  jiti
+│   ├── [4.0K]  js-cookie
+│   ├── [4.0K]  js-tokens
+│   ├── [4.0K]  js-yaml
+│   ├── [4.0K]  jsbarcode
+│   ├── [4.0K]  json-buffer
+│   ├── [4.0K]  json-schema
+│   ├── [4.0K]  json-schema-traverse
+│   ├── [4.0K]  json-stable-stringify-without-jsonify
+│   ├── [4.0K]  jspdf
+│   ├── [4.0K]  jspdf-autotable
+│   ├── [4.0K]  jszip
+│   ├── [4.0K]  keyv
+│   ├── [4.0K]  kleur
+│   ├── [4.0K]  levn
+│   ├── [4.0K]  lie
+│   ├── [4.0K]  lilconfig
+│   ├── [4.0K]  lines-and-columns
+│   ├── [4.0K]  linkifyjs
+│   ├── [4.0K]  locate-path
+│   ├── [ 20K]  lodash
+│   ├── [4.0K]  lodash.camelcase
+│   ├── [4.0K]  lodash.castarray
+│   ├── [4.0K]  lodash.isplainobject
+│   ├── [4.0K]  lodash.merge
+│   ├── [4.0K]  long
+│   ├── [4.0K]  longest-streak
+│   ├── [4.0K]  loose-envify
+│   ├── [4.0K]  lovable-tagger
+│   ├── [4.0K]  lru-cache
+│   ├── [4.0K]  lucide-react
+│   ├── [4.0K]  maath
+│   ├── [4.0K]  magic-string
+│   ├── [4.0K]  make-dir
+│   ├── [4.0K]  mdast-util-from-markdown
+│   ├── [4.0K]  mdast-util-mdx-expression
+│   ├── [4.0K]  mdast-util-mdx-jsx
+│   ├── [4.0K]  mdast-util-mdxjs-esm
+│   ├── [4.0K]  mdast-util-phrasing
+│   ├── [4.0K]  mdast-util-to-hast
+│   ├── [4.0K]  mdast-util-to-markdown
+│   ├── [4.0K]  mdast-util-to-string
+│   ├── [4.0K]  mdn-data
+│   ├── [4.0K]  merge2
+│   ├── [4.0K]  meshline
+│   ├── [4.0K]  meshoptimizer
+│   ├── [4.0K]  micromark
+│   ├── [4.0K]  micromark-core-commonmark
+│   ├── [4.0K]  micromark-factory-destination
+│   ├── [4.0K]  micromark-factory-label
+│   ├── [4.0K]  micromark-factory-space
+│   ├── [4.0K]  micromark-factory-title
+│   ├── [4.0K]  micromark-factory-whitespace
+│   ├── [4.0K]  micromark-util-character
+│   ├── [4.0K]  micromark-util-chunked
+│   ├── [4.0K]  micromark-util-classify-character
+│   ├── [4.0K]  micromark-util-combine-extensions
+│   ├── [4.0K]  micromark-util-decode-numeric-character-reference
+│   ├── [4.0K]  micromark-util-decode-string
+│   ├── [4.0K]  micromark-util-encode
+│   ├── [4.0K]  micromark-util-html-tag-name
+│   ├── [4.0K]  micromark-util-normalize-identifier
+│   ├── [4.0K]  micromark-util-resolve-all
+│   ├── [4.0K]  micromark-util-sanitize-uri
+│   ├── [4.0K]  micromark-util-subtokenize
+│   ├── [4.0K]  micromark-util-symbol
+│   ├── [4.0K]  micromark-util-types
+│   ├── [4.0K]  micromatch
+│   ├── [4.0K]  mime-db
+│   ├── [4.0K]  mime-types
+│   ├── [4.0K]  mimic-response
+│   ├── [4.0K]  minimatch
+│   ├── [4.0K]  minipass
+│   ├── [4.0K]  minizlib
+│   ├── [4.0K]  mkdirp
+│   ├── [4.0K]  motion-dom
+│   ├── [4.0K]  motion-utils
+│   ├── [4.0K]  ms
+│   ├── [4.0K]  mz
+│   ├── [4.0K]  nan
+│   ├── [4.0K]  nano-css
+│   ├── [4.0K]  nanoid
+│   ├── [4.0K]  natural-compare
+│   ├── [4.0K]  next-themes
+│   ├── [4.0K]  nitron
+│   ├── [4.0K]  node-fetch
+│   ├── [4.0K]  node-releases
+│   ├── [4.0K]  nopt
+│   ├── [4.0K]  normalize-path
+│   ├── [4.0K]  normalize-range
+│   ├── [4.0K]  npm
+│   ├── [4.0K]  npmlog
+│   ├── [4.0K]  object-assign
+│   ├── [4.0K]  object-hash
+│   ├── [4.0K]  once
+│   ├── [4.0K]  open
+│   ├── [4.0K]  optionator
+│   ├── [4.0K]  orderedmap
+│   ├── [4.0K]  p-limit
+│   ├── [4.0K]  p-locate
+│   ├── [4.0K]  p-try
+│   ├── [4.0K]  package-json-from-dist
+│   ├── [4.0K]  pako
+│   ├── [4.0K]  parent-module
+│   ├── [4.0K]  parse-entities
+│   ├── [4.0K]  path-exists
+│   ├── [4.0K]  path-is-absolute
+│   ├── [4.0K]  path-is-inside
+│   ├── [4.0K]  path-key
+│   ├── [4.0K]  path-parse
+│   ├── [4.0K]  path-scurry
+│   ├── [4.0K]  path-to-regexp
+│   ├── [4.0K]  path2d-polyfill
+│   ├── [4.0K]  pdfjs-dist
+│   ├── [4.0K]  performance-now
+│   ├── [4.0K]  picocolors
+│   ├── [4.0K]  picomatch
+│   ├── [4.0K]  pify
+│   ├── [4.0K]  pirates
+│   ├── [4.0K]  pngjs
+│   ├── [4.0K]  postcss
+│   ├── [4.0K]  postcss-import
+│   ├── [4.0K]  postcss-js
+│   ├── [4.0K]  postcss-load-config
+│   ├── [4.0K]  postcss-nested
+│   ├── [4.0K]  postcss-selector-parser
+│   ├── [4.0K]  postcss-value-parser
+│   ├── [4.0K]  potpack
+│   ├── [4.0K]  powershell-utils
+│   ├── [4.0K]  prelude-ls
+│   ├── [4.0K]  process-nextick-args
+│   ├── [4.0K]  promise-worker-transferable
+│   ├── [4.0K]  prompts
+│   ├── [4.0K]  prop-types
+│   ├── [4.0K]  property-information
+│   ├── [4.0K]  prosemirror-changeset
+│   ├── [4.0K]  prosemirror-commands
+│   ├── [4.0K]  prosemirror-dropcursor
+│   ├── [4.0K]  prosemirror-gapcursor
+│   ├── [4.0K]  prosemirror-history
+│   ├── [4.0K]  prosemirror-inputrules
+│   ├── [4.0K]  prosemirror-keymap
+│   ├── [4.0K]  prosemirror-model
+│   ├── [4.0K]  prosemirror-schema-list
+│   ├── [4.0K]  prosemirror-state
+│   ├── [4.0K]  prosemirror-tables
+│   ├── [4.0K]  prosemirror-transform
+│   ├── [4.0K]  prosemirror-view
+│   ├── [4.0K]  protobufjs
+│   ├── [4.0K]  punycode
+│   ├── [4.0K]  qrcode
+│   ├── [4.0K]  queue-microtask
+│   ├── [4.0K]  raf
+│   ├── [4.0K]  range-parser
+│   ├── [4.0K]  re2js
+│   ├── [4.0K]  react
+│   ├── [4.0K]  react-async-script
+│   ├── [4.0K]  react-composer
+│   ├── [4.0K]  react-confetti
+│   ├── [4.0K]  react-day-picker
+│   ├── [4.0K]  react-dom
+│   ├── [4.0K]  react-fast-compare
+│   ├── [4.0K]  react-google-recaptcha
+│   ├── [4.0K]  react-helmet-async
+│   ├── [4.0K]  react-hook-form
+│   ├── [4.0K]  react-is
+│   ├── [4.0K]  react-markdown
+│   ├── [4.0K]  react-reconciler
+│   ├── [4.0K]  react-remove-scroll
+│   ├── [4.0K]  react-remove-scroll-bar
+│   ├── [4.0K]  react-resizable-panels
+│   ├── [4.0K]  react-router
+│   ├── [4.0K]  react-router-dom
+│   ├── [4.0K]  react-smooth
+│   ├── [4.0K]  react-style-singleton
+│   ├── [4.0K]  react-transition-group
+│   ├── [4.0K]  react-universal-interface
+│   ├── [4.0K]  react-use
+│   ├── [4.0K]  react-use-measure
+│   ├── [4.0K]  read-cache
+│   ├── [4.0K]  readable-stream
+│   ├── [4.0K]  readdirp
+│   ├── [4.0K]  recharts
+│   ├── [4.0K]  recharts-scale
+│   ├── [4.0K]  regenerator-runtime
+│   ├── [4.0K]  remark-parse
+│   ├── [4.0K]  remark-rehype
+│   ├── [4.0K]  require-directory
+│   ├── [4.0K]  require-from-string
+│   ├── [4.0K]  require-main-filename
+│   ├── [4.0K]  resize-observer-polyfill
+│   ├── [4.0K]  resolve
+│   ├── [4.0K]  resolve-from
+│   ├── [4.0K]  reusify
+│   ├── [4.0K]  rgbcolor
+│   ├── [4.0K]  rimraf
+│   ├── [4.0K]  rollup
+│   ├── [4.0K]  rope-sequence
+│   ├── [4.0K]  rtl-css-js
+│   ├── [4.0K]  run-applescript
+│   ├── [4.0K]  run-parallel
+│   ├── [4.0K]  safe-buffer
+│   ├── [4.0K]  scheduler
+│   ├── [4.0K]  screenfull
+│   ├── [4.0K]  semver
+│   ├── [4.0K]  serve-handler
+│   ├── [4.0K]  set-blocking
+│   ├── [4.0K]  set-harmonic-interval
+│   ├── [4.0K]  setimmediate
+│   ├── [4.0K]  shallowequal
+│   ├── [4.0K]  sharp
+│   ├── [4.0K]  shebang-command
+│   ├── [4.0K]  shebang-regex
+│   ├── [4.0K]  signal-exit
+│   ├── [4.0K]  simple-concat
+│   ├── [4.0K]  simple-get
+│   ├── [4.0K]  sisteransi
+│   ├── [4.0K]  sonner
+│   ├── [4.0K]  source-map
+│   ├── [4.0K]  source-map-js
+│   ├── [4.0K]  space-separated-tokens
+│   ├── [4.0K]  ssf
+│   ├── [4.0K]  stack-generator
+│   ├── [4.0K]  stackblur-canvas
+│   ├── [4.0K]  stackframe
+│   ├── [4.0K]  stacktrace-gps
+│   ├── [4.0K]  stacktrace-js
+│   ├── [4.0K]  stats-gl
+│   ├── [4.0K]  stats.js
+│   ├── [4.0K]  string-width
+│   ├── [4.0K]  string-width-cjs
+│   ├── [4.0K]  string_decoder
+│   ├── [4.0K]  stringify-entities
+│   ├── [4.0K]  strip-ansi
+│   ├── [4.0K]  strip-ansi-cjs
+│   ├── [4.0K]  strip-json-comments
+│   ├── [4.0K]  style-to-js
+│   ├── [4.0K]  style-to-object
+│   ├── [4.0K]  stylis
+│   ├── [4.0K]  sucrase
+│   ├── [4.0K]  supports-color
+│   ├── [4.0K]  supports-preserve-symlinks-flag
+│   ├── [4.0K]  suspend-react
+│   ├── [4.0K]  svg-pathdata
+│   ├── [4.0K]  swr
+│   ├── [4.0K]  tailwind-merge
+│   ├── [4.0K]  tailwindcss
+│   ├── [4.0K]  tailwindcss-animate
+│   ├── [4.0K]  tar
+│   ├── [4.0K]  text-segmentation
+│   ├── [4.0K]  thenify
+│   ├── [4.0K]  thenify-all
+│   ├── [4.0K]  three
+│   ├── [4.0K]  three-mesh-bvh
+│   ├── [4.0K]  three-stdlib
+│   ├── [4.0K]  throttle-debounce
+│   ├── [4.0K]  throttleit
+│   ├── [4.0K]  tiny-invariant
+│   ├── [4.0K]  to-regex-range
+│   ├── [4.0K]  toggle-selection
+│   ├── [4.0K]  tr46
+│   ├── [4.0K]  trim-lines
+│   ├── [4.0K]  troika-three-text
+│   ├── [4.0K]  troika-three-utils
+│   ├── [4.0K]  troika-worker-utils
+│   ├── [4.0K]  trough
+│   ├── [4.0K]  ts-api-utils
+│   ├── [4.0K]  ts-easing
+│   ├── [4.0K]  ts-interface-checker
+│   ├── [4.0K]  tslib
+│   ├── [4.0K]  tunnel-rat
+│   ├── [4.0K]  tween-functions
+│   ├── [4.0K]  type-check
+│   ├── [4.0K]  typescript
+│   ├── [4.0K]  typescript-eslint
+│   ├── [4.0K]  undici
+│   ├── [4.0K]  undici-types
+│   ├── [4.0K]  unified
+│   ├── [4.0K]  unist-util-is
+│   ├── [4.0K]  unist-util-position
+│   ├── [4.0K]  unist-util-stringify-position
+│   ├── [4.0K]  unist-util-visit
+│   ├── [4.0K]  unist-util-visit-parents
+│   ├── [4.0K]  update-browserslist-db
+│   ├── [4.0K]  uri-js
+│   ├── [4.0K]  use-callback-ref
+│   ├── [4.0K]  use-sidecar
+│   ├── [4.0K]  use-sync-external-store
+│   ├── [4.0K]  util-deprecate
+│   ├── [4.0K]  utility-types
+│   ├── [4.0K]  utrie
+│   ├── [4.0K]  vaul
+│   ├── [4.0K]  vfile
+│   ├── [4.0K]  vfile-message
+│   ├── [4.0K]  victory-vendor
+│   ├── [4.0K]  vite
+│   ├── [4.0K]  w3c-keyname
+│   ├── [4.0K]  web-vitals
+│   ├── [4.0K]  webgl-constants
+│   ├── [4.0K]  webgl-sdf-generator
+│   ├── [4.0K]  webidl-conversions
+│   ├── [4.0K]  websocket-driver
+│   ├── [4.0K]  websocket-extensions
+│   ├── [4.0K]  whatwg-url
+│   ├── [4.0K]  which
+│   ├── [4.0K]  which-module
+│   ├── [4.0K]  wide-align
+│   ├── [4.0K]  wmf
+│   ├── [4.0K]  word
+│   ├── [4.0K]  word-wrap
+│   ├── [4.0K]  wrap-ansi
+│   ├── [4.0K]  wrap-ansi-cjs
+│   ├── [4.0K]  wrappy
+│   ├── [4.0K]  ws
+│   ├── [4.0K]  wsl-utils
+│   ├── [4.0K]  xlsx
+│   ├── [4.0K]  y18n
+│   ├── [4.0K]  yallist
+│   ├── [4.0K]  yaml
+│   ├── [4.0K]  yargs
+│   ├── [4.0K]  yargs-parser
+│   ├── [4.0K]  yocto-queue
+│   ├── [4.0K]  zod
+│   ├── [4.0K]  zustand
+│   └── [4.0K]  zwitch
+├── [528K]  package-lock.json
+├── [3.7K]  package.json
+├── [3.6K]  package.json.bak
+├── [3.7K]  package.json.broken
+├── [  81]  postcss.config.js
+├── [1.3M]  public
+│   ├── [7.5K]  favicon.ico
+│   ├── [325K]  favicon.png
+│   ├── [ 935]  firebase-messaging-sw.js
+│   ├── [ 33K]  icon-192.png
+│   ├── [474K]  icon-512.png
+│   ├── [474K]  icon.png
+│   ├── [ 536]  manifest.json
+│   ├── [3.2K]  placeholder.svg
+│   └── [ 160]  robots.txt
+├── [4.7K]  pusaka
+│   ├── [ 517]  nitron.config.json
+│   └── [ 218]  package.json
+├── [4.4K]  pusaka-apk
+│   └── [ 378]  index.html
+├── [ 11K]  scripts
+│   ├── [2.9K]  generate-og-pages.cjs
+│   └── [3.8K]  generate-og-pages.mjs
+├── [831K]  src
+│   ├── [ 20K]  App.tsx
+│   ├── [ 17K]  DEPLOYMENT.md
+│   ├── [2.1K]  README.md
+│   ├── [ 12K]  VerfyStudent.tsx
+│   ├── [169K]  bun.lock
+│   ├── [196K]  bun.lockb
+│   ├── [4.0K]  components
+│   ├── [ 414]  components.json
+│   ├── [4.0K]  config
+│   ├── [4.0K]  contexts
+│   ├── [4.0K]  deploy
+│   ├── [ 765]  eslint.config.js
+│   ├── [4.0K]  hooks
+│   ├── [ 13K]  index.css
+│   ├── [ 621]  index.html
+│   ├── [4.0K]  integrations
+│   ├── [4.0K]  lib
+│   ├── [ 573]  main.tsx
+│   ├── [338K]  package-lock.json
+│   ├── [3.2K]  package.json
+│   ├── [4.0K]  pages
+│   ├── [  81]  postcss.config.js
+│   ├── [4.0K]  public
+│   ├── [4.0K]  supabase
+│   ├── [6.5K]  tailwind.config.ts
+│   ├── [ 635]  tsconfig.app.json
+│   ├── [ 396]  tsconfig.json
+│   ├── [ 481]  tsconfig.node.json
+│   ├── [4.0K]  utils
+│   ├── [  38]  vite-env.d.ts
+│   └── [ 568]  vite.config.ts
+├── [ 849]  struktur.sh
+├── [1.8M]  struktur_20260908_094640.txt
+├── [ 766]  struktur_20260908_095543.txt
+├── [  76]  struktur_aplikasi.txt
+├── [ 29K]  supabase
+│   ├── [1.1K]  config.toml
+│   ├── [4.0K]  functions
+│   └── [ 20K]  migrations
+├── [6.5K]  tailwind.config.ts
+├── [ 635]  tsconfig.app.json
+├── [ 396]  tsconfig.json
+├── [ 481]  tsconfig.node.json
+└── [ 568]  vite.config.ts
+
+  26M used in 613 directories, 97 files
+
+======================================
+10 FILE TERBESAR:
+─────────────────────────────────────
+101M	./node_modules/canvas/build/Release/librsvg-2.so.2
+53M	./node_modules/@swc/core-linux-x64-musl/swc.linux-x64-musl.node
+36M	./node_modules/@swc/core-linux-x64-gnu/swc.linux-x64-gnu.node
+26M	./node_modules/canvas/build/Release/libharfbuzz.so.0
+17M	./node_modules/@img/sharp-libvips-linuxmusl-x64/lib/libvips-cpp.so.8.17.3
+16M	./node_modules/@img/sharp-libvips-linux-x64/lib/libvips-cpp.so.8.17.3
+16M	./Pusaka_Nedelcis/node_modules/@img/sharp-libvips-linux-x64/lib/libvips-cpp.so.8.17.3
+11M	./node_modules/canvas/build/Release/libgio-2.0.so.0
+9.8M	./node_modules/lovable-tagger/node_modules/@esbuild/linux-x64/bin/esbuild
+9.7M	./node_modules/three/examples/jsm/libs/rhino3dm/rhino3dm.wasm
+
+======================================
+10 FOLDER TERBESAR:
+─────────────────────────────────────
+1.1G	./node_modules
+181M	./node_modules/canvas/build/Release
+181M	./node_modules/canvas/build
+181M	./node_modules/canvas
+115M	./node_modules/@firebase
+90M	./node_modules/@swc
+74M	./node_modules/firebase
+64M	./node_modules/@firebase/firestore/dist
+64M	./node_modules/@firebase/firestore
+64M	./backups
+
+======================================
+FILE YANG BARU DIUBAH (24 jam terakhir):
+─────────────────────────────────────────
+./src/pages/HomeroomFileUploadManagement.tsx
+./src/pages/StudentDashboard.tsx
+./src/components/cash-audit/CashAuditPreview.tsx
+./src/components/cash-audit/CashAuditK7BPreview.tsx
+./src/components/dashboard/StudentRenderTabs.tsx
+./src/components/dashboard/CashAuditPreview.tsx
+./src/components/dashboard/StudentUploadTab.tsx
+./src/components/dashboard/CashAuditK7BPreview.tsx
+./src/App.tsx
+./struktur_20260908_095543.txt
+./dist/favicon.png
+./dist/placeholder.svg
+./dist/icon-512.png
+./dist/icon-192.png
+./dist/favicon.ico
+./dist/robots.txt
+./dist/manifest.json
+./dist/icon.png
+./dist/assets/SuperAdminDashboard-BY6KjsTi.js
+./dist/assets/AdminSettings-D7I3QsEb.js

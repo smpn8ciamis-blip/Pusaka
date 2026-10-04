@@ -1,0 +1,1 @@
+ALTER TABLE public.school_settings ADD COLUMN IF NOT EXISTS exam_card_settings jsonb DEFAULT '{}'::jsonb;

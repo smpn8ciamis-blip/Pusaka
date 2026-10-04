@@ -1,0 +1,25 @@
+{
+"name": "Pusaka Nedelcis",
+  "packageId": "id.pusaka.nedelcis",
+  "version": "1.0.0",
+  "entry": "dist/index.html",
+  "orientation": "portrait",
+  "statusBar": true,
+  "permissions": [
+    "INTERNET",
+    "ACCESS_NETWORK_STATE",
+    "POST_NOTIFICATIONS"
+  ],
+  "icon": "./public/icon.png",
+  "webview": {
+    "backButton": "history",
+    "clearCacheOnStart": false
+  },
+"manifest": "./android/AndroidManifest.xml" 
+  "splashScreen": {
+    "backgroundColor": "#1E3A8A"
+  },
+  "network": {
+    "cleartext": true
+  }
+}

@@ -1,0 +1,47 @@
+project_id = "kkqvrgcypsijfttajalk"
+
+# Public statistics endpoint - returns only aggregate counts, no sensitive data
+[functions.stats]
+verify_jwt = false
+
+# Public student lookup - secure endpoint for status check portal
+[functions.public-student-lookup]
+verify_jwt = false
+
+# Server-side import validation - requires authentication
+[functions.validate-import]
+verify_jwt = true
+
+# Database sync endpoint - allows sync from local Supabase
+[functions.sync-database]
+verify_jwt = false
+
+# School registration - public endpoint for self-service onboarding
+[functions.register-school]
+verify_jwt = false
+
+[functions.reset-student-passwords]
+verify_jwt = false
+
+# Bootstrap admin web account (public, idempotent)
+[functions.create-web-admin]
+verify_jwt = false
+
+[functions.fetch-instagram-posts]
+verify_jwt = false
+
+[functions.chat-assistant]
+verify_jwt = false
+
+
+# Public RFID tap endpoint for the attendance kiosk
+[functions.rfid-tap]
+verify_jwt = false
+
+# Telegram notification sender (called from public kiosk page)
+[functions.telegram-notify]
+verify_jwt = false
+
+# Telegram bot webhook (called by Telegram servers)
+[functions.telegram-webhook]
+verify_jwt = false

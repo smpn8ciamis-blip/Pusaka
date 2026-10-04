@@ -1,0 +1,469 @@
+import { useEffect, useState, useRef, useCallback } from "react";
+import { useParams, Link } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
+import { PageHero } from "./Profil";
+import { 
+  ArrowLeft, 
+  Calendar, 
+  Newspaper, 
+  Loader2, 
+  Eye, 
+  Share2, 
+  MessageCircle, 
+  Facebook, 
+  Twitter, 
+  Send, 
+  Linkedin, 
+  Link as LinkIcon, 
+  Check 
+} from "lucide-react";
+import { toast } from "sonner";
+
+interface NewsCategory {
+  id: string;
+  name: string;
+  color: string;
+}
+
+interface News {
+  id: string;
+  title: string;
+  slug: string;
+  excerpt: string;
+  content: string;
+  cover_image_url: string | null;
+  published_at: string;
+  status: string;
+  category_id: string;
+  view_count: number;
+  share_count: number;
+  website_news_categories: NewsCategory | null;
+}
+
+type SharePlatform = "whatsapp" | "facebook" | "twitter" | "telegram" | "linkedin" | "copy_link" | "native";
+
+function useNewsViewTracker(newsId: string | undefined) {
+  const trackedRef = useRef(false);
+
+  useEffect(() => {
+    if (!newsId || trackedRef.current) return;
+
+    const storageKey = `news_viewed_${newsId}`;
+    const hasViewed = sessionStorage.getItem(storageKey);
+
+    if (hasViewed) return;
+
+    const trackView = async () => {
+      try {
+        const { error } = await supabase.rpc("increment_news_view", {
+          p_news_id: newsId,
+        });
+
+        if (error) {
+          console.error("View tracking error:", error);
+          return;
+        }
+        
+        sessionStorage.setItem(storageKey, "true");
+        trackedRef.current = true;
+      } catch (err) {
+        console.error("Failed to track view:", err);
+      }
+    };
+
+    const timer = setTimeout(trackView, 1500);
+    return () => clearTimeout(timer);
+  }, [newsId]);
+}
+
+function useNewsShareTracker() {
+  const trackShare = useCallback(
+    async (newsId: string, platform: SharePlatform) => {
+      try {
+        const { data } = await supabase.rpc("increment_news_share", {
+          p_news_id: newsId,
+          p_platform: platform,
+        });
+        return data;
+      } catch (err) {
+        console.error("Failed to track share:", err);
+        return null;
+      }
+    },
+    []
+  );
+
+  return { trackShare };
+}
+
+function ViewCounter({ viewCount, shareCount }: { viewCount: number; shareCount: number }) {
+  const formatCount = (count: number) => {
+    if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`;
+    if (count >= 1000) return `${(count / 1000).toFixed(1)}K`;
+    return count.toString();
+  };
+
+  return (
+    <div className="flex items-center gap-4 text-sm text-slate-500">
+      <div className="flex items-center gap-1.5">
+        <Eye className="h-4 w-4" />
+        <span className="font-medium">{formatCount(viewCount)}</span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <Share2 className="h-4 w-4" />
+        <span className="font-medium">{formatCount(shareCount)}</span>
+      </div>
+    </div>
+  );
+}
+
+function ShareButtons({ news, onShareCountUpdate }: { news: News; onShareCountUpdate?: (newCount: number) => void }) {
+  const [copied, setCopied] = useState(false);
+  const { trackShare } = useNewsShareTracker();
+
+  const shareUrl = `${window.location.origin}/website/berita/${news.slug}`;
+  const shareText = `${news.title} - ${news.excerpt}`;
+
+  const handleShare = async (platform: SharePlatform, url: string) => {
+    const newCount = await trackShare(news.id, platform);
+    if (newCount !== null && onShareCountUpdate) {
+      onShareCountUpdate(newCount);
+    }
+
+    if (platform !== "copy_link" && platform !== "native") {
+      window.open(url, "_blank", "noopener,noreferrer,width=600,height=500");
+    }
+  };
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      await trackShare(news.id, "copy_link");
+      setCopied(true);
+      toast.success("Link berhasil disalin!");
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      toast.error("Gagal menyalin link");
+    }
+  };
+
+  const handleNativeShare = async () => {
+    if (!navigator.share) return;
+
+    try {
+      await navigator.share({
+        title: news.title,
+        text: news.excerpt,
+        url: shareUrl,
+      });
+      await trackShare(news.id, "native");
+      toast.success("Berita berhasil dibagikan!");
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        console.error("Share failed:", err);
+      }
+    }
+  };
+
+  const shareLinks = {
+    whatsapp: `https://wa.me/?text=${encodeURIComponent(shareText + " " + shareUrl)}`,
+    facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`,
+    twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}`,
+    telegram: `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(shareText)}`,
+    linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`,
+  };
+
+  const buttons = [
+    { platform: "whatsapp" as const, icon: MessageCircle, label: "WhatsApp", color: "bg-green-500 hover:bg-green-600" },
+    { platform: "facebook" as const, icon: Facebook, label: "Facebook", color: "bg-blue-600 hover:bg-blue-700" },
+    { platform: "twitter" as const, icon: Twitter, label: "Twitter/X", color: "bg-sky-500 hover:bg-sky-600" },
+    { platform: "telegram" as const, icon: Send, label: "Telegram", color: "bg-sky-600 hover:bg-sky-700" },
+    { platform: "linkedin" as const, icon: Linkedin, label: "LinkedIn", color: "bg-blue-700 hover:bg-blue-800" },
+  ];
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <Share2 className="h-4 w-4 text-slate-600" />
+        <span className="text-sm font-semibold text-slate-700">Bagikan berita ini</span>
+      </div>
+
+      {typeof navigator !== "undefined" && "share" in navigator && (
+        <button
+          onClick={handleNativeShare}
+          className="w-full mb-3 flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg font-medium hover:opacity-90 transition"
+        >
+          <Share2 className="h-4 w-4" />
+          Bagikan
+        </button>
+      )}
+
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+        {buttons.map(({ platform, icon: Icon, label, color }) => (
+          <button
+            key={platform}
+            onClick={() => handleShare(platform, shareLinks[platform])}
+            className={`${color} text-white p-2.5 rounded-lg flex flex-col items-center gap-1 transition hover:scale-105`}
+            aria-label={`Bagikan ke ${label}`}
+            title={label}
+          >
+            <Icon className="h-5 w-5" />
+            <span className="text-[10px] font-medium">{label}</span>
+          </button>
+        ))}
+      </div>
+
+      <button
+        onClick={handleCopyLink}
+        className={`w-full mt-3 flex items-center justify-center gap-2 px-4 py-2.5 border-2 rounded-lg font-medium transition ${
+          copied ? "border-green-500 bg-green-50 text-green-700" : "border-slate-200 hover:border-slate-300 text-slate-700"
+        }`}
+      >
+        {copied ? (
+          <>
+            <Check className="h-4 w-4" />
+            Link Tersalin!
+          </>
+        ) : (
+          <>
+            <LinkIcon className="h-4 w-4" />
+            Salin Link
+          </>
+        )}
+      </button>
+    </div>
+  );
+}
+
+export default function BeritaDetail() {
+  const { slug } = useParams<{ slug: string }>();
+  const [news, setNews] = useState<News | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useNewsViewTracker(news?.id);
+
+  useEffect(() => {
+    if (!slug) return;
+
+    const fetchNews = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        const { data, error } = await supabase
+          .from("website_news")
+          .select("*, website_news_categories(name,color)")
+          .eq("slug", slug)
+          .eq("status", "published")
+          .single();
+
+        if (error) throw error;
+        setNews(data);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Gagal memuat berita");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchNews();
+  }, [slug]);
+
+  const handleShareCountUpdate = (newCount: number) => {
+    if (news) {
+      setNews({ ...news, share_count: newCount });
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-[#1E40AF]" />
+      </div>
+    );
+  }}
+
+  if (error || !news) {
+    return (
+      <div>
+        <PageHero title="Berita Tidak Ditemukan" subtitle="Berita yang Anda cari tidak tersedia." />
+        <div className="container mx-auto px-4 py-12 text-center">
+          <Newspaper className="h-16 w-16 mx-auto mb-4 text-slate-300" />
+          <p className="text-slate-600 mb-4">{error || "Berita tidak ditemukan"}</p>
+          <Link 
+            to="/website/berita" 
+            className="inline-flex items-center gap-2 px-4 py-2 bg-[#1E40AF] text-white rounded-lg hover:bg-blue-700"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Kembali ke Berita
+          </Link>
+        </div>
+      </div>
+    );
+  }}
+
+  const publishedDate = news.published_at
+    ? new Date(news.published_at).toLocaleDateString("id-ID", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      })
+    : "";
+
+  return (
+    <div>
+      <PageHero title={news.title} subtitle={news.excerpt} />
+
+      <article className="container mx-auto px-4 py-12 max-w-4xl">
+        <Link
+          to="/website/berita"
+          className="inline-flex items-center gap-2 text-sm text-slate-600 hover:text-[#1E40AF] mb-6 transition"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Kembali ke Daftar Berita
+        </Link>
+
+        {news.cover_image_url && (
+          <div className="aspect-video rounded-2xl overflow-hidden mb-6 bg-slate-100">
+            <img
+              src={news.cover_image_url}
+              alt={news.title}
+              className="w-full h-full object-cover"
+            />
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-4 mb-6 pb-6 border-b border-slate-200">
+          {news.website_news_categories && (
+            <span
+              className="text-xs font-semibold px-3 py-1 rounded-full"
+              style={{
+                background: `${news.website_news_categories.color}20`,
+                color: news.website_news_categories.color,
+              }}
+            >
+              {news.website_news_categories.name}
+            </span>
+          )}
+
+          <div className="flex items-center gap-1.5 text-sm text-slate-500">
+            <Calendar className="h-4 w-4" />
+            <span>{publishedDate}</span>
+          </div>
+
+          <ViewCounter viewCount={news.view_count} shareCount={news.share_count} />
+        </div>
+
+        <div className="grid lg:grid-cols-[1fr_280px] gap-8">
+          <div>
+            <h1 className="text-3xl md:text-4xl font-bold text-slate-900 mb-6 leading-tight">
+              {news.title}
+            </h1>
+
+            <div
+              className="prose prose-slate max-w-none prose-headings:text-slate-900 prose-a:text-[#1E40AF] prose-img:rounded-lg"
+              dangerouslySetInnerHTML={{ __html: news.content }}
+            />
+          </div>
+
+          <aside className="hidden lg:block lg:sticky lg:top-24 lg:self-start">
+            <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100">
+              <ShareButtons 
+                news={news} 
+                onShareCountUpdate={handleShareCountUpdate}
+              />
+
+              <div className="mt-5 pt-5 border-t border-slate-200">
+                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
+                  Statistik Artikel
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-600">Dilihat</span>
+                    <span className="font-bold text-slate-900">{news.view_count.toLocaleString("id-ID")}x</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-600">Dibagikan</span>
+                    <span className="font-bold text-slate-900">{news.share_count.toLocaleString("id-ID")}x</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        <div className="lg:hidden mt-8 pt-8 border-t border-slate-200">
+          <ShareButtons 
+            news={news} 
+            onShareCountUpdate={handleShareCountUpdate}
+          />
+        </div>
+      </article>
+    </div>
+  );
+}
+                background: `${news.website_news_categories.color}20`,
+                color: news.website_news_categories.color,
+              }}
+            >
+              {news.website_news_categories.name}
+            </span>
+          )}
+
+          <div className="flex items-center gap-1.5 text-sm text-slate-500">
+            <Calendar className="h-4 w-4" />
+            <span>{publishedDate}</span>
+          </div>
+
+          <ViewCounter viewCount={news.view_count} shareCount={news.share_count} />
+        </div>
+
+        <div className="grid lg:grid-cols-[1fr_280px] gap-8">
+          <div>
+            <h1 className="text-3xl md:text-4xl font-bold text-slate-900 mb-6 leading-tight">
+              {news.title}
+            </h1>
+
+            <div
+              className="prose prose-slate max-w-none prose-headings:text-slate-900 prose-a:text-[#1E40AF] prose-img:rounded-lg"
+              dangerouslySetInnerHTML={{ __html: news.content }}
+            />
+          </div>
+
+          <aside className="hidden lg:block lg:sticky lg:top-24 lg:self-start">
+            <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100">
+              <ShareButtons 
+                news={news} 
+                onShareCountUpdate={handleShareCountUpdate}
+              />
+
+              <div className="mt-5 pt-5 border-t border-slate-200">
+                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
+                  Statistik Artikel
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-600">Dilihat</span>
+                    <span className="font-bold text-slate-900">{news.view_count.toLocaleString("id-ID")}x</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-600">Dibagikan</span>
+                    <span className="font-bold text-slate-900">{news.share_count.toLocaleString("id-ID")}x</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        <div className="lg:hidden mt-8 pt-8 border-t border-slate-200">
+          <ShareButtons 
+            news={news} 
+            onShareCountUpdate={handleShareCountUpdate}
+          />
+        </div>
+      </article>
+    </div>
+  );
+}

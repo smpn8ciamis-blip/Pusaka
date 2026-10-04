@@ -1,0 +1,4 @@
+
+ STRUKTUR APLIKASI:  echo  Tanggal Dibuat : 
+    2026-08-30 12:18:19 echo
+

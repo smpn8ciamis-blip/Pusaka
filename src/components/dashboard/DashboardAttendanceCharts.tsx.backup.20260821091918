@@ -1,0 +1,211 @@
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { AlertTriangle, TrendingUp, Users } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from "recharts";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { format } from "date-fns";
+import { id as localeId } from "date-fns/locale";
+
+interface DashboardAttendanceChartsProps {
+  startDate: Date;
+  endDate: Date;
+  dailyAttendanceTrend: any[];
+  attendanceByClass: any;
+  lowAttendanceClasses: any[];
+}
+
+export const DashboardAttendanceCharts = ({
+  startDate,
+  endDate,
+  dailyAttendanceTrend,
+  attendanceByClass,
+  lowAttendanceClasses,
+}: DashboardAttendanceChartsProps) => {
+  // ✅ PERBAIKAN: Query kelas yang belum mengisi absensi
+  // Menggabungkan data dari attendance DAN rfid_attendance
+  const { data: unfilledClassesData } = useQuery({
+    queryKey: ['unfilled-classes', startDate, endDate],
+    queryFn: async () => {
+      const startStr = format(startDate, 'yyyy-MM-dd');
+      const endStr = format(endDate, 'yyyy-MM-dd');
+
+      // 1. Ambil semua kelas aktif
+      const { data: allClasses } = await supabase
+        .from('classes')
+        .select('id, name, grade, students(id)')
+        .eq('academic_year', (await supabase.from('academic_years').select('year').eq('is_active', true).maybeSingle()).data?.year || '');
+
+      if (!allClasses || allClasses.length === 0) return [];
+
+      // 2. Ambil semua schedule untuk tahun akademik ini
+      const { data: schedules } = await supabase
+        .from('schedules')
+        .select('id, class_id')
+        .eq('academic_year', (await supabase.from('academic_years').select('year').eq('is_active', true).maybeSingle()).data?.year || '');
+
+      const scheduleIds = schedules?.map(s => s.id) || [];
+
+      // 3. Ambil data attendance manual untuk rentang tanggal
+      const { data: manualAttendance } = await supabase
+        .from('attendance')
+        .select('student_id, date, schedule_id')
+        .gte('date', startStr)
+        .lte('date', endStr);
+
+      // 4. Ambil data RFID attendance untuk rentang tanggal
+      const { data: rfidAttendance } = await supabase
+        .from('rfid_attendance')
+        .select('student_id, date')
+        .gte('date', startStr)
+        .lte('date', endStr);
+
+      // 5. Build mapping: schedule_id -> class_id
+      const scheduleToClass = new Map<string, string>();
+      schedules?.forEach(s => scheduleToClass.set(s.id, s.class_id));
+
+      // 6. Build mapping: student_id -> class_id
+      const studentToClass = new Map<string, string>();
+      allClasses.forEach(cls => {
+        cls.students?.forEach((s: any) => {
+          studentToClass.set(s.id, cls.id);
+        });
+      });
+
+      // 7. Track kelas mana yang sudah memiliki data absensi
+      const classesWithAttendance = new Set<string>();
+
+      // Dari manual attendance
+      manualAttendance?.forEach(record => {
+        const classId = scheduleToClass.get(record.schedule_id);
+        if (classId) classesWithAttendance.add(classId);
+      });
+
+      // Dari RFID attendance
+      rfidAttendance?.forEach(record => {
+        const classId = studentToClass.get(record.student_id);
+        if (classId) classesWithAttendance.add(classId);
+      });
+
+      // 8. Filter kelas yang BELUM mengisi absensi
+      const unfilledClasses = allClasses
+        .filter(cls => !classesWithAttendance.has(cls.id))
+        .map(cls => ({
+          id: cls.id,
+          name: cls.name,
+          grade: cls.grade,
+          studentCount: cls.students?.length || 0,
+          label: `${cls.name} (${cls.grade}) (${cls.students?.length || 0} siswa)`,
+        }));
+
+      return unfilledClasses;
+    },
+    enabled: !!startDate && !!endDate,
+  });
+
+  const chartData = dailyAttendanceTrend || [];
+  const classData = attendanceByClass?.filledClasses || [];
+  const unfilledClasses = unfilledClassesData || [];
+
+  const COLORS = {
+    hadir: '#10b981',
+    izin: '#3b82f6',
+    sakit: '#f59e0b',
+    alpa: '#ef4444',
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Kelas Belum Mengisi Absensi */}
+      {unfilledClasses.length > 0 && (
+        <Card className="border-amber-200 bg-amber-50/50">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-amber-800">
+              <AlertTriangle className="h-5 w-5" />
+              Kelas Belum Mengisi Absensi
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-amber-700 mb-3">
+              Terdapat {unfilledClasses.length} kelas yang belum mengisi absensi untuk periode ini:
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {unfilledClasses.map((cls: any) => (
+                <span
+                  key={cls.id}
+                  className="px-3 py-1.5 bg-amber-100 text-amber-800 rounded-lg text-sm font-medium"
+                >
+                  {cls.label}
+                </span>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Grafik Kehadiran Harian */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5 text-primary" />
+            Tren Kehadiran Harian (Periode: {format(startDate, 'dd/MM/yyyy')} - {format(endDate, 'dd/MM/yyyy')})
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {chartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="hadir" fill={COLORS.hadir} name="Hadir" />
+                <Bar dataKey="izin" fill={COLORS.izin} name="Izin" />
+                <Bar dataKey="sakit" fill={COLORS.sakit} name="Sakit" />
+                <Bar dataKey="alpa" fill={COLORS.alpa} name="Alpa" />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="text-center py-12 text-muted-foreground">
+              <TrendingUp className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
+              <p className="text-sm">Belum ada data kehadiran untuk periode ini</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Grafik Kehadiran Per Kelas */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5 text-primary" />
+            Grafik Kehadiran Per Kelas (Periode: {format(startDate, 'dd/MM/yyyy')} - {format(endDate, 'dd/MM/yyyy')})
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {classData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={400}>
+              <BarChart data={classData} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis type="number" />
+                <YAxis dataKey="name" type="category" width={150} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="hadir" fill={COLORS.hadir} name="Hadir" />
+                <Bar dataKey="izin" fill={COLORS.izin} name="Izin" />
+                <Bar dataKey="sakit" fill={COLORS.sakit} name="Sakit" />
+                <Bar dataKey="alpa" fill={COLORS.alpa} name="Alpa" />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="text-center py-12 text-muted-foreground">
+              <Users className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
+              <p className="text-sm">Belum ada data kehadiran per kelas untuk periode ini</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+};

@@ -1,0 +1,441 @@
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { format, startOfWeek, parseISO, startOfMonth, eachDayOfInterval } from 'date-fns';
+import { id as localeId } from 'date-fns/locale';
+
+const toLocalDateStr = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const CACHE_TIME = {
+  STATIC: { staleTime: 10 * 60 * 1000, gcTime: 30 * 60 * 1000 },
+  MODERATE: { staleTime: 5 * 60 * 1000, gcTime: 15 * 60 * 1000 },
+  DYNAMIC: { staleTime: 2 * 60 * 1000, gcTime: 10 * 60 * 1000 },
+};
+
+export const useDashboardStats = (userRole: string | null, selectedYear: string | null, selectedSemester: number) => {
+  return useQuery({
+    queryKey: ['dashboard-stats', selectedYear, selectedSemester],
+    queryFn: async () => {
+      if (!selectedYear) return { teachers: 0, students: 0, classes: 0, schedules: 0 };
+      
+      const { data: yearClasses } = await supabase
+        .from('classes')
+        .select('id')
+        .eq('academic_year', selectedYear);
+      
+      const classIds = yearClasses?.map(c => c.id) || [];
+      
+      const [teachers, students, classes, schedules] = await Promise.all([
+        supabase.from('teachers').select('id', { count: 'exact', head: true }),
+        classIds.length > 0 
+          ? supabase.from('students').select('id', { count: 'exact', head: true })
+              .in('class_id', classIds)
+              .eq('status', 'aktif')
+              .eq('is_alumni', false)
+          : Promise.resolve({ count: 0 }),
+        supabase.from('classes').select('id', { count: 'exact', head: true }).eq('academic_year', selectedYear),
+        supabase.from('schedules').select('id', { count: 'exact', head: true }).eq('academic_year', selectedYear).eq('semester', selectedSemester),
+      ]);
+      
+      return {
+        teachers: teachers.count || 0,
+        students: students.count || 0,
+        classes: classes.count || 0,
+        schedules: schedules.count || 0,
+      };
+    },
+    enabled: userRole === 'admin' && !!selectedYear,
+    ...CACHE_TIME.MODERATE,
+  });
+};
+
+export const useTodaySchedules = (userId: string | null, userRole: string | null, selectedYear: string | null, selectedSemester: number) => {
+  return useQuery({
+    queryKey: ['today-schedules', userId, userRole, selectedYear, selectedSemester],
+    queryFn: async () => {
+      if (!selectedYear) return [];
+      const today = new Date().getDay();
+      
+      if (userRole === 'admin') {
+        const { data } = await supabase
+          .from('schedules')
+          .select(`*, classes(id, name, grade)`)
+          .eq('day_of_week', today)
+          .eq('academic_year', selectedYear)
+          .eq('semester', selectedSemester)
+          .order('start_time');
+        return data || [];
+      } else {
+        const { data: teacher } = await supabase
+          .from('teachers')
+          .select('id')
+          .eq('user_id', userId)
+          .maybeSingle();
+        if (!teacher) return [];
+        const { data } = await supabase
+          .from('schedules')
+          .select(`*, classes(id, name, grade)`)
+          .eq('day_of_week', today)
+          .eq('teacher_id', teacher.id)
+          .eq('academic_year', selectedYear)
+          .eq('semester', selectedSemester)
+          .order('start_time');
+        return data || [];
+      }
+    },
+    enabled: !!userId && !!userRole && !!selectedYear,
+    ...CACHE_TIME.MODERATE,
+  });
+};
+
+// ✅ PERBAIKAN: Gabungkan data dari attendance DAN rfid_attendance
+export const useAttendanceRecap = (startDate: Date, endDate: Date, selectedYear: string | null, selectedSemester: number) => {
+  return useQuery({
+    queryKey: ['attendance-recap', toLocalDateStr(startDate), toLocalDateStr(endDate), selectedYear],
+    queryFn: async () => {
+      if (!selectedYear) return { total: 0, hadir: 0, terlambat: 0, izin: 0, sakit: 0, alpa: 0, belum: 0, expected: 0, attendanceRate: 0 };
+      
+      const start = toLocalDateStr(startDate);
+      const end = toLocalDateStr(endDate);
+
+      console.log('🔍 Fetching attendance from', start, 'to', end, 'for year', selectedYear);
+
+      // Step 1: Ambil semua attendance untuk rentang tanggal
+      const { data: attendanceData, error: attendanceError } = await supabase
+        .from('attendance')
+        .select('id, student_id, date, status, schedule_id')
+        .gte('date', start)
+        .lte('date', end);
+      
+      if (attendanceError) {
+        console.error('❌ Error fetching attendance:', attendanceError);
+        throw attendanceError;
+      }
+
+      console.log(' Attendance records fetched:', attendanceData?.length || 0);
+
+      // Step 2: Ambil semua rfid_attendance untuk rentang tanggal
+      const { data: rfidData, error: rfidError } = await supabase
+        .from('rfid_attendance')
+        .select('id, student_id, date, status')
+        .gte('date', start)
+        .lte('date', end);
+      
+      if (rfidError) {
+        console.error('❌ Error fetching rfid_attendance:', rfidError);
+        throw rfidError;
+      }
+
+      console.log('📊 RFID attendance records fetched:', rfidData?.length || 0);
+
+      // Step 3: Gabungkan kedua data dengan prioritas attendance (manual)
+      const combinedData = new Map<string, any>();
+      
+      // Tambahkan attendance manual terlebih dahulu
+      attendanceData?.forEach((record: any) => {
+        const key = `${record.student_id}-${record.date}`;
+        combinedData.set(key, {
+          student_id: record.student_id,
+          date: record.date,
+          status: record.status,
+          source: 'manual'
+        });
+      });
+      
+      // Tambahkan RFID hanya jika belum ada data manual untuk tanggal yang sama
+      rfidData?.forEach((record: any) => {
+        const key = `${record.student_id}-${record.date}`;
+        if (!combinedData.has(key)) {
+          combinedData.set(key, {
+            student_id: record.student_id,
+            date: record.date,
+            status: record.status,
+            source: 'rfid'
+          });
+        }
+      });
+
+      console.log('✅ Combined records:', combinedData.size);
+
+      // Step 4: Hitung per status
+      let hadir = 0, terlambat = 0, izin = 0, sakit = 0, alpa = 0;
+      const uniqueStudentDates = new Set<string>();
+      
+      Array.from(combinedData.values()).forEach((record: any) => {
+        const key = `${record.student_id}-${record.date}`;
+        if (uniqueStudentDates.has(key)) return;
+        uniqueStudentDates.add(key);
+        
+        const status = (record.status || '').toLowerCase();
+        if (status === 'hadir') hadir++;
+        else if (status === 'terlambat') { terlambat++; hadir++; }
+        else if (status === 'izin') izin++;
+        else if (status === 'sakit') sakit++;
+        else if (status === 'alpa') alpa++;
+      });
+
+      // Step 5: Hitung expected (siswa aktif × hari sekolah)
+      const { count: activeStudentsCount } = await supabase
+        .from('students')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'aktif')
+        .eq('is_alumni', false);
+      
+      const schoolDays = new Set(Array.from(combinedData.values()).map(r => r.date));
+      const expected = (activeStudentsCount || 0) * schoolDays.size;
+      const totalHadir = hadir + terlambat;
+      const total = hadir + izin + sakit + alpa;
+
+      console.log('✅ Stats calculated:', { hadir, terlambat, izin, sakit, alpa, total, expected, totalHadir });
+
+      return {
+        total, 
+        hadir: totalHadir, 
+        terlambat, 
+        izin, 
+        sakit, 
+        alpa,
+        belum: Math.max(0, expected - total),
+        expected,
+        attendanceRate: expected > 0 ? Math.round((totalHadir / expected) * 100) : 0,
+      };
+    },
+    enabled: !!selectedYear,
+  });
+};
+
+export const useAttendanceByClass = (startDate: Date, endDate: Date, userRole: string | null, selectedYear: string | null, selectedSemester: number) => {
+  return useQuery({
+    queryKey: ['attendance-by-class', toLocalDateStr(startDate), toLocalDateStr(endDate), selectedYear],
+    queryFn: async () => {
+      if (!selectedYear) return { filledClasses: [], unfilledClasses: [] };
+      
+      const start = toLocalDateStr(startDate);
+      const end = toLocalDateStr(endDate);
+
+      // Ambil semua kelas
+      const { data: allClasses } = await supabase
+        .from('classes')
+        .select('id, name, grade')
+        .eq('academic_year', selectedYear);
+
+      const classIds = allClasses?.map(c => c.id) || [];
+      
+      // Hitung siswa aktif per kelas
+      const activeStudentCountByClass = new Map<string, number>();
+      if (classIds.length > 0) {
+        const { data: activeStudents } = await supabase
+          .from('students')
+          .select('class_id')
+          .in('class_id', classIds)
+          .eq('status', 'aktif')
+          .eq('is_alumni', false);
+        
+        activeStudents?.forEach(s => {
+          activeStudentCountByClass.set(s.class_id, (activeStudentCountByClass.get(s.class_id) || 0) + 1);
+        });
+      }
+
+      // Ambil schedule per kelas
+      const { data: scheduleIds } = await supabase
+        .from('schedules')
+        .select('id, class_id')
+        .eq('academic_year', selectedYear);
+      
+      const classesWithSchedules = new Set(scheduleIds?.map(s => s.class_id) || []);
+
+      // Build class map
+      const classMap = new Map();
+      allClasses?.forEach((cls: any) => {
+        classMap.set(cls.id, {
+          id: cls.id, 
+          name: `${cls.name} (${cls.grade})`, 
+          grade: cls.grade,
+          studentCount: activeStudentCountByClass.get(cls.id) || 0,
+          hadir: 0, terlambat: 0, izin: 0, sakit: 0, alpa: 0, belum: 0, expected: 0, total: 0, attendanceRate: 0,
+          hasSchedule: classesWithSchedules.has(cls.id), 
+          hasFilled: false,
+        });
+      });
+
+      // Ambil attendance manual
+      const { data: attendanceData, error } = await supabase
+        .from('attendance')
+        .select('id, student_id, date, status, schedule_id')
+        .gte('date', start)
+        .lte('date', end);
+      
+      if (error) throw error;
+
+      // Ambil RFID attendance
+      const { data: rfidData } = await supabase
+        .from('rfid_attendance')
+        .select('id, student_id, date, status')
+        .gte('date', start)
+        .lte('date', end);
+
+      // Gabungkan data
+      const combinedData = new Map<string, any>();
+      
+      attendanceData?.forEach((record: any) => {
+        const key = `${record.student_id}-${record.date}`;
+        combinedData.set(key, {
+          student_id: record.student_id,
+          date: record.date,
+          status: record.status,
+          schedule_id: record.schedule_id,
+          source: 'manual'
+        });
+      });
+      
+      rfidData?.forEach((record: any) => {
+        const key = `${record.student_id}-${record.date}`;
+        if (!combinedData.has(key)) {
+          combinedData.set(key, {
+            student_id: record.student_id,
+            date: record.date,
+            status: record.status,
+            source: 'rfid'
+          });
+        }
+      });
+
+      // Build schedule to class mapping
+      const scheduleToClass = new Map<string, string>();
+      scheduleIds?.forEach(s => scheduleToClass.set(s.id, s.class_id));
+
+      // Ambil siswa aktif
+      const studentIds = [...new Set(Array.from(combinedData.values()).map(r => r.student_id))];
+      let activeStudentIds = new Map<string, string>();
+      if (studentIds.length > 0) {
+        const { data: activeCheck } = await supabase
+          .from('students')
+          .select('id, class_id')
+          .in('id', studentIds)
+          .eq('status', 'aktif')
+          .eq('is_alumni', false);
+        activeCheck?.forEach(s => activeStudentIds.set(s.id, s.class_id));
+      }
+
+      const seen = new Set<string>();
+      Array.from(combinedData.values()).forEach((record: any) => {
+        let classId = record.schedule_id ? scheduleToClass.get(record.schedule_id) : null;
+        
+        // Jika tidak ada schedule_id (RFID), cari class_id dari student
+        if (!classId && activeStudentIds.has(record.student_id)) {
+          classId = activeStudentIds.get(record.student_id);
+        }
+        
+        const key = `${record.student_id}-${record.date}`;
+        
+        if (!classId || seen.has(key)) return;
+        seen.add(key);
+        
+        const classData = classMap.get(classId);
+        if (!classData) return;
+        
+        classData.hasFilled = true;
+        const status = (record.status || '').toLowerCase();
+        
+        if (status === 'hadir') classData.hadir++;
+        else if (status === 'terlambat') { classData.terlambat++; classData.hadir++; }
+        else if (status === 'izin') classData.izin++;
+        else if (status === 'sakit') classData.sakit++;
+        else if (status === 'alpa') classData.alpa++;
+      });
+
+      const allClassData = Array.from(classMap.values()).map(classData => {
+        const totalHadir = classData.hadir;
+        const recorded = totalHadir + classData.izin + classData.sakit + classData.alpa;
+        const total = classData.expected > 0 ? classData.expected : recorded + classData.belum;
+        const attendanceRate = total > 0 ? Math.round((totalHadir / total) * 100) : 0;
+        return { ...classData, total, attendanceRate };
+      });
+
+      const sortClasses = (a: any, b: any) => a.grade !== b.grade ? a.grade - b.grade : a.name.localeCompare(b.name);
+      
+      return {
+        filledClasses: allClassData.filter(c => c.hasFilled).sort(sortClasses),
+        unfilledClasses: allClassData.filter(c => !c.hasFilled && c.hasSchedule).sort(sortClasses),
+      };
+    },
+    enabled: (userRole === 'admin' || userRole === 'kesiswaan') && !!selectedYear,
+  });
+};
+
+export const useDailyAttendanceTrend = (startDate: Date, endDate: Date, userRole: string | null) => {
+  return useQuery({
+    queryKey: ['daily-attendance-trend', toLocalDateStr(startDate), toLocalDateStr(endDate)],
+    queryFn: async () => {
+      const start = toLocalDateStr(startDate);
+      const end = toLocalDateStr(endDate);
+      
+      // Ambil attendance manual
+      const { data: attendanceData, error } = await supabase
+        .from('attendance')
+        .select('student_id, date, status, created_at')
+        .gte('date', start)
+        .lte('date', end)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+
+      // Ambil RFID attendance
+      const { data: rfidData } = await supabase
+        .from('rfid_attendance')
+        .select('student_id, date, status')
+        .gte('date', start)
+        .lte('date', end);
+
+      // Gabungkan data
+      const combinedData = new Map<string, any>();
+      
+      attendanceData?.forEach((record: any) => {
+        const key = `${record.student_id}-${record.date}`;
+        combinedData.set(key, record);
+      });
+      
+      rfidData?.forEach((record: any) => {
+        const key = `${record.student_id}-${record.date}`;
+        if (!combinedData.has(key)) {
+          combinedData.set(key, record);
+        }
+      });
+
+      const dateRange = eachDayOfInterval({ start: startDate, end: endDate });
+      const dailyData = new Map();
+      
+      dateRange.forEach(date => {
+        dailyData.set(format(date, 'yyyy-MM-dd'), {
+          date: format(date, 'dd/MM'), 
+          hadir: 0, 
+          terlambat: 0, 
+          izin: 0, 
+          sakit: 0, 
+          alpa: 0,
+        });
+      });
+
+      Array.from(combinedData.values()).forEach((record: any) => {
+        const dateData = dailyData.get(record.date);
+        if (dateData) {
+          const status = record.status?.toLowerCase();
+          if (status === 'hadir') dateData.hadir++;
+          else if (status === 'terlambat') { dateData.hadir++; dateData.terlambat++; }
+          else if (status === 'izin') dateData.izin++;
+          else if (status === 'sakit') dateData.sakit++;
+          else if (status === 'alpa') dateData.alpa++;
+        }
+      });
+      
+      return Array.from(dailyData.values());
+    },
+    enabled: userRole === 'admin' || userRole === 'kesiswaan',
+  });
+};
+
+// ... (fungsi lainnya tetap sama)

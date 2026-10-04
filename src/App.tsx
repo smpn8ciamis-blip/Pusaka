@@ -1,0 +1,292 @@
+import React, { lazy, Suspense } from "react";
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { AuthProvider } from "./contexts/AuthContext";
+import { ProtectedRoute } from "./components/ProtectedRoute";
+import { VersionNotification } from "./components/VersionNotification";
+import { WaterProgressLoader } from "./components/ui/water-progress-loader";
+
+// Lazy load all page components for better performance
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Teachers = lazy(() => import("./pages/Teachers"));
+const Students = lazy(() => import("./pages/Students"));
+const Classes = lazy(() => import("./pages/Classes"));
+const Alumni = lazy(() => import("./pages/Alumni"));
+const Schedules = lazy(() => import("./pages/Schedules"));
+const Attendance = lazy(() => import("./pages/Attendance"));
+const Journals = lazy(() => import("./pages/Journals"));
+const Grades = lazy(() => import("./pages/Grades"));
+const Analytics = lazy(() => import("./pages/Analytics"));
+const GradeAnalytics = lazy(() => import("./pages/GradeAnalytics"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Auth = lazy(() => import("./pages/Auth"));
+const Setup = lazy(() => import("./pages/Setup"));
+const SetupSampleData = lazy(() => import("./pages/SetupSampleData"));
+const DebugSchedules = lazy(() => import("./pages/DebugSchedules"));
+const VerifyStudent = lazy(() => import("./pages/VerifyStudent"));
+// ⭐ BARU: Halaman verifikasi QR aman untuk laporan (siswa tidak hadir, dll)
+const VerifyReport = lazy(() => import("./pages/VerifyReport"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+const HomeroomAttendance = lazy(() => import("./pages/HomeroomAttendance"));
+const Announcements = lazy(() => import("./pages/Announcements"));
+const StudentAttendanceReport = lazy(() => import("./pages/StudentAttendanceReport"));
+const ExamAdministration = lazy(() => import("./pages/ExamAdministration"));
+const AcademicYearSettings = lazy(() => import("./pages/AcademicYearSettings"));
+const PublicAttendanceCheck = lazy(() => import("./pages/PublicAttendanceCheck"));
+const ParentPermission = lazy(() => import("./pages/ParentPermission"));
+const PermissionLetters = lazy(() => import("./pages/PermissionLetters"));
+const Violations = lazy(() => import("./pages/Violations"));
+const TeacherWorkload = lazy(() => import("./pages/TeacherWorkload"));
+const StudentDetail = lazy(() => import("./pages/StudentDetail"));
+const Achievements = lazy(() => import("./pages/Achievements"));
+const Repository = lazy(() => import("./pages/Repository"));
+const Complaints = lazy(() => import("./pages/Complaints"));
+const ComplaintsManagement = lazy(() => import("./pages/ComplaintsManagement"));
+const PublicComplaintCheck = lazy(() => import("./pages/PublicComplaintCheck"));
+const DatabaseBackup = lazy(() => import("./pages/DatabaseBackup"));
+const PublicGraduationCheck = lazy(() => import("./pages/PublicGraduationCheck"));
+const AssignmentLetters = lazy(() => import("./pages/AssignmentLetters"));
+const OfficialTravel = lazy(() => import("./pages/OfficialTravel"));
+const MyLetters = lazy(() => import("./pages/MyLetters"));
+const StaffRegistration = lazy(() => import("./pages/StaffRegistration"));
+const BendaharaDashboard = lazy(() => import("./pages/BendaharaDashboard"));
+const BulkDataEditor = lazy(() => import("./pages/BulkDataEditor"));
+const BendaharaSettings = lazy(() => import("./pages/BendaharaSettings"));
+const RKASManagement = lazy(() => import("./pages/RKASManagement"));
+const SPJManagement = lazy(() => import("./pages/SPJManagement"));
+const KodeLabelSettings = lazy(() => import("./pages/KodeLabelSettings"));
+const Changelog = lazy(() => import("./pages/Changelog"));
+const PaymentReceipts = lazy(() => import("./pages/PaymentReceipts"));
+const WorkerPayments = lazy(() => import("./pages/WorkerPayments"));
+const NightShiftPayments = lazy(() => import("./pages/NightShiftPayments"));
+const WeekendShiftPayments = lazy(() => import("./pages/WeekendShiftPayments"));
+const GttPttHonorarium = lazy(() => import("./pages/GttPttHonorarium"));
+const ExtracurricularHonorarium = lazy(() => import("./pages/ExtracurricularHonorarium"));
+const NarasumberHonorarium = lazy(() => import("./pages/NarasumberHonorarium"));
+const StaffAccounts = lazy(() => import("./pages/StaffAccounts"));
+const SuratMasuk = lazy(() => import("./pages/SuratMasuk"));
+const SuratKeluar = lazy(() => import("./pages/SuratKeluar"));
+const TataUsahaDashboard = lazy(() => import("./pages/TataUsahaDashboard"));
+const ImportantEventNotes = lazy(() => import("./pages/ImportantEventNotes"));
+const StudentRegistration = lazy(() => import("./pages/StudentRegistration"));
+const StudentSelfRegister = lazy(() => import("./pages/StudentSelfRegister"));
+const StudentDashboard = lazy(() => import("./pages/StudentDashboard"));
+const StudentAccounts = lazy(() => import("./pages/StudentAccounts"));
+const KesiswaanDashboard = lazy(() => import("./pages/KesiswaanDashboard"));
+const PublicServices = lazy(() => import("./pages/PublicServices"));
+const CashAudit = lazy(() => import("./pages/CashAudit"));
+const PollingDashboard = lazy(() => import("./pages/PollingDashboard"));
+const PublicTeacherUpload = lazy(() => import("./pages/PublicTeacherUpload"));
+const BillingDashboard = lazy(() => import("./pages/BillingDashboard"));
+const FileUploadManagement = lazy(() => import("./pages/FileUploadManagement"));
+const PublicViolationCheck = lazy(() => import("./pages/PublicViolationCheck"));
+const TaxManagement = lazy(() => import("./pages/TaxManagement"));
+const SuperAdminDashboard = lazy(() => import("./pages/SuperAdminDashboard"));
+const SchoolRegistration = lazy(() => import("./pages/SchoolRegistration"));
+const SystemInfo = lazy(() => import("./pages/SystemInfo"));
+const BulkPhotoUpload = lazy(() => import("./pages/BulkPhotoUpload"));
+const StudentMutations = lazy(() => import("./pages/StudentMutations"));
+const GuruPiketDashboard = lazy(() => import("./pages/GuruPiketDashboard"));
+const DispensasiSiswa = lazy(() => import("./pages/DispensasiSiswa"));
+const BukuTamu = lazy(() => import("./pages/BukuTamu"));
+const SeedDatabase = lazy(() => import("./pages/SeedDatabase"));
+const CbtExamManagement = lazy(() => import("./pages/CbtExamManagement"));
+const CbtStudentExam = lazy(() => import("./pages/CbtStudentExam"));
+const NedelcisHub = lazy(() => import("./pages/NedelcisHub"));
+const PortalTautanGuru = lazy(() => import("./pages/PortalTautanGuru"));
+const RfidTap = lazy(() => import("./pages/RfidTap"));
+const RfidAttendanceManagement = lazy(() => import("./pages/RfidAttendanceManagement"));
+// Tambahan halaman upload untuk wali kelas
+const HomeroomFileUploadManagement = lazy(() => import("./pages/HomeroomFileUploadManagement"));
+
+// Public website
+const PublicLayout = lazy(() => import("./components/website/PublicLayout"));
+const WebHome = lazy(() => import("./pages/website/Home"));
+const WebProfil = lazy(() => import("./pages/website/Profil"));
+const WebAkademik = lazy(() => import("./pages/website/Akademik"));
+const WebEkskul = lazy(() => import("./pages/website/Ekstrakurikuler"));
+const WebBerita = lazy(() => import("./pages/website/Berita"));
+const WebBeritaDetail = lazy(() => import("./pages/website/BeritaDetail"));
+const WebGaleri = lazy(() => import("./pages/website/Galeri"));
+const WebGuru = lazy(() => import("./pages/website/Guru"));
+const WebKontak = lazy(() => import("./pages/website/Kontak"));
+// Web admin
+const AdminLayout = lazy(() => import("./pages/web-admin/AdminLayout"));
+const AdminDashboard = lazy(() => import("./pages/web-admin/AdminDashboard"));
+const AdminNews = lazy(() => import("./pages/web-admin/AdminNews"));
+const AdminPages = lazy(() => import("./pages/web-admin/AdminPages"));
+const AdminHero = lazy(() => import("./pages/web-admin/AdminHero"));
+const AdminGallery = lazy(() => import("./pages/web-admin/AdminGallery"));
+const AdminAgenda = lazy(() => import("./pages/web-admin/AdminAgenda"));
+const AdminPrograms = lazy(() => import("./pages/web-admin/AdminPrograms"));
+const AdminCategories = lazy(() => import("./pages/web-admin/AdminCategories"));
+const AdminMessages = lazy(() => import("./pages/web-admin/AdminMessages"));
+const AdminSettings = lazy(() => import("./pages/web-admin/AdminSettings"));
+const AdminExtracurricular = lazy(() => import("./pages/web-admin/AdminExtracurricular"));
+
+// Optimized QueryClient with better caching strategy
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000,
+      gcTime: 15 * 60 * 1000,
+      refetchOnWindowFocus: false,
+      refetchOnMount: false,
+      refetchOnReconnect: false,
+      retry: 1,
+      networkMode: 'offlineFirst',
+    },
+    mutations: {
+      retry: 1,
+    },
+  },
+});
+
+// Loading fallback component
+const PageLoader = () => (
+  <div className="flex items-center justify-center min-h-screen bg-background">
+    <div className="flex flex-col items-center gap-4">
+      <WaterProgressLoader size="lg" isLoading={true} />
+      <span className="text-sm text-muted-foreground">Memuat halaman...</span>
+    </div>
+  </div>
+);
+
+const App = () => (
+  <QueryClientProvider client={queryClient}>
+    <TooltipProvider>
+      <Toaster />
+      <Sonner />
+      <BrowserRouter>
+        <AuthProvider>
+          <VersionNotification />
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              <Route path="/setup" element={<Setup />} />
+              <Route path="/setup-sample-data" element={<SetupSampleData />} />
+              <Route path="/seed-database" element={<SeedDatabase />} />
+              <Route path="/debug-schedules" element={<ProtectedRoute><DebugSchedules /></ProtectedRoute>} />
+              <Route path="/auth" element={<Auth />} />
+              {/* ⭐ BARU: verifikasi QR aman (token-hash) — laporan kehadiran, siswa tidak hadir, dll */}
+              <Route path="/verify/:token" element={<VerifyReport />} />
+              <Route path="/cek-status-peserta-didik" element={<PublicAttendanceCheck />} />
+              <Route path="/surat-izin-orang-tua" element={<ParentPermission />} />
+              <Route path="/cek-kelulusan" element={<PublicGraduationCheck />} />
+              <Route path="/daftar-sekolah" element={<SchoolRegistration />} />
+              <Route path="/layanan-publik" element={<PublicServices />} />
+              <Route path="/upload-berkas-guru" element={<PublicTeacherUpload />} />
+              <Route path="/cek-pelanggaran" element={<PublicViolationCheck />} />
+              <Route path="/verify-student" element={<VerifyStudent />} />
+              {/* Public school website */}
+              <Route path="/" element={<PublicLayout />}>
+                <Route index element={<WebHome />} />
+                <Route path="website/profil" element={<WebProfil />} />
+                <Route path="website/akademik" element={<WebAkademik />} />
+                <Route path="website/ekstrakurikuler" element={<WebEkskul />} />
+                <Route path="website/berita" element={<WebBerita />} />
+                <Route path="website/berita/:slug" element={<WebBeritaDetail />} />
+                <Route path="website/galeri" element={<WebGaleri />} />
+                <Route path="website/guru" element={<WebGuru />} />
+                <Route path="website/kontak" element={<WebKontak />} />
+              </Route>
+              {/* Web admin panel */}
+              <Route path="/web-admin" element={<ProtectedRoute allowedRoles={['admin_web','admin','super_admin']}><AdminLayout /></ProtectedRoute>}>
+                <Route index element={<AdminDashboard />} />
+                <Route path="berita" element={<AdminNews />} />
+                <Route path="halaman" element={<AdminPages />} />
+                <Route path="hero" element={<AdminHero />} />
+                <Route path="galeri" element={<AdminGallery />} />
+                <Route path="agenda" element={<AdminAgenda />} />
+                <Route path="program" element={<AdminPrograms />} />
+                <Route path="ekstrakurikuler" element={<AdminExtracurricular />} />
+                <Route path="kategori" element={<AdminCategories />} />
+                <Route path="pesan" element={<AdminMessages />} />
+                <Route path="pengaturan" element={<AdminSettings />} />
+              </Route>
+              <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+              <Route path="/teachers" element={<ProtectedRoute><Teachers /></ProtectedRoute>} />
+              <Route path="/students" element={<ProtectedRoute><Students /></ProtectedRoute>} />
+              <Route path="/student-mutations" element={<ProtectedRoute allowedRoles={['admin', 'kesiswaan']}><StudentMutations /></ProtectedRoute>} />
+              <Route path="/students/:id" element={<ProtectedRoute><StudentDetail /></ProtectedRoute>} />
+              <Route path="/classes" element={<ProtectedRoute><Classes /></ProtectedRoute>} />
+              <Route path="/alumni" element={<ProtectedRoute><Alumni /></ProtectedRoute>} />
+              <Route path="/schedules" element={<ProtectedRoute><Schedules /></ProtectedRoute>} />
+              <Route path="/teacher-workload" element={<ProtectedRoute><TeacherWorkload /></ProtectedRoute>} />
+              <Route path="/attendance" element={<ProtectedRoute><Attendance /></ProtectedRoute>} />
+              <Route path="/journals" element={<ProtectedRoute><Journals /></ProtectedRoute>} />
+              <Route path="/grades" element={<ProtectedRoute><Grades /></ProtectedRoute>} />
+              <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+              <Route path="/grade-analytics" element={<ProtectedRoute><GradeAnalytics /></ProtectedRoute>} />
+              <Route path="/permission-letters" element={<ProtectedRoute><PermissionLetters /></ProtectedRoute>} />
+              <Route path="/violations" element={<ProtectedRoute><Violations /></ProtectedRoute>} />
+              <Route path="/achievements" element={<ProtectedRoute><Achievements /></ProtectedRoute>} />
+              <Route path="/repository" element={<ProtectedRoute><Repository /></ProtectedRoute>} />
+              <Route path="/homeroom-attendance" element={<ProtectedRoute><HomeroomAttendance /></ProtectedRoute>} />
+              <Route path="/announcements" element={<ProtectedRoute><Announcements /></ProtectedRoute>} />
+              <Route path="/student-attendance-report" element={<ProtectedRoute><StudentAttendanceReport /></ProtectedRoute>} />
+              <Route path="/exam-administration" element={<ProtectedRoute><ExamAdministration /></ProtectedRoute>} />
+              <Route path="/academic-year-settings" element={<ProtectedRoute><AcademicYearSettings /></ProtectedRoute>} />
+              <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+              <Route path="/pengaduan" element={<Complaints />} />
+              <Route path="/cek-status-pengaduan" element={<PublicComplaintCheck />} />
+              <Route path="/manajemen-pengaduan" element={<ProtectedRoute><ComplaintsManagement /></ProtectedRoute>} />
+              <Route path="/database-backup" element={<ProtectedRoute allowedRoles={['admin', 'super_admin']}><DatabaseBackup /></ProtectedRoute>} />
+              <Route path="/assignment-letters" element={<ProtectedRoute><AssignmentLetters /></ProtectedRoute>} />
+              <Route path="/official-travel" element={<ProtectedRoute><OfficialTravel /></ProtectedRoute>} />
+              <Route path="/my-letters" element={<ProtectedRoute><MyLetters /></ProtectedRoute>} />
+              <Route path="/payment-receipts" element={<ProtectedRoute><PaymentReceipts /></ProtectedRoute>} />
+              <Route path="/worker-payments" element={<ProtectedRoute><WorkerPayments /></ProtectedRoute>} />
+              <Route path="/night-shift-payments" element={<ProtectedRoute allowedRoles={["bendahara", "admin"]}><NightShiftPayments /></ProtectedRoute>} />
+              <Route path="/weekend-shift-payments" element={<ProtectedRoute allowedRoles={["bendahara", "admin"]}><WeekendShiftPayments /></ProtectedRoute>} />
+              <Route path="/gtt-ptt-honorarium" element={<ProtectedRoute><GttPttHonorarium /></ProtectedRoute>} />
+              <Route path="/extracurricular-honorarium" element={<ProtectedRoute><ExtracurricularHonorarium /></ProtectedRoute>} />
+              <Route path="/narasumber-honorarium" element={<ProtectedRoute><NarasumberHonorarium /></ProtectedRoute>} />
+              <Route path="/bendahara-dashboard" element={<ProtectedRoute><BendaharaDashboard /></ProtectedRoute>} />
+              <Route path="/staff-registration" element={<ProtectedRoute requireRole="admin"><StaffRegistration /></ProtectedRoute>} />
+              <Route path="/staff-accounts" element={<ProtectedRoute requireRole="admin"><StaffAccounts /></ProtectedRoute>} />
+              <Route path="/bulk-data-editor" element={<ProtectedRoute requireRole="admin"><BulkDataEditor /></ProtectedRoute>} />
+              <Route path="/bendahara-settings" element={<ProtectedRoute><BendaharaSettings /></ProtectedRoute>} />
+              <Route path="/rkas" element={<ProtectedRoute><RKASManagement /></ProtectedRoute>} />
+              <Route path="/spj" element={<ProtectedRoute><SPJManagement /></ProtectedRoute>} />
+              <Route path="/kode-label-settings" element={<ProtectedRoute><KodeLabelSettings /></ProtectedRoute>} />
+              <Route path="/changelog" element={<ProtectedRoute><Changelog /></ProtectedRoute>} />
+              <Route path="/surat-masuk" element={<ProtectedRoute><SuratMasuk /></ProtectedRoute>} />
+              <Route path="/surat-keluar" element={<ProtectedRoute><SuratKeluar /></ProtectedRoute>} />
+              <Route path="/tata-usaha-dashboard" element={<ProtectedRoute><TataUsahaDashboard /></ProtectedRoute>} />
+              <Route path="/important-event-notes" element={<ProtectedRoute><ImportantEventNotes /></ProtectedRoute>} />
+              <Route path="/student-registration" element={<ProtectedRoute requireRole="admin"><StudentRegistration /></ProtectedRoute>} />
+              <Route path="/student-accounts" element={<ProtectedRoute requireRole="admin"><StudentAccounts /></ProtectedRoute>} />
+              <Route path="/daftar-siswa" element={<StudentSelfRegister />} />
+              <Route path="/student-dashboard" element={<StudentDashboard />} />
+              <Route path="/kesiswaan-dashboard" element={<ProtectedRoute allowedRoles={['kesiswaan', 'admin']}><KesiswaanDashboard /></ProtectedRoute>} />
+              <Route path="/cash-audit" element={<ProtectedRoute><CashAudit /></ProtectedRoute>} />
+              <Route path="/polling" element={<ProtectedRoute allowedRoles={['polling', 'admin']}><PollingDashboard /></ProtectedRoute>} />
+              <Route path="/file-upload-management" element={<ProtectedRoute allowedRoles={['teacher', 'admin']}><FileUploadManagement /></ProtectedRoute>} />
+              <Route path="/homeroom-upload-management" element={<ProtectedRoute allowedRoles={['teacher', 'admin']}><HomeroomFileUploadManagement /></ProtectedRoute>} />
+              <Route path="/billing-dashboard" element={<ProtectedRoute allowedRoles={['billing', 'admin']}><BillingDashboard /></ProtectedRoute>} />
+              <Route path="/tax-management" element={<ProtectedRoute allowedRoles={['bendahara', 'admin']}><TaxManagement /></ProtectedRoute>} />
+              <Route path="/super-admin" element={<ProtectedRoute requireRole="super_admin"><SuperAdminDashboard /></ProtectedRoute>} />
+              <Route path="/system-info" element={<ProtectedRoute requireRole="admin"><SystemInfo /></ProtectedRoute>} />
+              <Route path="/bulk-photo-upload" element={<ProtectedRoute requireRole="admin"><BulkPhotoUpload /></ProtectedRoute>} />
+              <Route path="/guru-piket-dashboard" element={<ProtectedRoute allowedRoles={['guru_piket', 'admin']}><GuruPiketDashboard /></ProtectedRoute>} />
+              <Route path="/dispensasi-siswa" element={<ProtectedRoute allowedRoles={['guru_piket', 'admin', 'kesiswaan']}><DispensasiSiswa /></ProtectedRoute>} />
+              <Route path="/buku-tamu" element={<ProtectedRoute allowedRoles={['guru_piket', 'admin']}><BukuTamu /></ProtectedRoute>} />
+              <Route path="/cbt-management" element={<ProtectedRoute allowedRoles={['teacher', 'admin']}><CbtExamManagement /></ProtectedRoute>} />
+              <Route path="/cbt-student" element={<ProtectedRoute allowedRoles={['siswa']}><CbtStudentExam /></ProtectedRoute>} />
+              <Route path="/nedelcis-hub" element={<NedelcisHub />} />
+              <Route path="/portal-tautan-guru" element={<PortalTautanGuru />} />
+              <Route path="/absensi-rfid" element={<RfidTap />} />
+              <Route path="/rfid-attendance" element={<RfidAttendanceManagement />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </Suspense>
+        </AuthProvider>
+      </BrowserRouter>
+    </TooltipProvider>
+  </QueryClientProvider>
+);
+
+export default App;

@@ -1,0 +1,66 @@
+=========================================
+FULL STRUCTURE - Sun Aug 30 12:07:24 WIB 2026
+=========================================
+
+📁 ROOT DIRECTORY:
+
+all-subfolders-structure.sh: line 22: tree: command not found
+
+=========================================
+📁 SRC FOLDER
+=========================================
+all-subfolders-structure.sh: line 30: tree: command not found
+
+=========================================
+📁 COMPONENTS SUBFOLDER
+=========================================
+all-subfolders-structure.sh: line 38: tree: command not found
+
+📋 DAFTAR KOMPONEN (0 file):
+  📄 AcademicYearSelector.tsx
+  📄 AppFooter.tsx
+  📄 AttendanceDaySettings.tsx
+  📄 BulkStudentAccountDialog.tsx
+  📄 ClassPromotionDialog.tsx
+  📄 CopySchedulesDialog.tsx
+  📄 CreateRKASForm.tsx
+  📄 DashboardLayout.tsx
+  📄 DatabaseBackup.tsx
+  📄 DatabaseSync.tsx
+  📄 DuplicateAttendanceManager.tsx
+  📄 GraduateStudentsDialog.tsx
+  📄 GraduationAnnouncementSettings.tsx
+  📄 HighlightText.tsx
+  📄 ImportAttendance.tsx
+  📄 ImportClasses.tsx
+  📄 ImportRKAS.tsx
+  📄 ImportSchedules.tsx
+  📄 ImportStudents.tsx
+  📄 ImportTeachers.tsx
+  📄 ImportViolationTypes.tsx
+  📄 LetterheadPreview.tsx
+  📄 MakanMinumCard.tsx
+  📄 NotificationBell.tsx
+  📄 PasswordChangeForm.tsx
+  📄 ProtectedRoute.tsx
+  📄 StudentSearchSelect.tsx
+  📄 SubscriptionBanner.tsx
+  📄 SuratRecapPdfPreview.tsx
+  📄 TwoFactorSetup.tsx
+  📄 TwoFactorVerify.tsx
+  📄 VersionNotification.tsx
+  📄 WeeklyScheduleCalendar.tsx
+  📄 ZapierWebhookManager.tsx
+
+=========================================
+📁 PAGES SUBFOLDER
+=========================================
+all-subfolders-structure.sh: line 54: tree: command not found
+
+=========================================
+📁 SUPABASE FOLDER
+=========================================
+all-subfolders-structure.sh: line 64: tree: command not found
+
+=========================================
+✅ Selesai

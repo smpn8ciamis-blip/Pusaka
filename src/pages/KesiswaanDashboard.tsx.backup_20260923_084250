@@ -1,0 +1,1986 @@
+import {
+  useState,
+  lazy,
+  Suspense,
+  useMemo,
+  useCallback,
+  useEffect,
+  memo } from "react";
+import { motion,
+  AnimatePresence } from "framer-motion";
+import { DashboardLayout } from "@/components/DashboardLayout";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Popover,
+  PopoverContent,
+  PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import {
+  Calendar as CalendarIcon,
+  X,
+  Users,
+  AlertTriangle,
+  Award,
+  ClipboardList,
+  TrendingUp,
+  TrendingDown,
+  Search,
+  RefreshCw,
+  BarChart3,
+  Sparkles,
+  Clock,
+  CheckCircle2,
+  FileWarning,
+  UserRound,
+} from "lucide-react";
+import {
+  format,
+  startOfMonth,
+  startOfYear,
+  subDays,
+} from "date-fns";
+import { id as idLocale } from "date-fns/locale";
+import { cn } from "@/lib/utils";
+import { useCountAnimation } from "@/hooks/useCountAnimation";
+import { useStudentGenderStats } from "@/hooks/useStudentGenderStats";
+import { StudentGenderStatsCard } from "@/components/dashboard/StudentGenderStatsCard";
+import { useAcademicYear } from "@/contexts/AcademicYearContext";
+import { useDateRangeFilter } from "@/hooks/useDateRangeFilter";
+import { useDashboardExport } from "@/hooks/useDashboardExport";
+import {
+  useAttendanceRecap,
+  useAttendanceByClass,
+  useDailyAttendanceTrend,
+  useLateStudents,
+  useLateViolationsTrend,
+  useStudentViolationDetails,
+} from "@/hooks/useDashboardData";
+import { DashboardAttendanceRecap } from "@/components/dashboard/DashboardAttendanceRecap";
+import { WaterLoaderCard } from "@/components/ui/water-progress-loader";
+import {
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  Area,
+  AreaChart,
+  LabelList,
+} from "recharts";
+
+// =====================================================================
+// LAZY LOADED
+// =====================================================================
+const DashboardLateStudents = lazy(() =>
+  import("@/components/dashboard/DashboardLateStudents").then((m) => ({
+    default: m.DashboardLateStudents,
+  }))
+);
+const StudentViolationModal = lazy(() =>
+  import("@/components/dashboard/StudentViolationModal").then((m) => ({
+    default: m.StudentViolationModal,
+  }))
+);
+
+// =====================================================================
+// CONSTANTS
+// =====================================================================
+const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4"];
+const VISIBLE_LIMIT = 3;
+
+const TOOLTIP_STYLE: React.CSSProperties = {
+  backgroundColor: "hsl(var(--card))",
+  border: "1px solid hsl(var(--border))",
+  borderRadius: "12px",
+  fontSize: "12px",
+  boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+  padding: "8px 12px",
+};
+
+// =====================================================================
+// INLINE HOOKS
+// =====================================================================
+function useDebouncedValue<T>(value: T, delay = 400): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
+
+function useAutoRefresh(enabled: boolean, refetch: () => void, intervalMs = 60_000) {
+  useEffect(() => {
+    if (!enabled) return;
+    const id = setInterval(refetch, intervalMs);
+    return () => clearInterval(id);
+  }, [enabled, refetch, intervalMs]);
+}
+
+function useKesiswaanStats(startDate?: Date, endDate?: Date) {
+  const debouncedStart = useDebouncedValue(startDate, 400);
+  const debouncedEnd = useDebouncedValue(endDate, 400);
+
+  return useQuery({
+    queryKey: [
+      "kesiswaan-stats",
+      debouncedStart?.toISOString() ?? null,
+      debouncedEnd?.toISOString() ?? null,
+    ],
+    queryFn: async () => {
+      const startStr = debouncedStart ? format(debouncedStart, "yyyy-MM-dd") : undefined;
+      const endStr = debouncedEnd ? format(debouncedEnd, "yyyy-MM-dd") : undefined;
+
+      const [studentRes, violationsData, achievementsData, recentV, recentA] =
+        await Promise.all([
+          supabase
+            .from("students")
+            .select("*", { count: "exact", head: true })
+            .eq("is_alumni", false),
+
+          (async () => {
+            let q = supabase
+              .from("student_violations")
+              .select(
+                `id, violation_date, points, violation_types:violation_type_id (name, category)`
+              );
+            if (startStr) q = q.gte("violation_date", startStr);
+            if (endStr) q = q.lte("violation_date", endStr);
+            const { data, error } = await q;
+            if (error) throw error;
+            return data ?? [];
+          })(),
+
+          (async () => {
+            let q = supabase
+              .from("student_achievements")
+              .select("id, achievement_date, achievement_type, level");
+            if (startStr) q = q.gte("achievement_date", startStr);
+            if (endStr) q = q.lte("achievement_date", endStr);
+            const { data, error } = await q;
+            if (error) throw error;
+            return data ?? [];
+          })(),
+
+          supabase
+            .from("student_violations")
+            .select(
+              `id, violation_date, points, notes,
+               students:student_id (full_name, nis),
+               violation_types:violation_type_id (name, category)`
+            )
+            .order("violation_date", { ascending: false })
+            .limit(10)
+            .then((r) => r.data ?? []),
+
+          supabase
+            .from("student_achievements")
+            .select(
+              `id, achievement_date, achievement_name, achievement_type, level,
+               students:student_id (full_name, nis)`
+            )
+            .order("achievement_date", { ascending: false })
+            .limit(10)
+            .then((r) => r.data ?? []),
+        ]);
+
+      const vByCat: Record<string, number> = {};
+      violationsData.forEach((v: any) => {
+        const c = v.violation_types?.category || "lainnya";
+        vByCat[c] = (vByCat[c] || 0) + 1;
+      });
+
+      const aByType: Record<string, number> = {};
+      achievementsData.forEach((a: any) => {
+        aByType[a.achievement_type] = (aByType[a.achievement_type] || 0) + 1;
+      });
+
+      const aByLevel: Record<string, number> = {};
+      achievementsData.forEach((a: any) => {
+        aByLevel[a.level] = (aByLevel[a.level] || 0) + 1;
+      });
+
+      return {
+        studentCount: studentRes.count || 0,
+        totalViolations: violationsData.length,
+        totalPoints: violationsData.reduce(
+          (s: number, v: any) => s + (v.points || 0),
+          0
+        ),
+        violationsByCategory: Object.entries(vByCat).map(([name, value]) => ({
+          name,
+          value,
+        })),
+        totalAchievements: achievementsData.length,
+        achievementsByType: Object.entries(aByType).map(([name, value]) => ({
+          name,
+          value,
+        })),
+        achievementsByLevel: Object.entries(aByLevel).map(([name, value]) => ({
+          name,
+          value,
+        })),
+        recentViolations: recentV,
+        recentAchievements: recentA,
+      };
+    },
+    staleTime: 60_000,
+  });
+}
+
+// =====================================================================
+// SUB-COMPONENTS
+// =====================================================================
+
+// --- Elegant Floating Background ---
+const AnimatedBackground = memo(() => (
+  <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
+    <div className="absolute -top-20 -left-20 w-72 h-72 bg-blue-500/10 dark:bg-blue-500/5 rounded-full blur-3xl animate-float-slow" />
+    <div className="absolute top-1/3 right-0 w-96 h-96 bg-purple-500/10 dark:bg-purple-500/5 rounded-full blur-3xl animate-float-slower" />
+    <div className="absolute bottom-0 left-1/3 w-80 h-80 bg-emerald-500/10 dark:bg-emerald-500/5 rounded-full blur-3xl animate-float-slow" />
+  </div>
+));
+AnimatedBackground.displayName = "AnimatedBackground";
+
+// --- Skeleton ---
+const StatsCardSkeleton = () => (
+  <Card className="animate-pulse">
+    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+      <div className="h-4 w-24 bg-muted rounded" />
+      <div className="h-4 w-4 bg-muted rounded" />
+    </CardHeader>
+    <CardContent>
+      <div className="h-8 w-16 bg-muted rounded mb-2" />
+      <div className="h-3 w-20 bg-muted rounded" />
+    </CardContent>
+  </Card>
+);
+const StatsGridSkeleton = () => (
+  <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+    {Array.from({ length: 4 }).map((_, i) => (
+      <StatsCardSkeleton key={i} />
+    ))}
+  </div>
+);
+
+// --- Empty State ---
+const EmptyState = ({
+  icon,
+  title,
+  subtitle,
+}: {
+  icon: string;
+  title: string;
+  subtitle: string;
+}) => (
+  <div className="flex flex-col items-center justify-center py-8 text-center">
+    <div className="h-14 w-14 rounded-full bg-gradient-to-br from-muted/60 to-muted/30 flex items-center justify-center mb-2 shadow-inner">
+      <span className="text-xl">{icon}</span>
+    </div>
+    <p className="text-sm font-medium">{title}</p>
+    <p className="text-xs text-muted-foreground">{subtitle}</p>
+  </div>
+);
+
+// --- Section Header (konsisten & elegan) ---
+const SectionHeader = ({
+  icon: Icon,
+  title,
+  description,
+  accent = "primary",
+  children,
+}: {
+  icon: any;
+  title: string;
+  description?: string;
+  accent?: "primary" | "emerald" | "amber" | "red" | "violet";
+  children?: React.ReactNode;
+}) => {
+  const accentMap: Record<string, string> = {
+    primary: "from-blue-500/20 to-blue-500/5 text-blue-500",
+    emerald: "from-emerald-500/20 to-emerald-500/5 text-emerald-500",
+    amber: "from-amber-500/20 to-amber-500/5 text-amber-500",
+    red: "from-red-500/20 to-red-500/5 text-red-500",
+    violet: "from-violet-500/20 to-violet-500/5 text-violet-500",
+  };
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="flex items-center gap-3">
+        <div
+          className={cn(
+            "h-10 w-10 rounded-xl bg-gradient-to-br flex items-center justify-center shadow-sm",
+            accentMap[accent]
+          )}
+        >
+          <Icon className="h-5 w-5" />
+        </div>
+        <div>
+          <CardTitle className="text-base sm:text-lg font-semibold tracking-tight">
+            {title}
+          </CardTitle>
+          {description && (
+            <CardDescription className="text-xs sm:text-sm">{description}</CardDescription>
+          )}
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+};
+
+// --- Stats Cards ---
+const containerVariants = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.08 } },
+};
+const itemVariants = {
+  hidden: { opacity: 0, y: 20 },
+  show: { opacity: 1, y: 0 },
+};
+
+const KesiswaanStatsCards = memo(function KesiswaanStatsCards({
+  loading,
+  studentCount,
+  attendancePercent,
+  attendancePresent,
+  attendanceTotal,
+  totalViolations,
+  totalPoints,
+  totalAchievements,
+}: {
+  loading: boolean;
+  studentCount: number;
+  attendancePercent: number;
+  attendancePresent: number;
+  attendanceTotal: number;
+  totalViolations: number;
+  totalPoints: number;
+  totalAchievements: number;
+}) {
+  const aStudents = useCountAnimation(studentCount);
+  const aAttendance = useCountAnimation(attendancePercent);
+  const aViolations = useCountAnimation(totalViolations);
+  const aAchievements = useCountAnimation(totalAchievements);
+
+  if (loading) return <StatsGridSkeleton />;
+
+  const cards = [
+    {
+      title: "Total Siswa Aktif",
+      value: aStudents,
+      suffix: "",
+      desc: "siswa terdaftar",
+      icon: Users,
+      gradient: "from-blue-500 to-blue-600",
+      glow: "shadow-blue-500/20",
+      trend: null as any,
+    },
+    {
+      title: "Tingkat Kehadiran",
+      value: aAttendance,
+      suffix: "%",
+      desc: `${attendancePresent} hadir dari ${attendanceTotal}`,
+      icon: ClipboardList,
+      gradient: "from-emerald-500 to-green-600",
+      glow: "shadow-emerald-500/20",
+      trend: attendancePercent >= 90 ? "up" : "down",
+    },
+    {
+      title: "Total Pelanggaran",
+      value: aViolations,
+      suffix: "",
+      desc: `${totalPoints} total poin`,
+      icon: AlertTriangle,
+      gradient: "from-rose-500 to-red-600",
+      glow: "shadow-rose-500/20",
+      trend: null as any,
+    },
+    {
+      title: "Total Prestasi",
+      value: aAchievements,
+      suffix: "",
+      desc: "penghargaan tercatat",
+      icon: Award,
+      gradient: "from-amber-500 to-orange-600",
+      glow: "shadow-amber-500/20",
+      trend: null as any,
+    },
+  ];
+
+  return (
+    <motion.div
+      variants={containerVariants}
+      initial="hidden"
+      animate="show"
+      className="grid gap-3 grid-cols-2 lg:grid-cols-4"
+    >
+      {cards.map((card) => {
+        const Icon = card.icon;
+        return (
+          <motion.div key={card.title} variants={itemVariants}>
+            <Card
+              className={cn(
+                "group relative overflow-hidden backdrop-blur-sm border-border/60",
+                "transition-all duration-300 hover:scale-[1.02] hover:shadow-xl",
+                card.glow
+              )}
+            >
+              {/* Glow gradient overlay */}
+              <div
+                className={cn(
+                  "absolute inset-0 opacity-[0.07] group-hover:opacity-[0.12] transition-opacity duration-300 bg-gradient-to-br",
+                  card.gradient
+                )}
+              />
+              <div
+                className={cn(
+                  "absolute -right-8 -top-8 h-24 w-24 rounded-full blur-2xl opacity-20 bg-gradient-to-br group-hover:opacity-40 transition-opacity",
+                  card.gradient
+                )}
+              />
+
+              <CardHeader className="relative flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
+                  {card.title}
+                </CardTitle>
+                <div
+                  className={cn(
+                    "h-8 w-8 rounded-lg flex items-center justify-center bg-gradient-to-br text-white shadow-md transition-transform group-hover:scale-110 group-hover:rotate-3",
+                    card.gradient
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                </div>
+              </CardHeader>
+              <CardContent className="relative">
+                <div className="text-2xl sm:text-3xl font-bold tabular-nums bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text">
+                  {card.value}
+                  {card.suffix}
+                </div>
+                <div className="flex items-center justify-between gap-1 mt-1.5">
+                  <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
+                    {card.desc}
+                  </p>
+                  {card.trend === "up" && (
+                    <span className="flex items-center gap-0.5 text-[10px] font-medium text-emerald-500 shrink-0 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">
+                      <TrendingUp className="h-3 w-3" /> Baik
+                    </span>
+                  )}
+                  {card.trend === "down" && (
+                    <span className="flex items-center gap-0.5 text-[10px] font-medium text-rose-500 shrink-0 bg-rose-500/10 px-1.5 py-0.5 rounded-full">
+                      <TrendingDown className="h-3 w-3" /> Rendah
+                    </span>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        );
+      })}
+    </motion.div>
+  );
+});
+
+// --- Unified Date Filter ---
+const UnifiedDateFilter = memo(function UnifiedDateFilter({
+  startDate,
+  endDate,
+  setStartDate,
+  setEndDate,
+  autoRefresh,
+  setAutoRefresh,
+  onClear,
+}: {
+  startDate?: Date;
+  endDate?: Date;
+  setStartDate: (d?: Date) => void;
+  setEndDate: (d?: Date) => void;
+  autoRefresh: boolean;
+  setAutoRefresh: (v: boolean) => void;
+  onClear: () => void;
+}) {
+  const presets = [
+    { label: "7 Hari", apply: () => { setStartDate(subDays(new Date(), 6)); setEndDate(new Date()); } },
+    { label: "Bulan Ini", apply: () => { setStartDate(startOfMonth(new Date())); setEndDate(new Date()); } },
+    { label: "Tahun Ini", apply: () => { setStartDate(startOfYear(new Date())); setEndDate(new Date()); } },
+  ];
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="hidden sm:flex items-center gap-1 rounded-xl border bg-background/60 backdrop-blur-sm p-1 shadow-sm">
+        {presets.map((p) => (
+          <Button
+            key={p.label}
+            size="sm"
+            variant="ghost"
+            className="h-7 px-3 text-xs rounded-lg hover:bg-primary/10 hover:text-primary transition-colors"
+            onClick={p.apply}
+          >
+            {p.label}
+          </Button>
+        ))}
+      </div>
+
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn(
+              "justify-start text-left font-normal rounded-xl bg-background/60 backdrop-blur-sm",
+              !startDate && "text-muted-foreground"
+            )}
+          >
+            <CalendarIcon className="mr-2 h-3.5 w-3.5" />
+            {startDate ? format(startDate, "dd MMM yyyy", { locale: idLocale }) : "Dari"}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0" align="start">
+          <Calendar mode="single" selected={startDate} onSelect={setStartDate} initialFocus locale={idLocale} />
+        </PopoverContent>
+      </Popover>
+
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn(
+              "justify-start text-left font-normal rounded-xl bg-background/60 backdrop-blur-sm",
+              !endDate && "text-muted-foreground"
+            )}
+          >
+            <CalendarIcon className="mr-2 h-3.5 w-3.5" />
+            {endDate ? format(endDate, "dd MMM yyyy", { locale: idLocale }) : "Sampai"}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0" align="start">
+          <Calendar mode="single" selected={endDate} onSelect={setEndDate} initialFocus locale={idLocale} />
+        </PopoverContent>
+      </Popover>
+
+      {(startDate || endDate) && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-xl hover:bg-rose-500/10 hover:text-rose-500 transition-colors"
+          onClick={onClear}
+          title="Bersihkan filter"
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      )}
+
+      <div className="flex items-center gap-2 ml-2 pl-2 border-l border-border/60">
+        <Switch id="auto-refresh" checked={autoRefresh} onCheckedChange={setAutoRefresh} />
+        <Label
+          htmlFor="auto-refresh"
+          className="text-xs text-muted-foreground cursor-pointer flex items-center gap-1"
+        >
+          <RefreshCw
+            className={cn("h-3 w-3", autoRefresh && "animate-spin [animation-duration:3s]")}
+          />
+          Auto
+        </Label>
+      </div>
+    </div>
+  );
+});
+
+// =====================================================================
+// ★ GRADIENT DEFS REUSABLE ★
+// =====================================================================
+const ChartGradients = memo(({ idPrefix, colors }: { idPrefix: string; colors: string[] }) => (
+  <defs>
+    {colors.map((c, i) => (
+      <linearGradient key={i} id={`${idPrefix}-${i}`} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor={c} stopOpacity={0.8} />
+        <stop offset="100%" stopColor={c} stopOpacity={0.3} />
+      </linearGradient>
+    ))}
+  </defs>
+));
+ChartGradients.displayName = "ChartGradients";
+
+// =====================================================================
+// ★★★ CLASS ATTENDANCE CHART (ELEGAN, SEMUA KELAS) ★★★
+// =====================================================================
+const ClassAttendanceChart = memo(function ClassAttendanceChart({
+  attendanceByClass,
+  isLoading,
+}: {
+  attendanceByClass: any;
+  isLoading?: boolean;
+}) {
+  const chartData = useMemo(() => {
+    if (!attendanceByClass) return [];
+
+    const filled = attendanceByClass.filledClasses || [];
+    const empty = attendanceByClass.emptyClasses || [];
+
+    const allClasses = [
+      ...filled.map((c: any) => ({
+        className: c.className || c.class_name || c.name || "-",
+        attendanceRate: Number(c.attendanceRate) || 0,
+        total: Number(c.total) || 0,
+        hadir: Number(c.hadir) || 0,
+        hasData: true,
+      })),
+      ...empty.map((c: any) => ({
+        className:
+          typeof c === "string" ? c : c.className || c.class_name || c.name || "-",
+        attendanceRate: 0,
+        total: 0,
+        hadir: 0,
+        hasData: false,
+      })),
+    ];
+
+    return allClasses.sort((a, b) => {
+      if (b.attendanceRate !== a.attendanceRate) return b.attendanceRate - a.attendanceRate;
+      return a.className.localeCompare(b.className, "id", { numeric: true });
+    });
+  }, [attendanceByClass]);
+
+  const getBarColor = (rate: number, hasData: boolean) => {
+    if (!hasData) return "#94a3b8";
+    if (rate >= 90) return "#10b981";
+    if (rate >= 80) return "#3b82f6";
+    if (rate >= 70) return "#f59e0b";
+    return "#ef4444";
+  };
+
+  const getRateLabel = (rate: number, hasData: boolean) => {
+    if (!hasData) return "Belum ada data";
+    if (rate >= 90) return "Sangat Baik";
+    if (rate >= 80) return "Baik";
+    if (rate >= 70) return "Cukup";
+    return "Perlu Perhatian";
+  };
+
+  const summary = useMemo(() => {
+    const withData = chartData.filter((c) => c.hasData);
+    return [
+      { label: "Sangat Baik", range: "≥90%", color: "emerald", count: withData.filter((c) => c.attendanceRate >= 90).length },
+      { label: "Baik", range: "80-89%", color: "blue", count: withData.filter((c) => c.attendanceRate >= 80 && c.attendanceRate < 90).length },
+      { label: "Cukup", range: "70-79%", color: "amber", count: withData.filter((c) => c.attendanceRate >= 70 && c.attendanceRate < 80).length },
+      { label: "Perlu Perhatian", range: "<70%", color: "red", count: withData.filter((c) => c.attendanceRate < 70).length },
+    ];
+  }, [chartData]);
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <SectionHeader icon={BarChart3} title="Kehadiran per Kelas" description="Memuat data..." />
+        </CardHeader>
+        <CardContent>
+          <div className="h-[400px] flex items-center justify-center">
+            <div className="animate-pulse space-y-3 w-full">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <div className="h-4 w-16 bg-muted rounded" />
+                  <div className="h-6 bg-muted rounded" style={{ width: `${30 + Math.random() * 60}%` }} />
+                </div>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (chartData.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <SectionHeader
+            icon={BarChart3}
+            title="Kehadiran per Kelas"
+            description="Tingkat kehadiran setiap kelas"
+          />
+        </CardHeader>
+        <CardContent>
+          <EmptyState icon="📊" title="Belum ada data kelas" subtitle="Data akan muncul setelah ada input" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const chartHeight = Math.max(300, chartData.length * 42);
+
+  return (
+    <Card className="overflow-hidden hover:shadow-lg transition-all duration-300 border-border/60">
+      <CardHeader className="pb-3">
+        <SectionHeader
+          icon={BarChart3}
+          title="Kehadiran per Kelas"
+          description={`Tingkat kehadiran setiap kelas (${chartData.length} kelas)`}
+          accent="primary"
+        >
+          <div className="flex flex-wrap gap-2 text-xs">
+            {[
+              { c: "bg-emerald-500", l: "≥ 90%" },
+              { c: "bg-blue-500", l: "80-89%" },
+              { c: "bg-amber-500", l: "70-79%" },
+              { c: "bg-red-500", l: "< 70%" },
+              { c: "bg-slate-400", l: "No data" },
+            ].map((s) => (
+              <div key={s.l} className="flex items-center gap-1.5">
+                <span className={cn("h-2.5 w-2.5 rounded-full shadow-sm", s.c)} />
+                <span className="text-muted-foreground text-[10px] sm:text-xs">{s.l}</span>
+              </div>
+            ))}
+          </div>
+        </SectionHeader>
+      </CardHeader>
+      <CardContent>
+        <div className="w-full overflow-y-auto pr-2 custom-scrollbar" style={{ maxHeight: 500 }}>
+          <ResponsiveContainer width="100%" height={chartHeight}>
+            <BarChart
+              data={chartData}
+              layout="vertical"
+              margin={{ top: 8, right: 60, bottom: 8, left: 8 }}
+            >
+              <defs>
+                {chartData.map((entry, i) => {
+                  const base = getBarColor(entry.attendanceRate, entry.hasData);
+                  return (
+                    <linearGradient key={`grad-${i}`} id={`barGrad-${i}`} x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor={base} stopOpacity={0.5} />
+                      <stop offset="100%" stopColor={base} stopOpacity={1} />
+                    </linearGradient>
+                  );
+                })}
+              </defs>
+
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} className="stroke-muted/30" />
+              <XAxis
+                type="number"
+                domain={[0, 100]}
+                tickFormatter={(v) => `${v}%`}
+                className="text-xs"
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                dataKey="className"
+                type="category"
+                className="text-xs"
+                width={70}
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: "hsl(var(--foreground))", fontSize: 11, fontWeight: 500 }}
+              />
+
+              <Tooltip
+                cursor={{ fill: "hsl(var(--muted))", opacity: 0.3 }}
+                content={({ active, payload }) => {
+                  if (!active || !payload?.length) return null;
+                  const d = payload[0].payload;
+                  return (
+                    <div className="rounded-xl border bg-card/95 backdrop-blur px-3 py-2 shadow-xl" style={TOOLTIP_STYLE}>
+                      <p className="font-semibold text-sm mb-1">{d.className}</p>
+                      <div className="space-y-0.5">
+                        <p className="text-xs">
+                          Kehadiran:{" "}
+                          <span className="font-semibold text-primary">
+                            {d.attendanceRate.toFixed(1)}%
+                          </span>
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Hadir: {d.hadir} / {d.total}
+                        </p>
+                        <p className="text-xs font-medium mt-1" style={{ color: getBarColor(d.attendanceRate, d.hasData) }}>
+                          {getRateLabel(d.attendanceRate, d.hasData)}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                }}
+              />
+
+              <Bar dataKey="attendanceRate" radius={[0, 6, 6, 0]} animationDuration={800} animationBegin={100}>
+                {chartData.map((_, i) => (
+                  <Cell key={`cell-${i}`} fill={`url(#barGrad-${i})`} />
+                ))}
+                <LabelList
+                  dataKey="attendanceRate"
+                  position="right"
+                  formatter={(v: number) => `${v.toFixed(1)}%`}
+                  style={{ fontSize: 11, fontWeight: 600, fill: "hsl(var(--foreground))" }}
+                />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Summary */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4 pt-4 border-t border-border/60">
+          {summary.map((s) => {
+            const colorMap: Record<string, string> = {
+              emerald: "text-emerald-500 bg-emerald-500/10 border-emerald-500/20",
+              blue: "text-blue-500 bg-blue-500/10 border-blue-500/20",
+              amber: "text-amber-500 bg-amber-500/10 border-amber-500/20",
+              red: "text-red-500 bg-red-500/10 border-red-500/20",
+            };
+            return (
+              <div
+                key={s.label}
+                className={cn(
+                  "flex items-center justify-between p-2.5 rounded-xl border transition-all hover:scale-[1.02]",
+                  colorMap[s.color]
+                )}
+              >
+                <div>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground">{s.label}</p>
+                  <p className={cn("text-base sm:text-lg font-bold", colorMap[s.color].split(" ")[0])}>
+                    {s.count}
+                  </p>
+                </div>
+                <span className="text-[10px] opacity-70">{s.range}</span>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+});
+ClassAttendanceChart.displayName = "ClassAttendanceChart";
+
+
+
+// =====================================================================
+// ★ HOOK: Deteksi kelas yang BELUM mengisi absensi pada tanggal tertentu
+//   Membandingkan TOTAL KELAS vs kelas yang punya absensi di tanggal itu
+// =====================================================================
+// =====================================================================
+// ★ HOOK v4: Deteksi kelas belum mengisi absensi (STRICT YEAR FILTER)
+//   - HANYA ambil kelas dengan indikator tahun pelajaran aktif
+//   - Tampilkan nama ASLI (dengan suffix tahun) ke UI
+//   - Wali kelas: multi-strategy + debug kolom
+// =====================================================================
+function detectGrade(name: string): string {
+  const n = String(name).trim();
+  const numMatch = n.match(/^(\d{1,2})/);
+  if (numMatch) return numMatch[1];
+  const romanMatch = n.match(/^(XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I)\b/i);
+  if (romanMatch) return romanMatch[1].toUpperCase();
+  return "Lainnya";
+}
+
+function gradeOrder(g: string): number {
+  const num = parseInt(g, 10);
+  if (!isNaN(num)) return num;
+  const romanMap: Record<string, number> = {
+    I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6,
+    VII: 7, VIII: 8, IX: 9, X: 10, XI: 11, XII: 12,
+  };
+  return romanMap[g] ?? 999;
+}
+
+function cleanClassName(name: string): string {
+  return String(name).replace(/[_\s]*\d{4}\/\d{4}\s*$/, "").trim();
+}
+
+function hasYearSuffix(name: string, year: string): boolean {
+  if (!year) return false;
+  const re = new RegExp(`[\\s_]*${year.replace("/", "\\/")}\\s*$`);
+  return re.test(String(name));
+}
+
+function extractYearSuffix(name: string): string | null {
+  const m = String(name).match(/(\d{4}\/\d{4})\s*$/);
+  return m ? m[1] : null;
+}
+
+function normalizeClassName(name: string): string {
+  return String(name)
+    .replace(/[_\s]*\d{4}\/\d{4}\s*$/, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "");
+}
+
+function useActiveClassesForYear(academicYear?: string) {
+  return useQuery({
+    queryKey: ["active-classes-for-year", academicYear || ""],
+    queryFn: async () => {
+      const dbg: string[] = [];
+
+      // --- 1) Ambil semua kelas ---
+      let allClasses: any[] = [];
+      let classTable = "";
+      for (const t of ["classes", "kelas", "class", "master_classes"]) {
+        try {
+          const { data, error } = await supabase.from(t).select("*");
+          if (!error && data?.length) {
+            allClasses = data;
+            classTable = t;
+            dbg.push(`classes[${t}]=${data.length}`);
+            if (data[0]) {
+              const cols = Object.keys(data[0]);
+              dbg.push(`columns=[${cols.join(",")}]`);
+            }
+            break;
+          }
+        } catch { /* ignore */ }
+      }
+
+      // --- 2) Filter by academic year ---
+      let filtered = allClasses;
+      if (academicYear && allClasses.length) {
+        const yearCols = [
+          "academic_year", "school_year", "tahun_pelajaran",
+          "tahun_ajaran", "year", "periode", "schoolYear",
+        ];
+        let yearCol: string | null = null;
+        for (const col of yearCols) {
+          if (allClasses.some(c => c[col] != null && String(c[col]).trim())) {
+            yearCol = col; break;
+          }
+        }
+        if (yearCol) {
+          filtered = allClasses.filter(
+            c => String(c[yearCol!] || "").trim() === academicYear
+          );
+          dbg.push(`filter[${yearCol}="${academicYear}"]: ${filtered.length}/${allClasses.length}`);
+        } else {
+          const re = new RegExp(`[\\s_]*${academicYear.replace("/", "\\/")}\\s*$`);
+          const withSuffix = allClasses.filter(c =>
+            re.test(String(c.name || c.nama || c.class_name || ""))
+          );
+          if (withSuffix.length > 0) {
+            filtered = withSuffix;
+            dbg.push(`filter[name-suffix="${academicYear}"]: ${filtered.length}/${allClasses.length}`);
+          } else {
+            dbg.push(`⚠ tidak ada indikator tahun — pakai semua (${allClasses.length})`);
+          }
+        }
+      }
+
+      // --- 3) Resolve wali kelas ---
+      const teacherMap: Record<string, string> = {};
+
+      const teacherNameCols = [
+        "wali_kelas", "homeroom_teacher", "teacher_name",
+        "nama_wali_kelas", "nama_wali", "guru_name", "nama_guru",
+      ];
+      const teacherIdCols = [
+        "teacher_id", "wali_kelas_id", "homeroom_teacher_id",
+        "teacherId", "guru_id", "id_guru", "wali_id",
+        "homeroom_id", "id_wali_kelas",
+      ];
+
+      let teacherNameCol: string | null = null;
+      let teacherIdCol: string | null = null;
+
+      // Cek kolom nama dulu
+      for (const col of teacherNameCols) {
+        if (filtered.some(c => typeof c[col] === "string" && String(c[col]).trim())) {
+          teacherNameCol = col;
+          dbg.push(`wali.nama="${col}"`);
+          break;
+        }
+      }
+      // Cek kolom ID
+      if (!teacherNameCol) {
+        for (const col of teacherIdCols) {
+          if (filtered.some(c => c[col] != null)) {
+            teacherIdCol = col;
+            dbg.push(`wali.id="${col}"`);
+            break;
+          }
+        }
+      }
+
+      // Resolve ID → nama
+      if (teacherIdCol && !teacherNameCol) {
+        const ids = [
+          ...new Set(filtered.map(c => c[teacherIdCol!]).filter(Boolean).map(String))
+        ];
+        if (ids.length) {
+          const teacherTables = [
+            "teachers", "users", "profiles", "guru", "pegawai", "staff", "user_profiles",
+          ];
+          for (const t of teacherTables) {
+            try {
+              const { data } = await supabase.from(t).select("*").in("id", ids);
+              if (data?.length) {
+                for (const row of data) {
+                  const nm = row.name || row.full_name || row.nama ||
+                             row.nama_lengkap || row.display_name || row.username;
+                  if (nm) teacherMap[String(row.id)] = String(nm);
+                }
+                dbg.push(`resolved wali[${t}]=${data.length}/${ids.length}`);
+                if (Object.keys(teacherMap).length > 0) break;
+              }
+            } catch { /* ignore */ }
+          }
+        }
+      }
+
+      // --- 4) Map hasil ---
+      const result = filtered.map(c => {
+        const raw = String(c.name || c.nama || c.class_name || c.nama_kelas || "-");
+        const wali = teacherNameCol
+          ? String(c[teacherNameCol] || "").trim()
+          : teacherIdCol
+            ? teacherMap[String(c[teacherIdCol])] || ""
+            : "";
+        return {
+          id: c.id,
+          displayName: raw,
+          normalized: normalizeClassName(raw),
+          grade: detectGrade(raw),
+          waliKelas: wali,
+        };
+      }).sort((a, b) =>
+        a.displayName.localeCompare(b.displayName, "id", { numeric: true })
+      );
+
+      // eslint-disable-next-line no-console
+      console.log("[useActiveClassesForYear]", {
+        academicYear,
+        totalAll: allClasses.length,
+        filtered: result.length,
+        waliFound: result.filter(c => c.waliKelas).length,
+        sample: result.slice(0, 5).map(c => ({
+          name: c.displayName, wali: c.waliKelas || "(kosong)"
+        })),
+        debug: dbg,
+      });
+
+      return { classes: result, debug: dbg, totalAll: allClasses.length };
+    },
+    staleTime: 60_000,
+  });
+}
+
+// Helper: cari wali kelas dari beberapa sumber
+function _resolveWali(
+  cls: { waliKelas?: string; normName: string; displayName?: string },
+  waliByClass?: Record<string, string>
+): string {
+  // 1) dari cls.waliKelas (dari query classes)
+  if (cls.waliKelas && cls.waliKelas.trim()) return cls.waliKelas.trim();
+
+  // 2) dari map waliByClass (dari rekap rombel)
+  if (waliByClass) {
+    const key = cls.normName;
+    if (waliByClass[key]) return waliByClass[key];
+    // Fallback tanpa normalisasi
+    const alt = String(cls.displayName || "").toLowerCase().replace(/\s+/g, "");
+    if (waliByClass[alt]) return waliByClass[alt];
+  }
+
+  return "";
+}
+
+const UnfilledClassesCard = memo(function UnfilledClassesCard({
+  academicYear,
+  attendanceByClass,
+  waliByClass,
+}: {
+  academicYear?: string;
+  attendanceByClass: any;
+  waliByClass?: Record<string, string>;
+}) {
+  const { data, isLoading } = useActiveClassesForYear(academicYear);
+
+  const allClasses = data?.classes || [];
+
+  // Set normalized names untuk perbandingan cepat
+  const filledSet = useMemo(() => {
+    return new Set((undefined || []).map(normalizeClassName));
+  }, [undefined]);
+
+  const unfilled = useMemo(() => {
+    return allClasses.filter(c => !filledSet.has(c.normalized));
+  }, [allClasses, filledSet]);
+
+  const total = allClasses.length;
+  const filled = total - unfilled.length;
+
+  const grouped = useMemo(() => {
+    const g: Record<string, typeof unfilled> = {};
+    unfilled.forEach(c => {
+      if (!g[c.grade]) g[c.grade] = [];
+      g[c.grade].push(c);
+    });
+    return g;
+  }, [unfilled]);
+
+  const sortedGrades = Object.keys(grouped).sort(
+    (a, b) => gradeOrder(a) - gradeOrder(b)
+  );
+
+  // ---- Loading ----
+  if (isLoading) {
+    return (
+      <Card className="border-border/60">
+        <CardHeader className="pb-3">
+          <SectionHeader
+            icon={FileWarning}
+            title="Kelas Belum Mengisi Absensi"
+            description="Memuat data..."
+            accent="amber"
+          />
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+            {Array.from({ length: 9 }).map((_, i) => (
+              <div key={i} className="h-14 rounded-lg bg-muted/50 animate-pulse" />
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (total === 0) {
+    return (
+      <Card className="border-border/60">
+        <CardHeader className="pb-3">
+          <SectionHeader
+            icon={FileWarning}
+            title="Kelas Belum Mengisi Absensi"
+            description="Data kelas tidak ditemukan"
+            accent="amber"
+          />
+        </CardHeader>
+        <CardContent>
+          <EmptyState
+            icon="🗂️"
+            title="Tidak ada kelas aktif"
+            subtitle={`Belum ada kelas untuk TP ${academicYear || "-"}`}
+          />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (unfilled.length === 0) {
+    return (
+      <Card className="border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 to-transparent">
+        <CardHeader className="pb-3">
+          <SectionHeader
+            icon={CheckCircle2}
+            title="Kelas Belum Mengisi Absensi"
+            description={`Semua ${total} kelas sudah mengisi${academicYear ? ` · TP ${academicYear}` : ""}`}
+            accent="emerald"
+          />
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+            <div className="h-12 w-12 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0">
+              <CheckCircle2 className="h-6 w-6 text-emerald-500" />
+            </div>
+            <div>
+              <p className="font-medium text-sm text-emerald-600 dark:text-emerald-400">
+                Luar biasa! 🎉
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {filled} dari {total} kelas sudah mengisi absensi
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="border-amber-500/30 bg-gradient-to-br from-amber-500/5 via-transparent to-transparent hover:shadow-lg transition-all duration-300 overflow-hidden">
+      <div className="h-1 w-full bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500" />
+
+      <CardHeader className="pb-3">
+        <SectionHeader
+          icon={FileWarning}
+          title="Kelas Belum Mengisi Absensi"
+          description={`${unfilled.length} dari ${total} kelas belum mengisi pada periode ini${academicYear ? ` · TP ${academicYear}` : ""}`}
+          accent="amber"
+        >
+          <div className="flex items-center gap-2 flex-wrap">
+            {academicYear && (
+              <Badge
+                variant="outline"
+                className="text-xs border-violet-500/40 text-violet-600 dark:text-violet-400 bg-violet-500/10 gap-1"
+              >
+                📅 {academicYear}
+              </Badge>
+            )}
+            <Badge
+              variant="outline"
+              className="text-xs border-emerald-500/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 gap-1"
+            >
+              <CheckCircle2 className="h-3 w-3" />
+              {filled} sudah
+            </Badge>
+            <Badge
+              variant="outline"
+              className="text-xs border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10 gap-1 animate-pulse"
+            >
+              <Clock className="h-3 w-3" />
+              {unfilled.length} belum
+            </Badge>
+          </div>
+        </SectionHeader>
+      </CardHeader>
+
+      <CardContent className="space-y-5">
+        {sortedGrades.map(grade => (
+          <div key={grade} className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Kelas {grade}
+              </span>
+              <span className="text-[10px] text-muted-foreground/70 bg-muted/60 px-1.5 py-0.5 rounded-full">
+                {grouped[grade].length}
+              </span>
+              <div className="flex-1 h-px bg-border/60" />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+              <AnimatePresence mode="popLayout">
+                {grouped[grade].map((cls, i) => (
+                  <motion.div
+                    key={cls.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    transition={{ delay: i * 0.02 }}
+                    whileHover={{ scale: 1.02, y: -2 }}
+                    className={cn(
+                      "group/chip relative flex items-start gap-2 px-3 py-2 rounded-xl",
+                      "bg-gradient-to-br from-amber-500/10 to-orange-500/5",
+                      "border border-amber-500/30 hover:border-amber-500/60",
+                      "shadow-sm hover:shadow-md transition-all cursor-default"
+                    )}
+                  >
+                    <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                    <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className="text-xs font-bold text-amber-700 dark:text-amber-300 truncate"
+                          title={cls.displayName}
+                        >
+                          {cls.displayName}
+                        </span>
+                        <Clock className="h-3 w-3 text-amber-500 opacity-60 group-hover/chip:opacity-100 transition-opacity shrink-0" />
+                      </div>
+                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <UserRound className="h-2.5 w-2.5 shrink-0" />
+                        {_resolveWali(cls, waliByClass) ? (
+                          <span className="truncate" title={_resolveWali(cls, waliByClass) || ""}>
+                            {_resolveWali(cls, waliByClass)}
+                          </span>
+                        ) : (
+                          <span className="italic opacity-50">Wali: -</span>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+          </div>
+        ))}
+
+        <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-500/5 border border-amber-500/20 mt-2">
+          <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+          <p className="text-[11px] sm:text-xs text-muted-foreground leading-relaxed">
+            Mohon ingatkan <b>wali kelas</b> yang tercantum untuk segera mengisi
+            absensi agar rekap kehadiran tetap akurat.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+});
+UnfilledClassesCard.displayName = "UnfilledClassesCard";
+
+
+
+
+
+
+// =====================================================================
+// ★★★ ELEGANT ATTENDANCE TREND (AREA) ★★★
+// =====================================================================
+const ElegantAttendanceTrend = memo(function ElegantAttendanceTrend({ data }: { data: any[] }) {
+  const chartData = useMemo(() => {
+    if (!data || data.length === 0) return [];
+    return data.map((d: any) => ({
+      date: d.date || d.tanggal || d.day,
+      hadir: Number(d.hadir) || 0,
+      izin: Number(d.izin) || 0,
+      sakit: Number(d.sakit) || 0,
+      alpa: Number(d.alpa) || 0,
+      terlambat: Number(d.terlambat) || 0,
+      total: Number(d.total) || 0,
+    }));
+  }, [data]);
+
+  if (chartData.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <SectionHeader
+            icon={Sparkles}
+            title="Tren Kehadiran Harian"
+            description="Belum ada data tren"
+            accent="violet"
+          />
+        </CardHeader>
+        <CardContent>
+          <EmptyState icon="📈" title="Belum ada data tren" subtitle="Pilih periode dengan data" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="hover:shadow-lg transition-all duration-300 border-border/60 overflow-hidden">
+      <CardHeader className="pb-3">
+        <SectionHeader
+          icon={Sparkles}
+          title="Tren Kehadiran Harian"
+          description="Perkembangan kehadiran dari waktu ke waktu"
+          accent="violet"
+        />
+      </CardHeader>
+      <CardContent>
+        <ResponsiveContainer width="100%" height={320}>
+          <AreaChart data={chartData} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
+            <defs>
+              <linearGradient id="gradHadir" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#10b981" stopOpacity={0.7} />
+                <stop offset="100%" stopColor="#10b981" stopOpacity={0.02} />
+              </linearGradient>
+              <linearGradient id="gradTerlambat" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.6} />
+                <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.02} />
+              </linearGradient>
+              <filter id="glowLine" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" vertical={false} />
+            <XAxis dataKey="date" className="text-xs" axisLine={false} tickLine={false} />
+            <YAxis className="text-xs" axisLine={false} tickLine={false} />
+            <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ stroke: "hsl(var(--primary))", strokeWidth: 1, strokeDasharray: "4 4" }} />
+            <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" />
+            <Area
+              type="monotone"
+              dataKey="hadir"
+              name="Hadir"
+              stroke="#10b981"
+              strokeWidth={2.5}
+              fill="url(#gradHadir)"
+              animationDuration={900}
+              filter="url(#glowLine)"
+            />
+            <Area
+              type="monotone"
+              dataKey="terlambat"
+              name="Terlambat"
+              stroke="#f59e0b"
+              strokeWidth={2.5}
+              fill="url(#gradTerlambat)"
+              animationDuration={900}
+              filter="url(#glowLine)"
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+});
+ElegantAttendanceTrend.displayName = "ElegantAttendanceTrend";
+
+// =====================================================================
+// ★ VIOLATIONS PIE CHART ★
+// =====================================================================
+const ViolationsChart = memo(function ViolationsChart({
+  data,
+}: {
+  data: { name: string; value: number }[];
+}) {
+  if (!data || data.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <SectionHeader
+            icon={AlertTriangle}
+            title="Pelanggaran per Kategori"
+            description="Distribusi jenis pelanggaran"
+            accent="red"
+          />
+        </CardHeader>
+        <CardContent>
+          <EmptyState icon="🎉" title="Tidak ada pelanggaran" subtitle="Pertahankan kondisi ini!" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const total = data.reduce((s, d) => s + d.value, 0);
+
+  return (
+    <Card className="hover:shadow-lg transition-all duration-300 border-border/60">
+      <CardHeader className="pb-3">
+        <SectionHeader
+          icon={AlertTriangle}
+          title="Pelanggaran per Kategori"
+          description={`Total ${total} kejadian`}
+          accent="red"
+        />
+      </CardHeader>
+      <CardContent>
+        <ResponsiveContainer width="100%" height={300}>
+          <PieChart>
+            <defs>
+              {data.map((_, i) => (
+                <linearGradient key={i} id={`pieGrad-${i}`} x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stopColor={COLORS[i % COLORS.length]} stopOpacity={1} />
+                  <stop offset="100%" stopColor={COLORS[i % COLORS.length]} stopOpacity={0.6} />
+                </linearGradient>
+              ))}
+            </defs>
+            <Pie
+              data={data}
+              cx="50%"
+              cy="50%"
+              innerRadius={60}
+              outerRadius={90}
+              paddingAngle={5}
+              dataKey="value"
+              nameKey="name"
+              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+              labelLine={false}
+              animationDuration={800}
+              stroke="hsl(var(--background))"
+              strokeWidth={2}
+            >
+              {data.map((_, i) => (
+                <Cell key={i} fill={`url(#pieGrad-${i})`} />
+              ))}
+            </Pie>
+            <Tooltip
+              contentStyle={TOOLTIP_STYLE}
+              formatter={(v: number) => [`${v} kejadian`, "Jumlah"]}
+            />
+            <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" />
+          </PieChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+});
+
+// =====================================================================
+// ★ ACHIEVEMENTS BAR CHARTS ★
+// =====================================================================
+const AchievementsCharts = memo(function AchievementsCharts({
+  byType,
+  byLevel,
+}: {
+  byType: { name: string; value: number }[];
+  byLevel: { name: string; value: number }[];
+}) {
+  return (
+    <>
+      <Card className="hover:shadow-lg transition-all duration-300 border-border/60">
+        <CardHeader className="pb-3">
+          <SectionHeader
+            icon={Award}
+            title="Prestasi per Jenis"
+            description="Distribusi jenis prestasi"
+            accent="amber"
+          />
+        </CardHeader>
+        <CardContent>
+          {byType.length === 0 ? (
+            <EmptyState icon="🏆" title="Belum ada data prestasi" subtitle="Data akan muncul setelah input" />
+          ) : (
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={byType} layout="vertical">
+                <defs>
+                  <linearGradient id="gradAmber" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.5} />
+                    <stop offset="100%" stopColor="#f59e0b" stopOpacity={1} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" horizontal={false} />
+                <XAxis type="number" className="text-xs" axisLine={false} tickLine={false} />
+                <YAxis
+                  dataKey="name"
+                  type="category"
+                  className="text-xs"
+                  width={100}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: "hsl(var(--muted))", opacity: 0.3 }} />
+                <Bar dataKey="value" name="Jumlah" fill="url(#gradAmber)" radius={[0, 6, 6, 0]} animationDuration={800}>
+                  <LabelList
+                    dataKey="value"
+                    position="right"
+                    style={{ fontSize: 11, fontWeight: 600, fill: "hsl(var(--foreground))" }}
+                  />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="hover:shadow-lg transition-all duration-300 border-border/60">
+        <CardHeader className="pb-3">
+          <SectionHeader
+            icon={Award}
+            title="Prestasi per Tingkat"
+            description="Distribusi tingkat prestasi"
+            accent="violet"
+          />
+        </CardHeader>
+        <CardContent>
+          {byLevel.length === 0 ? (
+            <EmptyState icon="🏆" title="Belum ada data tingkat" subtitle="Data akan muncul setelah input" />
+          ) : (
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={byLevel} layout="vertical">
+                <defs>
+                  <linearGradient id="gradIndigo" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#6366f1" stopOpacity={0.5} />
+                    <stop offset="100%" stopColor="#6366f1" stopOpacity={1} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" horizontal={false} />
+                <XAxis type="number" className="text-xs" axisLine={false} tickLine={false} />
+                <YAxis
+                  dataKey="name"
+                  type="category"
+                  className="text-xs"
+                  width={100}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: "hsl(var(--muted))", opacity: 0.3 }} />
+                <Bar dataKey="value" name="Jumlah" fill="url(#gradIndigo)" radius={[0, 6, 6, 0]} animationDuration={800}>
+                  <LabelList
+                    dataKey="value"
+                    position="right"
+                    style={{ fontSize: 11, fontWeight: 600, fill: "hsl(var(--foreground))" }}
+                  />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
+    </>
+  );
+});
+
+// =====================================================================
+// ★ RECENT ACTIVITY ★
+// =====================================================================
+const RecentActivity = memo(function RecentActivity({
+  violations,
+  achievements,
+}: {
+  violations: any[];
+  achievements: any[];
+}) {
+  const [searchV, setSearchV] = useState("");
+  const [searchA, setSearchA] = useState("");
+  const [showAllV, setShowAllV] = useState(false);
+  const [showAllA, setShowAllA] = useState(false);
+
+  const filteredV = useMemo(() => {
+    const q = searchV.toLowerCase();
+    return violations.filter(
+      (v) =>
+        !q ||
+        v.students?.full_name?.toLowerCase().includes(q) ||
+        v.violation_types?.name?.toLowerCase().includes(q)
+    );
+  }, [violations, searchV]);
+
+  const filteredA = useMemo(() => {
+    const q = searchA.toLowerCase();
+    return achievements.filter(
+      (a) =>
+        !q ||
+        a.students?.full_name?.toLowerCase().includes(q) ||
+        a.achievement_name?.toLowerCase().includes(q)
+    );
+  }, [achievements, searchA]);
+
+  const visibleV = showAllV ? filteredV : filteredV.slice(0, VISIBLE_LIMIT);
+  const visibleA = showAllA ? filteredA : filteredA.slice(0, VISIBLE_LIMIT);
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      {/* Violations */}
+      <Card className="hover:shadow-lg transition-all duration-300 border-border/60">
+        <CardHeader className="pb-3">
+          <SectionHeader
+            icon={AlertTriangle}
+            title="Pelanggaran Terbaru"
+            description={`${filteredV.length} data ditemukan`}
+            accent="red"
+          />
+          {violations.length > VISIBLE_LIMIT && (
+            <div className="relative mt-3">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Cari siswa atau jenis..."
+                value={searchV}
+                onChange={(e) => setSearchV(e.target.value)}
+                className="h-9 pl-9 text-xs rounded-xl bg-muted/40 border-border/60"
+              />
+            </div>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <AnimatePresence mode="popLayout">
+            {visibleV.length === 0 ? (
+              <EmptyState icon="🎉" title="Tidak ada pelanggaran" subtitle="Pertahankan!" />
+            ) : (
+              visibleV.map((v: any) => (
+                <motion.div
+                  key={v.id}
+                  layout
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  whileHover={{ x: 4 }}
+                  className="group flex items-start justify-between p-3 rounded-xl bg-gradient-to-r from-muted/50 to-muted/20 hover:from-rose-500/5 hover:to-rose-500/10 border border-transparent hover:border-rose-500/20 transition-all"
+                >
+                  <div className="space-y-1 min-w-0 flex-1">
+                    <p className="font-medium text-sm truncate">{v.students?.full_name || "-"}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {v.violation_types?.name || "-"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {v.violation_date
+                        ? format(new Date(v.violation_date), "dd MMM yyyy", { locale: idLocale })
+                        : "-"}
+                    </p>
+                  </div>
+                  <Badge
+                    variant="destructive"
+                    className="text-xs shrink-0 ml-2 shadow-sm group-hover:scale-105 transition-transform"
+                  >
+                    {v.points} poin
+                  </Badge>
+                </motion.div>
+              ))
+            )}
+          </AnimatePresence>
+          {filteredV.length > VISIBLE_LIMIT && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full text-xs rounded-xl hover:bg-primary/10"
+              onClick={() => setShowAllV((s) => !s)}
+            >
+              {showAllV ? "Tampilkan lebih sedikit" : `Lihat semua (${filteredV.length})`}
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Achievements */}
+      <Card className="hover:shadow-lg transition-all duration-300 border-border/60">
+        <CardHeader className="pb-3">
+          <SectionHeader
+            icon={Award}
+            title="Prestasi Terbaru"
+            description={`${filteredA.length} data ditemukan`}
+            accent="amber"
+          />
+          {achievements.length > VISIBLE_LIMIT && (
+            <div className="relative mt-3">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Cari siswa atau prestasi..."
+                value={searchA}
+                onChange={(e) => setSearchA(e.target.value)}
+                className="h-9 pl-9 text-xs rounded-xl bg-muted/40 border-border/60"
+              />
+            </div>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <AnimatePresence mode="popLayout">
+            {visibleA.length === 0 ? (
+              <EmptyState icon="🏆" title="Belum ada prestasi" subtitle="Data akan muncul setelah input" />
+            ) : (
+              visibleA.map((a: any) => (
+                <motion.div
+                  key={a.id}
+                  layout
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  whileHover={{ x: 4 }}
+                  className="group flex items-start justify-between p-3 rounded-xl bg-gradient-to-r from-muted/50 to-muted/20 hover:from-amber-500/5 hover:to-amber-500/10 border border-transparent hover:border-amber-500/20 transition-all"
+                >
+                  <div className="space-y-1 min-w-0 flex-1">
+                    <p className="font-medium text-sm truncate">{a.students?.full_name || "-"}</p>
+                    <p className="text-xs text-muted-foreground truncate">{a.achievement_name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {a.achievement_date
+                        ? format(new Date(a.achievement_date), "dd MMM yyyy", { locale: idLocale })
+                        : "-"}
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1 items-end shrink-0 ml-2">
+                    <Badge variant="outline" className="text-xs group-hover:scale-105 transition-transform">
+                      {a.achievement_type}
+                    </Badge>
+                    <Badge variant="secondary" className="text-xs group-hover:scale-105 transition-transform">
+                      {a.level}
+                    </Badge>
+                  </div>
+                </motion.div>
+              ))
+            )}
+          </AnimatePresence>
+          {filteredA.length > VISIBLE_LIMIT && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full text-xs rounded-xl hover:bg-primary/10"
+              onClick={() => setShowAllA((s) => !s)}
+            >
+              {showAllA ? "Tampilkan lebih sedikit" : `Lihat semua (${filteredA.length})`}
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+});
+
+// =====================================================================
+// MAIN COMPONENT
+// =====================================================================
+export default function KesiswaanDashboard() {
+  const { selectedYear, selectedSemester } = useAcademicYear();
+
+  const [selectedStudent, setSelectedStudent] = useState<any>(null);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(false);
+
+  // Satu sumber kebenaran untuk filter
+  const { startDate, endDate, setStartDate, setEndDate, setPeriod, getPeriodLabel } =
+    useDateRangeFilter();
+
+  const { data: attendanceRecap } = useAttendanceRecap(startDate, endDate, selectedYear, selectedSemester);
+  const { data: attendanceByClass, isLoading: isLoadingClass } = useAttendanceByClass(
+    startDate,
+    endDate,
+    "kesiswaan",
+    selectedYear,
+    selectedSemester
+  );
+  const { data: dailyAttendanceTrend } = useDailyAttendanceTrend(startDate, endDate, "kesiswaan");
+  const { data: lateStudents } = useLateStudents(startDate, endDate, "kesiswaan");
+  const { data: lateViolationsTrend } = useLateViolationsTrend(startDate, endDate, "kesiswaan");
+  const { data: studentViolationDetails } = useStudentViolationDetails(selectedStudent, startDate, endDate);
+
+  const { data: stats, isLoading, refetch } = useKesiswaanStats(startDate, endDate);
+
+  const { handleExportPDF, handleExportExcel } = useDashboardExport(startDate, endDate, attendanceRecap);
+  const { data: genderStats } = useStudentGenderStats(selectedYear, "kesiswaan");
+
+  useAutoRefresh(autoRefresh, refetch, 60_000);
+
+  const attendancePercent = useMemo(
+    () =>
+      attendanceRecap?.total
+        ? Math.round((attendanceRecap.hadir / attendanceRecap.total) * 100)
+        : 0,
+    [attendanceRecap]
+  );
+
+    // ★ Map wali kelas dari rekap rombel (genderStats.byClass)
+  const waliByClass = useMemo(() => {
+    const map: Record<string, string> = {};
+    const list = (genderStats as any)?.byClass || [];
+    list.forEach((c: any) => {
+      const name = String(
+        c.className || c.class_name || c.nama_kelas ||
+        c.name || c.kelas || c.nama || ""
+      );
+      const wali = String(
+        c.waliKelas || c.wali_kelas || c.teacherName || c.teacher_name ||
+        c.nama_wali_kelas || c.nama_wali || c.wali || c.homeroom_teacher || ""
+      ).trim();
+      if (name && wali) {
+        map[_normName(name)] = wali;
+      }
+    });
+    // eslint-disable-next-line no-console
+    console.log("[waliByClass] built from genderStats.byClass", {
+      totalClasses: list.length,
+      withWali: Object.keys(map).length,
+      map,
+    });
+    return map;
+  }, [genderStats]);
+
+const handleStudentClick = useCallback((student: any) => {
+    setSelectedStudent(student);
+    setIsDetailModalOpen(true);
+  }, []);
+
+  const clearFilter = useCallback(() => {
+    setStartDate(undefined);
+    setEndDate(undefined);
+  }, [setStartDate, setEndDate]);
+
+  return (
+    <ProtectedRoute allowedRoles={["kesiswaan", "admin"]}>
+      <DashboardLayout>
+        <AnimatedBackground />
+
+        <div className="relative z-10 space-y-6">
+          {/* Header + Filter */}
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight bg-gradient-to-br from-foreground to-foreground/60 bg-clip-text">
+                Dashboard Kesiswaan
+              </h1>
+              <p className="text-muted-foreground text-sm mt-1">
+                Ringkasan data kesiswaan, absensi, dan pelanggaran
+              </p>
+            </div>
+
+            <UnifiedDateFilter
+              startDate={startDate}
+              endDate={endDate}
+              setStartDate={setStartDate}
+              setEndDate={setEndDate}
+              autoRefresh={autoRefresh}
+              setAutoRefresh={setAutoRefresh}
+              onClear={clearFilter}
+            />
+          </div>
+
+          {/* Stats Cards */}
+          <KesiswaanStatsCards
+            loading={isLoading}
+            studentCount={stats?.studentCount || 0}
+            attendancePercent={attendancePercent}
+            attendancePresent={attendanceRecap?.hadir || 0}
+            attendanceTotal={attendanceRecap?.total || 0}
+            totalViolations={stats?.totalViolations || 0}
+            totalPoints={stats?.totalPoints || 0}
+            totalAchievements={stats?.totalAchievements || 0}
+          />
+
+          {/* Gender Stats */}
+          {genderStats && (
+            <StudentGenderStatsCard
+              totalMale={genderStats.totalMale}
+              totalFemale={genderStats.totalFemale}
+              totalStudents={genderStats.totalStudents}
+              byClass={genderStats.byClass}
+              byGrade={genderStats.byGrade}
+            />
+          )}
+
+          {/* Rekap Kehadiran */}
+          <DashboardAttendanceRecap
+            startDate={startDate}
+            endDate={endDate}
+            setStartDate={setStartDate}
+            setEndDate={setEndDate}
+            setPeriod={setPeriod}
+            attendanceRecap={attendanceRecap}
+            onExportPDF={handleExportPDF}
+            onExportExcel={handleExportExcel}
+          />
+
+          {/* ★ Kehadiran per Kelas (pengganti DashboardAttendanceCharts) */}
+          <ClassAttendanceChart attendanceByClass={attendanceByClass} isLoading={isLoadingClass} />
+
+          {/* ★ Kelas Belum Mengisi Absensi */}
+          <UnfilledClassesCard
+            academicYear={selectedYear}
+            attendanceByClass={attendanceByClass}
+            waliByClass={waliByClass}
+          />
+
+          {/* ★ Tren Kehadiran Harian (elegant area chart) */}
+          <ElegantAttendanceTrend data={dailyAttendanceTrend || []} />
+
+          {/* Late Students (existing component) */}
+          <Suspense fallback={<WaterLoaderCard className="min-h-[400px]" />}>
+            <DashboardLateStudents
+              lateStudents={lateStudents || []}
+              lateViolationsTrend={lateViolationsTrend || []}
+              getPeriodLabel={getPeriodLabel}
+              onStudentClick={handleStudentClick}
+            />
+          </Suspense>
+
+          {/* Violations & Achievements */}
+          <div className="grid gap-4 md:grid-cols-2">
+            <ViolationsChart data={stats?.violationsByCategory || []} />
+            <AchievementsCharts
+              byType={stats?.achievementsByType || []}
+              byLevel={stats?.achievementsByLevel || []}
+            />
+          </div>
+
+          {/* Recent Activity */}
+          <RecentActivity
+            violations={stats?.recentViolations || []}
+            achievements={stats?.recentAchievements || []}
+          />
+        </div>
+
+        {/* Modal */}
+        <Suspense fallback={null}>
+          <StudentViolationModal
+            isOpen={isDetailModalOpen}
+            onClose={() => setIsDetailModalOpen(false)}
+            selectedStudent={selectedStudent}
+            violationDetails={studentViolationDetails || []}
+            getPeriodLabel={getPeriodLabel}
+          />
+        </Suspense>
+      </DashboardLayout>
+    </ProtectedRoute>
+  );
+}

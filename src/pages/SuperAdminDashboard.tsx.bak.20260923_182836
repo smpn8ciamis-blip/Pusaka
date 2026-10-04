@@ -1,0 +1,504 @@
+import { useState } from 'react';
+import { DashboardLayout } from '@/components/DashboardLayout';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+import { School, Plus, Users, UserCircle, MapPin, Phone, Mail, Building2, BarChart3, CreditCard, Calendar, Shield, Edit2, CheckCircle, XCircle, AlertTriangle, Check, Package, ShieldCheck, Clock } from 'lucide-react';
+import { format, addMonths } from 'date-fns';
+import { id as localeId } from 'date-fns/locale';
+import UserManagementTab from '@/components/super-admin/UserManagementTab';
+import SchoolEditDialog from '@/components/super-admin/SchoolEditDialog';
+import PlanManagementTab from '@/components/super-admin/PlanManagementTab';
+import SchoolApprovalTab from '@/components/super-admin/SchoolApprovalTab';
+import { FEATURE_LABELS, formatRupiah, type FeatureKey } from '@/config/subscriptionPlans';
+import { useSubscriptionPlans } from '@/hooks/useSubscriptionPlans';
+
+export default function SuperAdminDashboard() {
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
+  const [isEditSchoolOpen, setIsEditSchoolOpen] = useState(false);
+  const [selectedSchool, setSelectedSchool] = useState<any>(null);
+  const [newSchool, setNewSchool] = useState({ name: '', address: '', phone: '', email: '', npsn: '' });
+  const [subscriptionForm, setSubscriptionForm] = useState({
+    plan_name: 'starter',
+    status: 'active',
+    end_date: '',
+    max_students: 100,
+    max_teachers: 20,
+    notes: '',
+  });
+  const queryClient = useQueryClient();
+  const { planPresetsMap, activePlans } = useSubscriptionPlans();
+
+  const { data: schools, isLoading } = useQuery({
+    queryKey: ['all-schools'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('schools')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const { data: schoolStats } = useQuery({
+    queryKey: ['school-stats-global'],
+    queryFn: async () => {
+      const { count: totalStudents } = await supabase.from('students').select('*', { count: 'exact', head: true });
+      const { count: totalTeachers } = await supabase.from('teachers').select('*', { count: 'exact', head: true });
+      const { count: totalSchools } = await supabase.from('schools').select('*', { count: 'exact', head: true });
+      return { totalStudents: totalStudents || 0, totalTeachers: totalTeachers || 0, totalSchools: totalSchools || 0 };
+    },
+  });
+
+  const { data: subscriptions } = useQuery({
+    queryKey: ['all-subscriptions'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('school_subscriptions').select('*');
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const pendingCount = schools?.filter((s: any) => s.approval_status === 'pending').length || 0;
+
+  const createSchoolMutation = useMutation({
+    mutationFn: async (school: typeof newSchool) => {
+      const { data, error } = await supabase
+        .from('schools')
+        .insert([{ name: school.name, address: school.address, phone: school.phone, email: school.email, npsn: school.npsn, approval_status: 'approved' }])
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      toast.success('Sekolah berhasil ditambahkan!');
+      queryClient.invalidateQueries({ queryKey: ['all-schools'] });
+      queryClient.invalidateQueries({ queryKey: ['school-stats-global'] });
+      setIsCreateOpen(false);
+      setNewSchool({ name: '', address: '', phone: '', email: '', npsn: '' });
+    },
+    onError: (error: any) => toast.error('Gagal menambahkan sekolah: ' + error.message),
+  });
+
+  const upsertSubscriptionMutation = useMutation({
+    mutationFn: async ({ schoolId, form }: { schoolId: string; form: typeof subscriptionForm }) => {
+      const existing = subscriptions?.find((s: any) => s.school_id === schoolId);
+      const preset = planPresetsMap[form.plan_name];
+      const payload = {
+        school_id: schoolId,
+        plan_name: form.plan_name,
+        status: form.status,
+        end_date: form.end_date || null,
+        max_students: form.max_students,
+        max_teachers: form.max_teachers,
+        notes: form.notes || null,
+        monthly_price: preset?.monthly_price || 0,
+        allowed_features: preset?.features || [],
+      };
+      if (existing) {
+        const { error } = await supabase.from('school_subscriptions').update(payload).eq('id', existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('school_subscriptions').insert([payload]);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      toast.success('Langganan berhasil diperbarui!');
+      queryClient.invalidateQueries({ queryKey: ['all-subscriptions'] });
+      setIsSubscriptionOpen(false);
+      setSelectedSchool(null);
+    },
+    onError: (error: any) => toast.error('Gagal memperbarui langganan: ' + error.message),
+  });
+
+  const getSubscription = (schoolId: string) => subscriptions?.find((s: any) => s.school_id === schoolId);
+
+  const getStatusBadge = (sub: any) => {
+    if (!sub) return <Badge variant="outline" className="text-muted-foreground">Belum diatur</Badge>;
+    const isExpired = sub.end_date && new Date(sub.end_date) < new Date();
+    if (sub.status === 'suspended') return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" />Suspended</Badge>;
+    if (isExpired || sub.status === 'expired') return <Badge variant="destructive" className="bg-amber-500"><AlertTriangle className="h-3 w-3 mr-1" />Expired</Badge>;
+    return <Badge className="bg-emerald-500"><CheckCircle className="h-3 w-3 mr-1" />Aktif</Badge>;
+  };
+
+  const openSubscriptionDialog = (school: any) => {
+    setSelectedSchool(school);
+    const sub = getSubscription(school.id);
+    setSubscriptionForm({
+      plan_name: sub?.plan_name || 'starter',
+      status: sub?.status || 'active',
+      end_date: sub?.end_date || '',
+      max_students: sub?.max_students || 100,
+      max_teachers: sub?.max_teachers || 20,
+      notes: sub?.notes || '',
+    });
+    setIsSubscriptionOpen(true);
+  };
+
+  const activeCount = subscriptions?.filter((s: any) => s.status === 'active' && (!s.end_date || new Date(s.end_date) >= new Date())).length || 0;
+  const expiredCount = subscriptions?.filter((s: any) => s.status === 'expired' || (s.end_date && new Date(s.end_date) < new Date())).length || 0;
+
+  return (
+    <DashboardLayout>
+      <div className="space-y-6 animate-fade-in">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold flex items-center gap-2">
+              <Building2 className="h-8 w-8 text-primary" />
+              Dashboard Super Admin
+            </h1>
+            <p className="text-muted-foreground mt-1">Kelola semua sekolah dan langganan dalam sistem</p>
+          </div>
+          <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+            <DialogTrigger asChild>
+              <Button className="gap-2"><Plus className="h-4 w-4" />Tambah Sekolah</Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Tambah Sekolah Baru</DialogTitle>
+                <DialogDescription>Isi data sekolah yang akan didaftarkan ke sistem</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div><Label>Nama Sekolah *</Label><Input value={newSchool.name} onChange={(e) => setNewSchool(s => ({ ...s, name: e.target.value }))} placeholder="SDN 1 Contoh" /></div>
+                <div><Label>NPSN</Label><Input value={newSchool.npsn} onChange={(e) => setNewSchool(s => ({ ...s, npsn: e.target.value }))} placeholder="12345678" /></div>
+                <div><Label>Alamat</Label><Input value={newSchool.address} onChange={(e) => setNewSchool(s => ({ ...s, address: e.target.value }))} placeholder="Jl. Pendidikan No. 1" /></div>
+                <div><Label>Telepon</Label><Input value={newSchool.phone} onChange={(e) => setNewSchool(s => ({ ...s, phone: e.target.value }))} placeholder="021-1234567" /></div>
+                <div><Label>Email</Label><Input value={newSchool.email} onChange={(e) => setNewSchool(s => ({ ...s, email: e.target.value }))} placeholder="info@sekolah.sch.id" type="email" /></div>
+                <Button onClick={() => createSchoolMutation.mutate(newSchool)} disabled={!newSchool.name || createSchoolMutation.isPending} className="w-full">
+                  {createSchoolMutation.isPending ? 'Menyimpan...' : 'Simpan Sekolah'}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
+
+        {/* Global Stats */}
+        <div className="grid gap-4 md:grid-cols-6">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Total Sekolah</CardTitle>
+              <School className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent><div className="text-2xl font-bold">{schoolStats?.totalSchools ?? 0}</div></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Total Siswa</CardTitle>
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent><div className="text-2xl font-bold">{schoolStats?.totalStudents ?? 0}</div></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Total Guru</CardTitle>
+              <UserCircle className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent><div className="text-2xl font-bold">{schoolStats?.totalTeachers ?? 0}</div></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Langganan Aktif</CardTitle>
+              <CheckCircle className="h-4 w-4 text-emerald-500" />
+            </CardHeader>
+            <CardContent><div className="text-2xl font-bold text-emerald-600">{activeCount}</div></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Expired</CardTitle>
+              <AlertTriangle className="h-4 w-4 text-amber-500" />
+            </CardHeader>
+            <CardContent><div className="text-2xl font-bold text-amber-600">{expiredCount}</div></CardContent>
+          </Card>
+          <Card className={pendingCount > 0 ? 'border-amber-300 bg-amber-50/50 dark:bg-amber-950/10' : ''}>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Menunggu Approval</CardTitle>
+              <Clock className="h-4 w-4 text-amber-500" />
+            </CardHeader>
+            <CardContent><div className="text-2xl font-bold text-amber-600">{pendingCount}</div></CardContent>
+          </Card>
+        </div>
+
+        <Tabs defaultValue="schools" className="space-y-4">
+          <TabsList className="flex-wrap">
+            <TabsTrigger value="schools" className="gap-2"><School className="h-4 w-4" />Sekolah</TabsTrigger>
+            <TabsTrigger value="approval" className="gap-2">
+              <ShieldCheck className="h-4 w-4" />Persetujuan
+              {pendingCount > 0 && <Badge variant="destructive" className="ml-1 h-5 px-1.5 text-xs">{pendingCount}</Badge>}
+            </TabsTrigger>
+            <TabsTrigger value="subscriptions" className="gap-2"><CreditCard className="h-4 w-4" />Langganan</TabsTrigger>
+            <TabsTrigger value="plans" className="gap-2"><Package className="h-4 w-4" />Paket</TabsTrigger>
+            <TabsTrigger value="accounts" className="gap-2"><Users className="h-4 w-4" />Akun</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="schools">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><BarChart3 className="h-5 w-5" />Daftar Sekolah</CardTitle>
+                <CardDescription>Semua sekolah yang terdaftar dalam sistem</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {isLoading ? (
+                  <div className="text-center py-8 text-muted-foreground">Memuat data...</div>
+                ) : !schools?.length ? (
+                  <div className="text-center py-8 text-muted-foreground">Belum ada sekolah terdaftar</div>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {schools.map((school: any) => {
+                      const sub = getSubscription(school.id);
+                      return (
+                        <Card key={school.id} className="hover:shadow-md transition-shadow">
+                          <CardHeader className="pb-3">
+                            <div className="flex items-start justify-between">
+                              <CardTitle className="text-base">{school.name}</CardTitle>
+                              <div className="flex flex-col gap-1 items-end">
+                                {getStatusBadge(sub)}
+                                {school.approval_status === 'pending' && (
+                                  <Badge variant="outline" className="text-amber-600 border-amber-300"><Clock className="h-3 w-3 mr-1" />Pending</Badge>
+                                )}
+                              </div>
+                            </div>
+                            {school.npsn && <CardDescription>NPSN: {school.npsn}</CardDescription>}
+                          </CardHeader>
+                          <CardContent className="space-y-2 text-sm text-muted-foreground">
+                            {school.address && <div className="flex items-center gap-2"><MapPin className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{school.address}</span></div>}
+                            {school.phone && <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5 shrink-0" /><span>{school.phone}</span></div>}
+                            {school.email && <div className="flex items-center gap-2"><Mail className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{school.email}</span></div>}
+                            {sub && (
+                              <div className="flex items-center gap-2 pt-1">
+                                <CreditCard className="h-3.5 w-3.5 shrink-0" />
+                                <span>Paket: <strong className="capitalize">{sub.plan_name}</strong> ({formatRupiah(planPresetsMap[sub.plan_name]?.monthly_price ?? 0)}/bln)</span>
+                                {sub.end_date && <span className="text-xs">s/d {format(new Date(sub.end_date), 'dd MMM yyyy', { locale: localeId })}</span>}
+                              </div>
+                            )}
+                            <div className="flex gap-2 mt-2">
+                              <Button variant="outline" size="sm" className="flex-1 gap-1" onClick={() => { setSelectedSchool(school); setIsEditSchoolOpen(true); }}>
+                                <Edit2 className="h-3.5 w-3.5" />Edit
+                              </Button>
+                              <Button variant="outline" size="sm" className="flex-1 gap-1" onClick={() => openSubscriptionDialog(school)}>
+                                <CreditCard className="h-3.5 w-3.5" />Langganan
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="approval">
+            <SchoolApprovalTab />
+          </TabsContent>
+
+          <TabsContent value="subscriptions">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><CreditCard className="h-5 w-5" />Status Langganan Semua Sekolah</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left p-2 font-medium">Sekolah</th>
+                        <th className="text-left p-2 font-medium">Paket</th>
+                        <th className="text-left p-2 font-medium">Status</th>
+                        <th className="text-left p-2 font-medium">Berlaku s/d</th>
+                        <th className="text-left p-2 font-medium">Maks Siswa</th>
+                        <th className="text-left p-2 font-medium">Maks Guru</th>
+                        <th className="text-left p-2 font-medium">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {schools?.map((school: any) => {
+                        const sub = getSubscription(school.id);
+                        return (
+                          <tr key={school.id} className="border-b hover:bg-muted/50">
+                            <td className="p-2 font-medium">{school.name}</td>
+                            <td className="p-2 capitalize">{sub?.plan_name || '-'}</td>
+                            <td className="p-2">{getStatusBadge(sub)}</td>
+                            <td className="p-2">{sub?.end_date ? format(new Date(sub.end_date), 'dd MMM yyyy', { locale: localeId }) : 'Tidak terbatas'}</td>
+                            <td className="p-2">{sub?.max_students ?? '-'}</td>
+                            <td className="p-2">{sub?.max_teachers ?? '-'}</td>
+                            <td className="p-2">
+                              <Button variant="ghost" size="sm" onClick={() => openSubscriptionDialog(school)}>
+                                <Edit2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="plans">
+            <PlanManagementTab />
+          </TabsContent>
+
+          <TabsContent value="accounts">
+            <UserManagementTab />
+          </TabsContent>
+        </Tabs>
+
+        {/* Subscription Dialog */}
+        <Dialog open={isSubscriptionOpen} onOpenChange={setIsSubscriptionOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><CreditCard className="h-5 w-5" />Kelola Langganan</DialogTitle>
+              <DialogDescription>{selectedSchool?.name}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label>Paket Langganan</Label>
+                <Select value={subscriptionForm.plan_name} onValueChange={(v) => {
+                  const preset = planPresetsMap[v];
+                  if (preset) {
+                    const endDate = preset.duration_months > 0
+                      ? format(addMonths(new Date(), preset.duration_months), 'yyyy-MM-dd')
+                      : '';
+                    setSubscriptionForm(f => ({
+                      ...f,
+                      plan_name: v,
+                      max_students: preset.max_students,
+                      max_teachers: preset.max_teachers,
+                      end_date: endDate,
+                    }));
+                  } else {
+                    setSubscriptionForm(f => ({ ...f, plan_name: v }));
+                  }
+                }}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {activePlans.map(p => (
+                      <SelectItem key={p.plan_key} value={p.plan_key}>
+                        {p.label} — {formatRupiah(p.monthly_price)}/bln
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">Memilih paket akan otomatis mengatur kuota, fitur & masa aktif</p>
+              </div>
+
+              {planPresetsMap[subscriptionForm.plan_name] && (
+                <div className="rounded-lg border p-3 space-y-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Fitur Aktif — {planPresetsMap[subscriptionForm.plan_name].label}</Label>
+                  <div className="grid grid-cols-2 gap-1">
+                    {planPresetsMap[subscriptionForm.plan_name].features.map((f) => (
+                      <div key={f} className="flex items-center gap-1.5 text-xs">
+                        <Check className="h-3 w-3 text-emerald-500 shrink-0" />
+                        <span>{FEATURE_LABELS[f]}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <Label>Status</Label>
+                <Select value={subscriptionForm.status} onValueChange={(v) => setSubscriptionForm(f => ({ ...f, status: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Aktif</SelectItem>
+                    <SelectItem value="expired">Expired</SelectItem>
+                    <SelectItem value="suspended">Suspended</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Berlaku Sampai</Label>
+                <Input type="date" value={subscriptionForm.end_date} onChange={(e) => setSubscriptionForm(f => ({ ...f, end_date: e.target.value }))} />
+                <p className="text-xs text-muted-foreground mt-1">Kosongkan untuk tidak terbatas</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Maks Siswa</Label>
+                  <Input type="number" value={subscriptionForm.max_students} onChange={(e) => setSubscriptionForm(f => ({ ...f, max_students: parseInt(e.target.value) || 0 }))} />
+                </div>
+                <div>
+                  <Label>Maks Guru</Label>
+                  <Input type="number" value={subscriptionForm.max_teachers} onChange={(e) => setSubscriptionForm(f => ({ ...f, max_teachers: parseInt(e.target.value) || 0 }))} />
+                </div>
+              </div>
+              <div>
+                <Label>Catatan</Label>
+                <Input value={subscriptionForm.notes} onChange={(e) => setSubscriptionForm(f => ({ ...f, notes: e.target.value }))} placeholder="Catatan opsional..." />
+              </div>
+              <Button
+                onClick={() => selectedSchool && upsertSubscriptionMutation.mutate({ schoolId: selectedSchool.id, form: subscriptionForm })}
+                disabled={upsertSubscriptionMutation.isPending}
+                className="w-full"
+              >
+                {upsertSubscriptionMutation.isPending ? 'Menyimpan...' : 'Simpan Langganan'}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <SchoolEditDialog school={selectedSchool} open={isEditSchoolOpen} onOpenChange={setIsEditSchoolOpen} />
+      </div>
+    </DashboardLayout>
+  );
+}
+ text-muted-foreground">Fitur Aktif — {planPresetsMap[subscriptionForm.plan_name].label}</Label>
+                  <div className="grid grid-cols-2 gap-1">
+                    {planPresetsMap[subscriptionForm.plan_name].features.map((f) => (
+                      <div key={f} className="flex items-center gap-1.5 text-xs">
+                        <Check className="h-3 w-3 text-emerald-500 shrink-0" />
+                        <span>{FEATURE_LABELS[f]}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <Label>Status</Label>
+                <Select value={subscriptionForm.status} onValueChange={(v) => setSubscriptionForm(f => ({ ...f, status: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Aktif</SelectItem>
+                    <SelectItem value="expired">Expired</SelectItem>
+                    <SelectItem value="suspended">Suspended</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Berlaku Sampai</Label>
+                <Input type="date" value={subscriptionForm.end_date} onChange={(e) => setSubscriptionForm(f => ({ ...f, end_date: e.target.value }))} />
+                <p className="text-xs text-muted-foreground mt-1">Kosongkan untuk tidak terbatas</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Maks Siswa</Label><Input type="number" value={subscriptionForm.max_students} onChange={(e) => setSubscriptionForm(f => ({ ...f, max_students: parseInt(e.target.value) || 0 }))} /></div>
+                <div><Label>Maks Guru</Label><Input type="number" value={subscriptionForm.max_teachers} onChange={(e) => setSubscriptionForm(f => ({ ...f, max_teachers: parseInt(e.target.value) || 0 }))} /></div>
+              </div>
+              <div><Label>Catatan</Label><Input value={subscriptionForm.notes} onChange={(e) => setSubscriptionForm(f => ({ ...f, notes: e.target.value }))} placeholder="Catatan opsional..." /></div>
+              <Button onClick={() => selectedSchool && upsertSubscriptionMutation.mutate({ schoolId: selectedSchool.id, form: subscriptionForm })} disabled={upsertSubscriptionMutation.isPending} className="w-full">
+                {upsertSubscriptionMutation.isPending ? 'Menyimpan...' : 'Simpan Langganan'}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <SchoolEditDialog school={selectedSchool} open={isEditSchoolOpen} onOpenChange={setIsEditSchoolOpen} />
+      </div>
+    </DashboardLayout>
+  );
+}

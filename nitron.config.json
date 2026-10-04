@@ -1,0 +1,23 @@
+{
+  "name": "Pusaka Nedelcis",
+  "packageId": "id.pusaka.nedelcis",
+  "version": "1.0.0",
+  "entry": "dist/index.html",
+  "orientation": "portrait",
+  "statusBar": true,
+  "permissions": [
+    "INTERNET",
+    "ACCESS_NETWORK_STATE",
+    "POST_NOTIFICATIONS",
+    "WAKE_LOCK",
+    "VIBRATE"
+  ],
+  "icon": "./public/icon.png",
+  "manifest": "./android/AndroidManifest.xml",
+  "network": {
+    "cleartext": false
+  },
+  "firebase": {
+    "googleServicesJson": "./google-services.json"
+  }
+}

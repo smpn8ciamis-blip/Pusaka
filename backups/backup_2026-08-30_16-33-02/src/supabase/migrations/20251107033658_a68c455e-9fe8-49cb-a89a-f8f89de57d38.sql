@@ -1,0 +1,11 @@
+-- Add letterhead customization columns to school_settings
+ALTER TABLE public.school_settings
+ADD COLUMN IF NOT EXISTS logo_width INTEGER DEFAULT 20,
+ADD COLUMN IF NOT EXISTS logo_height INTEGER DEFAULT 20,
+ADD COLUMN IF NOT EXISTS logo_position_x INTEGER DEFAULT 14,
+ADD COLUMN IF NOT EXISTS logo_position_y INTEGER DEFAULT 15,
+ADD COLUMN IF NOT EXISTS header_font_size INTEGER DEFAULT 16,
+ADD COLUMN IF NOT EXISTS header_font_style TEXT DEFAULT 'bold',
+ADD COLUMN IF NOT EXISTS subheader_font_size INTEGER DEFAULT 10,
+ADD COLUMN IF NOT EXISTS show_address BOOLEAN DEFAULT true,
+ADD COLUMN IF NOT EXISTS show_phone BOOLEAN DEFAULT true;
