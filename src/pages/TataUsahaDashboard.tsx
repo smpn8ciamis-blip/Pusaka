@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { TataUsahaStatCards } from "@/components/dashboard/TataUsahaStatCards";
 import { TataUsahaRecentCards } from "@/components/dashboard/TataUsahaRecentCards";
 import { TataUsahaCharts } from "@/components/dashboard/TataUsahaCharts";
+import { TataUsahaPenggajianCards } from "@/components/dashboard/TataUsahaPenggajianCards";
 
 // Lazy load 3D component
 const FloatingShapes3D = lazy(() => import('@/components/3d/FloatingShapes').then(m => ({ default: m.FloatingShapes3D })));
@@ -303,6 +304,11 @@ export default function TataUsahaDashboard() {
             recentKeluar={stats?.recentKeluar || []}
             recentDisposisi={stats?.recentDisposisi || []}
             isLoading={isLoading}
+          />
+           {/* ===== BARU: Penggajian & Honorarium ===== */}
+          <TataUsahaPenggajianCards
+            startDate={startDate}
+            endDate={endDate}
           />
         </div>
       </DashboardLayout>
