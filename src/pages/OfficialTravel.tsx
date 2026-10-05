@@ -1196,7 +1196,6 @@ export default function OfficialTravel() {
                         searchPlaceholder="Cari nomor surat / deskripsi / lokasi..."
                         emptyMessage="Tidak ada surat tugas yang cocok."
                         loading={loadingAssignmentLetters}
-                        maxHeight="min(400px, 50vh)"
                       />
                     </div>
                   )}
@@ -1428,7 +1427,6 @@ export default function OfficialTravel() {
                                 placeholder="Tambah guru..."
                                 searchPlaceholder="Cari nama guru / NIP / mapel..."
                                 emptyMessage="Tidak ada guru."
-                                maxHeight="300px"
                               />
                               <p className="text-xs text-muted-foreground">Guru pertama menjadi Pelaksana Utama. Klik badge untuk menghapus.</p>
                             </>

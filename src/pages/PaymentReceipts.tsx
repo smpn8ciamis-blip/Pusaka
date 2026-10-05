@@ -1142,7 +1142,6 @@ export default function PaymentReceipts() {
                         searchPlaceholder="Cari nomor SPPD / maksud / tujuan..."
                         emptyMessage="Tidak ada SPPD yang cocok."
                         disabled={isEditMode}
-                        maxHeight="min(400px, 50vh)"
                       />
                     </div>
                     <div className="space-y-2">

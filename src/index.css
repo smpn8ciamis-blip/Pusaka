@@ -636,3 +636,50 @@ All colors MUST be HSL.
     transform: translateY(0);
   }
 }
+/* ============================================================
+   Fix untuk SearchableSelect — konsisten di semua zoom browser
+   ============================================================ */
+[data-radix-popper-content-wrapper] {
+  z-index: 9999 !important;
+  /* Pastikan wrapper tidak melebihi viewport */
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+}
+
+/* Popover content auto-fit */
+[data-radix-popper-content-wrapper] > [role="dialog"],
+[data-radix-popper-content-wrapper] > div {
+  max-height: min(70vh, 560px) !important;
+}
+
+/* Scrollbar tipis & rapi */
+[data-radix-popper-content-wrapper] .overflow-y-auto {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+[data-radix-popper-content-wrapper] .overflow-y-auto::-webkit-scrollbar {
+  width: 6px;
+}
+[data-radix-popper-content-wrapper] .overflow-y-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+[data-radix-popper-content-wrapper] .overflow-y-auto::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+[data-radix-popper-content-wrapper] .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* Highlight pencarian */
+mark {
+  background-color: rgb(254 240 138); /* yellow-200 */
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+/* Pastikan dialog tidak memotong popover */
+[data-radix-popper-content-wrapper] {
+  pointer-events: auto;
+}

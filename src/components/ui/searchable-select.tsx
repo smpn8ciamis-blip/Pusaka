@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { Check, ChevronsUpDown, Search } from "lucide-react";
+import { useState, useMemo, useRef, useEffect } from "react";
+import { Check, ChevronsUpDown, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,10 +41,12 @@ export function SearchableSelect({
   loading = false,
   className,
   contentClassName,
-  maxHeight = "400px",
 }: SearchableSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [highlightIndex, setHighlightIndex] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const selected = useMemo(
     () => options.find((opt) => opt.value === value),
@@ -60,13 +62,73 @@ export function SearchableSelect({
     });
   }, [options, query]);
 
+  // Reset highlight saat query berubah
+  useEffect(() => {
+    setHighlightIndex(0);
+  }, [query]);
+
+  // Auto-focus input saat popover terbuka
+  useEffect(() => {
+    if (open) {
+      // delay sedikit agar Radix selesai render
+      const t = setTimeout(() => inputRef.current?.focus(), 30);
+      return () => clearTimeout(t);
+    } else {
+      setQuery("");
+    }
+  }, [open]);
+
+  // Scroll ke item yang di-highlight
+  useEffect(() => {
+    if (!listRef.current) return;
+    const items = listRef.current.querySelectorAll("button[data-option]");
+    const item = items[highlightIndex] as HTMLElement | undefined;
+    if (item) {
+      item.scrollIntoView({ block: "nearest" });
+    }
+  }, [highlightIndex]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlightIndex((prev) => Math.min(prev + 1, filtered.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightIndex((prev) => Math.max(prev - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (filtered[highlightIndex]) {
+        onValueChange(filtered[highlightIndex].value);
+        setOpen(false);
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setOpen(false);
+    }
+  };
+
+  const highlightMatch = (text: string, q: string) => {
+    if (!q.trim()) return text;
+    const parts = text.split(
+      new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi")
+    );
+    return parts.map((part, i) =>
+      part.toLowerCase() === q.toLowerCase() ? (
+        <mark key={i} className="bg-yellow-200 text-foreground rounded px-0.5">
+          {part}
+        </mark>
+      ) : (
+        part
+      )
+    );
+  };
+
+  const displayed = filtered.slice(0, 100);
+
   return (
     <Popover
       open={open}
-      onOpenChange={(v) => {
-        setOpen(v);
-        if (!v) setQuery("");
-      }}
+      onOpenChange={setOpen}
       modal={false}
     >
       <PopoverTrigger asChild>
@@ -98,99 +160,110 @@ export function SearchableSelect({
         sideOffset={4}
         avoidCollisions={true}
         collisionPadding={16}
+        sticky="always"
         className={cn(
-          "p-0 z-[9999] w-[var(--radix-popover-trigger-width)]",
+          "p-0 z-[9999] flex flex-col",
+          "w-[var(--radix-popover-trigger-width)]",
           contentClassName
         )}
         style={{
           minWidth: "min(560px, 90vw)",
-          maxWidth: "90vw",
+          maxWidth: "min(90vw, 90vw)",
+          // ✅ Tinggi total dibatasi oleh viewport
+          maxHeight: "min(70vh, 560px)",
         }}
-        // Render ke body agar tidak terpotong dialog
-        onOpenAutoFocus={(e) => e.preventDefault()}
       >
-        <div className="flex flex-col" style={{ maxHeight: `calc(${maxHeight} + 60px)` }}>
-          {/* Header dengan Search */}
-          <div className="flex items-center gap-2 border-b px-3 py-2 sticky top-0 bg-popover z-10">
-            <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <Input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={searchPlaceholder}
-              className="h-8 border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 px-0"
-            />
-            {query && (
-              <button
-                type="button"
-                onClick={() => setQuery("")}
-                className="text-xs text-muted-foreground hover:text-foreground"
-              >
-                ✕
-              </button>
-            )}
-          </div>
+        {/* Header dengan Search — STICKY */}
+        <div className="flex items-center gap-2 border-b px-3 py-2 bg-popover shrink-0">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <Input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={searchPlaceholder}
+            className="h-8 border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 px-0 flex-1"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => {
+                setQuery("");
+                inputRef.current?.focus();
+              }}
+              className="text-muted-foreground hover:text-foreground shrink-0"
+              aria-label="Bersihkan pencarian"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
 
-          {/* List */}
-          <div
-            className="overflow-y-auto py-1"
-            style={{ maxHeight: maxHeight }}
-          >
-            {loading ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                Memuat data...
-              </div>
-            ) : filtered.length === 0 ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                {emptyMessage}
-              </div>
-            ) : (
-              filtered.map((opt) => {
-                const isSelected = value === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => {
-                      onValueChange(isSelected ? "" : opt.value);
-                      setOpen(false);
-                      setQuery("");
-                    }}
+        {/* List — SCROLL */}
+        <div
+          ref={listRef}
+          className="overflow-y-auto py-1 flex-1 min-h-0"
+        >
+          {loading ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              Memuat data...
+            </div>
+          ) : displayed.length === 0 ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              {emptyMessage}
+            </div>
+          ) : (
+            displayed.map((opt, idx) => {
+              const isSelected = value === opt.value;
+              const isHighlight = highlightIndex === idx;
+              return (
+                <button
+                  key={opt.value}
+                  data-option
+                  type="button"
+                  onMouseEnter={() => setHighlightIndex(idx)}
+                  onClick={() => {
+                    onValueChange(isSelected ? "" : opt.value);
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "w-full text-left px-3 py-2 transition-colors",
+                    "flex items-start gap-2",
+                    isHighlight && "bg-accent text-accent-foreground",
+                    isSelected && !isHighlight && "bg-accent/40"
+                  )}
+                >
+                  <Check
                     className={cn(
-                      "w-full text-left px-3 py-2 hover:bg-accent hover:text-accent-foreground",
-                      "flex items-start gap-2 transition-colors",
-                      isSelected && "bg-accent/60"
+                      "h-4 w-4 mt-0.5 shrink-0",
+                      isSelected ? "opacity-100 text-primary" : "opacity-0"
                     )}
-                  >
-                    <Check
-                      className={cn(
-                        "h-4 w-4 mt-0.5 shrink-0",
-                        isSelected ? "opacity-100 text-primary" : "opacity-0"
-                      )}
-                    />
-                    <div className="flex flex-col min-w-0 flex-1 gap-0.5">
-                      <span className="text-sm font-medium leading-tight break-words">
-                        {opt.label}
+                  />
+                  <div className="flex flex-col min-w-0 flex-1 gap-0.5">
+                    <span className="text-sm font-medium leading-tight break-words">
+                      {highlightMatch(opt.label, query)}
+                    </span>
+                    {opt.description && (
+                      <span className="text-xs text-muted-foreground leading-tight break-words">
+                        {highlightMatch(opt.description, query)}
                       </span>
-                      {opt.description && (
-                        <span className="text-xs text-muted-foreground leading-tight break-words">
-                          {opt.description}
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                );
-              })
-            )}
-          </div>
+                    )}
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
 
-          {/* Footer */}
-          <div className="border-t px-3 py-1.5 text-xs text-muted-foreground flex items-center justify-between sticky bottom-0 bg-popover">
-            <span>
-              {filtered.length} dari {options.length} item
-            </span>
-            <span className="hidden sm:inline">↑↓ navigasi • Enter pilih • Esc tutup</span>
-          </div>
+        {/* Footer — STICKY */}
+        <div className="border-t px-3 py-1.5 text-xs text-muted-foreground flex items-center justify-between bg-popover shrink-0">
+          <span>
+            {displayed.length} dari {filtered.length} item
+            {filtered.length > 100 && " (persempit pencarian)"}
+          </span>
+          <span className="hidden sm:inline">
+            ↑↓ navigasi • Enter pilih • Esc tutup
+          </span>
         </div>
       </PopoverContent>
     </Popover>
