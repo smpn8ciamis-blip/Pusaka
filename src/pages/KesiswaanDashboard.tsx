@@ -228,10 +228,12 @@ function useKesiswaanStats(startDate?: Date, endDate?: Date) {
 
       const [studentRes, violationsData, achievementsData, recentV, recentA] =
         await Promise.all([
+          // PERBAIKAN 1: Hanya hitung siswa dengan status 'aktif'
           supabase
             .from("students")
             .select("*", { count: "exact", head: true })
-            .eq("is_alumni", false),
+            .eq("is_alumni", false)
+            .eq("status", "aktif"), 
 
           (async () => {
             let q = supabase
@@ -1276,7 +1278,6 @@ const UnfilledClassesCard = memo(function UnfilledClassesCard({
   );
 });
 UnfilledClassesCard.displayName = "UnfilledClassesCard";
-
 
 
 
