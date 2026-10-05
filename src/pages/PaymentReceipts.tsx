@@ -5,7 +5,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -15,7 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, Receipt, Trash2, Search, FileDown, Pencil, Settings, Save, Eye, Calendar as CalendarIcon, X, Wallet, TrendingUp, TrendingDown, Users, CheckCircle2 } from "lucide-react";
+import { Plus, Receipt, Trash2, Search, FileDown, Pencil, Settings, Save, Eye, Calendar as CalendarIcon, X, Wallet, TrendingUp, TrendingDown, CheckCircle2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { cn, toTitleCase } from "@/lib/utils";
@@ -25,13 +24,10 @@ import { id as idLocale } from "date-fns/locale";
 import jsPDF from 'jspdf';
 import { addLetterheadToPDF } from '@/lib/pdfLetterhead';
 import { z } from "zod";
-import { ModernPageHeader, ModernStatsGrid } from "@/components/ui/modern-document-card";
 import { ReceiptPreviewDialog } from "@/components/receipt/ReceiptPreviewDialog";
 
-// Helper function to convert number to Indonesian words
 const numberToWords = (num: number): string => {
   const satuan = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
-  
   if (num < 12) return satuan[num];
   if (num < 20) return satuan[num - 10] + ' belas';
   if (num < 100) return satuan[Math.floor(num / 10)] + ' puluh ' + satuan[num % 10];
@@ -82,7 +78,6 @@ export default function PaymentReceipts() {
     payment_type: "transport",
   });
 
-  // Auto-populated data from SPPD
   const [sppdTeachersData, setSPPDTeachersData] = useState<any[]>([]);
   const [sppdStudentsData, setSPPDStudentsData] = useState<any[]>([]);
   const [autoData, setAutoData] = useState({
@@ -94,7 +89,6 @@ export default function PaymentReceipts() {
     description: "",
   });
 
-  // State for adding new position type
   const [isAddPositionOpen, setIsAddPositionOpen] = useState(false);
   const [newPosition, setNewPosition] = useState({
     position_type: "",
@@ -103,10 +97,8 @@ export default function PaymentReceipts() {
     accommodation_rate: "",
   });
 
-  // State for editing rates
   const [editingRates, setEditingRates] = useState<Record<string, TravelRate>>({});
-  
-  // State for preview dialog
+
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewReceipt, setPreviewReceipt] = useState<any>(null);
   const [previewTeachers, setPreviewTeachers] = useState<any[]>([]);
@@ -126,7 +118,6 @@ export default function PaymentReceipts() {
     },
   });
 
-  // Update travel rate mutation
   const updateRateMutation = useMutation({
     mutationFn: async (rate: TravelRate) => {
       const { error } = await supabase
@@ -148,7 +139,6 @@ export default function PaymentReceipts() {
     },
   });
 
-  // Create new position type mutation
   const createPositionMutation = useMutation({
     mutationFn: async (data: typeof newPosition) => {
       if (!data.position_type.trim()) {
@@ -175,7 +165,6 @@ export default function PaymentReceipts() {
     },
   });
 
-  // Delete position type mutation
   const deletePositionMutation = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase
@@ -193,7 +182,6 @@ export default function PaymentReceipts() {
     },
   });
 
-  // Toggle SPJ status mutation
   const toggleSpjMutation = useMutation({
     mutationFn: async ({ id, is_spj }: { id: string; is_spj: boolean }) => {
       const { error } = await supabase
@@ -211,7 +199,6 @@ export default function PaymentReceipts() {
     },
   });
 
-  // Fetch SPPD for selection with teacher count
   const { data: sppdList } = useQuery({
     queryKey: ["sppd-for-receipt"],
     queryFn: async () => {
@@ -219,10 +206,9 @@ export default function PaymentReceipts() {
         .from("official_travel_letters")
         .select("id, letter_number, purpose, destination, departure_date, return_date")
         .order("letter_date", { ascending: false });
-      
+
       if (error) throw error;
-      
-      // Get teacher (including manual executor) count for each SPPD
+
       const sppdWithTeachers = await Promise.all(
         (letters || []).map(async (letter) => {
           const { data: teachers } = await supabase
@@ -240,23 +226,25 @@ export default function PaymentReceipts() {
           return { ...letter, teacher_count: teacherCount };
         })
       );
-      
+
       return sppdWithTeachers;
     },
   });
 
-  // Get selected SPPD details
   const selectedSPPDData = sppdList?.find((s) => s.id === selectedSPPD);
 
-  // Fetch SPPD teachers (database teachers + manual executors) for collective receipt
+  // ============================================================
+  // fetchSPPDTeachers — gabung guru + manual, urut pakai order_index
+  // ============================================================
   const fetchSPPDTeachers = async (sppdId: string) => {
     if (!sppdId) return [];
 
-    // 1. Guru dari tabel official_travel_teachers
+    // 1. Guru dari official_travel_teachers (sudah urut via query order_index)
     const { data: sppdTeachers } = await supabase
       .from("official_travel_teachers")
-      .select("teacher_id")
-      .eq("official_travel_id", sppdId);
+      .select("teacher_id, order_index")
+      .eq("official_travel_id", sppdId)
+      .order("order_index", { ascending: true });
 
     let mappedTeachers: any[] = [];
 
@@ -275,22 +263,32 @@ export default function PaymentReceipts() {
           .in("id", userIds);
 
         const profileMap = new Map(profiles?.map((p) => [p.id, p.full_name]) || []);
+        const teacherMap = new Map(teachers.map((t) => [t.id, t]));
 
-        mappedTeachers = teachers.map((t) => ({
-          ...t,
-          full_name: profileMap.get(t.user_id) || "",
-          type: "guru" as const,
-          isManual: false,
-        }));
+        // ✅ Pertahankan urutan dari sppdTeachers (yang sudah di-order)
+        mappedTeachers = sppdTeachers
+          .map((st) => {
+            const t = teacherMap.get(st.teacher_id);
+            if (!t) return null;
+            return {
+              ...t,
+              full_name: profileMap.get(t.user_id) || "",
+              type: "guru" as const,
+              isManual: false,
+              order_index: st.order_index ?? 0,
+            };
+          })
+          .filter(Boolean);
       }
     }
 
-    // 2. Guru manual yang disimpan sebagai followers dengan tipe manual_executor
+    // 2. Manual executor dari followers (sudah urut via query order_index)
     const { data: manualFollowers } = await supabase
       .from("official_travel_followers")
-      .select("id, manual_executor_name, manual_executor_nip, manual_executor_pangkat, manual_executor_jabatan")
+      .select("id, manual_executor_name, manual_executor_nip, manual_executor_pangkat, manual_executor_jabatan, order_index")
       .eq("official_travel_id", sppdId)
-      .eq("follower_type", "manual_executor");
+      .eq("follower_type", "manual_executor")
+      .order("order_index", { ascending: true });
 
     const manualTeachers = (manualFollowers || []).map((f) => ({
       id: f.id,
@@ -301,69 +299,71 @@ export default function PaymentReceipts() {
       full_name: f.manual_executor_name || "",
       type: "guru" as const,
       isManual: true,
+      order_index: f.order_index ?? 0,
     }));
 
-    return [...mappedTeachers, ...manualTeachers];
+    // ✅ Gabung & sort final
+    return [...mappedTeachers, ...manualTeachers]
+      .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+      .map(({ order_index, ...rest }) => rest);
   };
 
-  // Fetch SPPD student followers for collective receipt
+  // ============================================================
+  // fetchSPPDStudents — pertahankan urutan via order_index
+  // ============================================================
   const fetchSPPDStudents = async (sppdId: string) => {
     if (!sppdId) return [];
-    
     try {
-      // Step 1: Get student followers
-      const { data: followers, error: followersError } = await supabase
+      const { data: followers } = await supabase
         .from("official_travel_followers")
-        .select("student_id")
+        .select("student_id, order_index")
         .eq("official_travel_id", sppdId)
-        .eq("follower_type", "student");
-      
-      if (followersError || !followers || followers.length === 0) return [];
-      
+        .eq("follower_type", "student")
+        .order("order_index", { ascending: true });
+
+      if (!followers || followers.length === 0) return [];
+
       const studentIds = followers.map(f => f.student_id).filter(Boolean);
       if (studentIds.length === 0) return [];
-      
-      // Step 2: Get student data
-      const { data: students, error: studentsError } = await supabase
+
+      const { data: students } = await supabase
         .from("students")
         .select("id, full_name, nis, class_id")
         .in("id", studentIds);
-      
-      if (studentsError || !students || students.length === 0) return [];
-      
-      // Step 3: Get class IDs and fetch class names separately
+
+      if (!students || students.length === 0) return [];
+
       const classIds = students.map(s => s.class_id).filter(Boolean);
       let classMap = new Map<string, string>();
-      
       if (classIds.length > 0) {
-        const { data: classes, error: classesError } = await supabase
-          .from("classes")
-          .select("id, name")
-          .in("id", classIds);
-        
-        if (!classesError && classes) {
-          classMap = new Map(classes.map(c => [c.id, c.name]));
-        }
+        const { data: classes } = await supabase
+          .from("classes").select("id, name").in("id", classIds);
+        if (classes) classMap = new Map(classes.map(c => [c.id, c.name]));
       }
-      
-      // Map to flat structure with class_name
-      const result = students.map(student => ({
-        id: student.id,
-        full_name: student.full_name || "",
-        nis: student.nis || "",
-        class_name: student.class_id ? (classMap.get(student.class_id) || "") : "",
-        jabatan: "Siswa",
-        type: "siswa" as const
-      }));
-      
-      return result;
+
+      const studentMap = new Map(students.map(s => [s.id, s]));
+
+      // ✅ Pertahankan urutan dari followers
+      return followers
+        .map(f => {
+          const s = studentMap.get(f.student_id);
+          if (!s) return null;
+          return {
+            id: s.id,
+            full_name: s.full_name || "",
+            nis: s.nis || "",
+            class_name: s.class_id ? (classMap.get(s.class_id) || "") : "",
+            jabatan: "Siswa",
+            type: "siswa" as const,
+          };
+        })
+        .filter(Boolean);
     } catch (error) {
       console.error("Error in fetchSPPDStudents:", error);
       return [];
     }
   };
 
-  // Fetch receipts
   const { data: receipts, isLoading } = useQuery({
     queryKey: ["payment-receipts"],
     queryFn: async () => {
@@ -384,8 +384,7 @@ export default function PaymentReceipts() {
         `)
         .order("receipt_date", { ascending: false });
       if (error) throw error;
-      
-      // Get teacher and student count for each receipt's SPPD
+
       const receiptsWithCounts = await Promise.all(
         (data || []).map(async (receipt) => {
           if (receipt.official_travel_letters?.id) {
@@ -408,8 +407,8 @@ export default function PaymentReceipts() {
 
             const teacherCount = (teachers?.length || 0) + (manualFollowers?.length || 0);
 
-            return { 
-              ...receipt, 
+            return {
+              ...receipt,
               sppd_teacher_count: teacherCount,
               sppd_student_count: students?.length || 0
             };
@@ -417,16 +416,14 @@ export default function PaymentReceipts() {
           return { ...receipt, sppd_teacher_count: 0, sppd_student_count: 0 };
         })
       );
-      
+
       return receiptsWithCounts;
     },
   });
 
-  // Fetch RKAS budget data for statistics - only transport and travel expenses
   const { data: rkasBudgetData } = useQuery({
     queryKey: ["rkas-budget-stats", monthFilter],
     queryFn: async () => {
-      // Fetch RKAS items filtered by transport and travel activities
       const { data, error } = await supabase
         .from("rkas_items")
         .select(`
@@ -442,32 +439,27 @@ export default function PaymentReceipts() {
           )
         `)
         .eq("rkas_documents.status", "parsed");
-      
+
       if (error) throw error;
-      
-      // Filter for specific kode_rekening for travel expenses
+
       const filteredItems = (data || []).filter(item => {
         return item.kode_rekening === "5.1.02.04.01.0003" || item.kode_rekening === "5.1.02.04.01.0001";
       });
-      
+
       return filteredItems;
     },
   });
 
-  // Helper function to calculate number of days between two dates (inclusive)
   const calculateTravelDays = (departureDate: string, returnDate: string): number => {
     const start = new Date(departureDate);
     const end = new Date(returnDate);
     const diffTime = Math.abs(end.getTime() - start.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 for inclusive
-    return diffDays;
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
   };
 
-  // Helper function to get rate based on jabatan (per person per day)
   const getRateForJabatan = (jabatan: string, paymentType: string): number => {
     const rate = travelRates?.find(r => r.position_type === jabatan);
     if (!rate) {
-      // Fallback to "Guru" rate if jabatan not found
       const guruRate = travelRates?.find(r => r.position_type === "Guru");
       if (!guruRate) return 0;
       switch (paymentType) {
@@ -485,7 +477,6 @@ export default function PaymentReceipts() {
     }
   };
 
-  // Auto-populate data when SPPD is selected
   const handleSPPDChange = async (sppdId: string) => {
     setSelectedSPPD(sppdId);
     if (!sppdId) {
@@ -504,17 +495,14 @@ export default function PaymentReceipts() {
     }
 
     const sppdData = sppdList?.find(s => s.id === sppdId);
-    
-    // Auto-fill receipt_number with SPPD letter_number
+
     if (sppdData?.letter_number) {
       setFormData(prev => ({ ...prev, receipt_number: sppdData.letter_number }));
     }
     if (!sppdData) return;
 
-    // Calculate number of travel days
     const travelDays = calculateTravelDays(sppdData.departure_date, sppdData.return_date);
 
-    // Fetch teachers and students for this SPPD
     const teachers = await fetchSPPDTeachers(sppdId);
     const students = await fetchSPPDStudents(sppdId);
     setSPPDTeachersData(teachers);
@@ -523,15 +511,13 @@ export default function PaymentReceipts() {
     if (teachers.length > 0) {
       const firstTeacher = teachers[0];
       const jabatan = firstTeacher.jabatan || "Guru";
-      
-      // Calculate total amount based on each teacher's jabatan rate * days + students
+
       let totalAmount = 0;
       teachers.forEach(teacher => {
         const teacherJabatan = teacher.jabatan || "Guru";
         totalAmount += getRateForJabatan(teacherJabatan, formData.payment_type) * travelDays;
       });
-      
-      // Add student rates * days
+
       students.forEach(() => {
         totalAmount += getRateForJabatan("Siswa", formData.payment_type) * travelDays;
       });
@@ -547,22 +533,19 @@ export default function PaymentReceipts() {
     }
   };
 
-  // Update amount when payment type changes
   const handlePaymentTypeChange = async (paymentType: string) => {
     setFormData(prev => ({ ...prev, payment_type: paymentType }));
-    
+
     if (sppdTeachersData.length > 0) {
       const sppdData = sppdList?.find(s => s.id === selectedSPPD);
       const travelDays = sppdData ? calculateTravelDays(sppdData.departure_date, sppdData.return_date) : 1;
-      
-      // Calculate total amount based on each teacher's jabatan rate * days + students
+
       let totalAmount = 0;
       sppdTeachersData.forEach(teacher => {
         const teacherJabatan = teacher.jabatan || "Guru";
         totalAmount += getRateForJabatan(teacherJabatan, paymentType) * travelDays;
       });
-      
-      // Add student rates * days
+
       sppdStudentsData.forEach(() => {
         totalAmount += getRateForJabatan("Siswa", paymentType) * travelDays;
       });
@@ -582,7 +565,7 @@ export default function PaymentReceipts() {
         ...autoData,
         official_travel_id: selectedSPPD,
       };
-      
+
       receiptSchema.parse({
         ...submitData,
         amount: parseFloat(autoData.amount) || 0,
@@ -629,7 +612,7 @@ export default function PaymentReceipts() {
         ...autoData,
         official_travel_id: selectedSPPD,
       };
-      
+
       receiptSchema.parse({
         ...submitData,
         amount: parseFloat(autoData.amount) || 0,
@@ -719,11 +702,12 @@ export default function PaymentReceipts() {
     setIsEditMode(true);
     setEditingId(receipt.id);
     setSelectedSPPD(receipt.official_travel_id);
-    
-    // Fetch teachers for this SPPD
+
     const teachers = await fetchSPPDTeachers(receipt.official_travel_id);
+    const students = await fetchSPPDStudents(receipt.official_travel_id);
     setSPPDTeachersData(teachers);
-    
+    setSPPDStudentsData(students);
+
     setFormData({
       receipt_number: receipt.receipt_number,
       payment_type: receipt.payment_type,
@@ -745,7 +729,6 @@ export default function PaymentReceipts() {
     }
   };
 
-  // Handle rate input change
   const handleRateChange = (rateId: string, field: keyof TravelRate, value: string) => {
     const rate = travelRates?.find(r => r.id === rateId);
     if (rate) {
@@ -760,7 +743,6 @@ export default function PaymentReceipts() {
     }
   };
 
-  // Save rate changes
   const saveRate = (rateId: string) => {
     const rate = editingRates[rateId];
     if (rate) {
@@ -786,7 +768,7 @@ export default function PaymentReceipts() {
         format: 'a4'
       });
       const pageWidth = doc.internal.pageSize.getWidth();
-      
+
       let yPos = 15;
       if (settings) {
         yPos = await addLetterheadToPDF(doc, {
@@ -801,12 +783,10 @@ export default function PaymentReceipts() {
         });
       }
 
-      // Add "No TB :" at top right corner below letterhead
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
       doc.text(`No TB : .......`, pageWidth - 20, yPos + 3, { align: "right" });
 
-      // Add "KWITANSI PEMBAYARAN" title
       yPos += 5;
       doc.setFontSize(14);
       doc.setFont("helvetica", "bold");
@@ -816,7 +796,6 @@ export default function PaymentReceipts() {
       const colonX = 55;
       const valueX = 60;
 
-      // Row 1: Sudah Diterima Dari
       yPos += 10;
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
@@ -825,7 +804,6 @@ export default function PaymentReceipts() {
       doc.setFont("helvetica", "bold");
       doc.text(`Bendahara BOS ${settings?.school_name || ""}`, valueX, yPos);
 
-      // Row 2: Banyaknya Uang
       yPos += 8;
       doc.setFont("helvetica", "normal");
       doc.text("Banyaknya Uang", leftMargin, yPos);
@@ -835,7 +813,6 @@ export default function PaymentReceipts() {
       doc.text(amountTextLines, valueX, yPos);
       yPos += (amountTextLines.length - 1) * 5;
 
-      // Row 3: Untuk Pembayaran
       yPos += 8;
       doc.setFont("helvetica", "normal");
       doc.text("Untuk Pembayaran", leftMargin, yPos);
@@ -845,97 +822,86 @@ export default function PaymentReceipts() {
       doc.text(descLines, valueX, yPos);
       yPos += (descLines.length - 1) * 5;
 
-      // Row 4: Terbilang (Amount Box)
       yPos += 10;
       doc.setFont("helvetica", "normal");
       doc.text("Terbilang", leftMargin, yPos + 5);
       doc.text(":", colonX, yPos + 5);
-      
-      // Amount box with border
+
       const boxX = valueX;
       const boxWidth = pageWidth - valueX - 15;
       const boxHeight = 10;
       doc.setDrawColor(0);
       doc.setLineWidth(0.3);
       doc.rect(boxX, yPos, boxWidth, boxHeight);
-      
+
       doc.setFontSize(11);
       doc.setFont("helvetica", "normal");
       doc.text("Rp", boxX + 3, yPos + 6);
       doc.text(`${Number(receipt.amount).toLocaleString('id-ID')},00`, boxX + boxWidth - 5, yPos + 6, { align: "right" });
 
-      // Tax Information Section
       yPos += boxHeight + 8;
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
       doc.text("Informasi Potongan Pajak", leftMargin, yPos);
-      
-      // Tax table
+
       const taxStartY = yPos + 5;
       const taxLabelX = leftMargin;
       const taxColonX = leftMargin + 25;
       const taxRpX = taxColonX + 5;
       const taxValueX = pageWidth - 50;
-      
+
       doc.text("- PPh Pasal 23", taxLabelX, taxStartY);
       doc.text(":", taxColonX, taxStartY);
       doc.text("Rp", taxRpX, taxStartY);
       doc.text("-", taxValueX, taxStartY, { align: "right" });
-      
+
       doc.text("- PPh Pasal 21", taxLabelX, taxStartY + 5);
       doc.text(":", taxColonX, taxStartY + 5);
       doc.text("Rp", taxRpX, taxStartY + 5);
       doc.text("-", taxValueX, taxStartY + 5, { align: "right" });
-      
+
       doc.text("- PPN", taxLabelX, taxStartY + 10);
       doc.text(":", taxColonX, taxStartY + 10);
       doc.text("Rp", taxRpX, taxStartY + 10);
       doc.text("-", taxValueX, taxStartY + 10, { align: "right" });
-      
+
       doc.setFont("helvetica", "bold");
       doc.text("Jumlah", taxLabelX, taxStartY + 15);
       doc.text(":", taxColonX, taxStartY + 15);
       doc.text("Rp", taxRpX, taxStartY + 15);
       doc.text("-", taxValueX, taxStartY + 15, { align: "right" });
 
-      // Signature Section - 3 columns
       yPos = taxStartY + 30;
       const colWidth = (pageWidth - 40) / 3;
       const col1X = leftMargin + colWidth / 2;
       const col2X = leftMargin + colWidth + colWidth / 2;
       const col3X = leftMargin + colWidth * 2 + colWidth / 2;
-      
+
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
-      
-      // Get SPPD departure date for recipient signature
-      const sppdDate = receipt.official_travel_letters?.departure_date 
+
+      const sppdDate = receipt.official_travel_letters?.departure_date
         ? format(new Date(receipt.official_travel_letters.departure_date), "dd MMMM yyyy", { locale: idLocale })
         : format(new Date(receipt.receipt_date), "dd MMMM yyyy", { locale: idLocale });
-      
-      // Headers
+
       doc.text("Menyetujui", col1X, yPos, { align: "center" });
       doc.setFont("helvetica", "bolditalic");
       doc.text(`Lunas Dibayar, ${format(new Date(receipt.receipt_date), "dd MMMM yyyy", { locale: idLocale })}`, col2X, yPos, { align: "center" });
       doc.setFont("helvetica", "normal");
       doc.text(`Ciamis, ${sppdDate}`, col3X, yPos, { align: "center" });
-      
-      // Titles
+
       yPos += 5;
       doc.text(`Kepala ${settings?.school_name || "Sekolah"}`, col1X, yPos, { align: "center" });
       doc.text("Bendahara BOS", col2X, yPos, { align: "center" });
       doc.text("Penerima", col3X, yPos, { align: "center" });
 
-      // Signature space
       yPos += 25;
-      
-      // Names
+
       doc.setFont("helvetica", "bold");
       doc.text(toTitleCase(settings?.headmaster_name) || "", col1X, yPos, { align: "center" });
       doc.text(toTitleCase(settings?.bendahara_name) || ".........................", col2X, yPos, { align: "center" });
       doc.text(toTitleCase(receipt.recipient_name), col3X, yPos, { align: "center" });
-      
-      // NIPs
+
       yPos += 5;
       doc.setFontSize(8);
       doc.setFont("helvetica", "normal");
@@ -968,7 +934,7 @@ export default function PaymentReceipts() {
         format: 'a4'
       });
       const pageWidth = doc.internal.pageSize.getWidth();
-      
+
       let yPos = 15;
       if (settings) {
         yPos = await addLetterheadToPDF(doc, {
@@ -983,12 +949,10 @@ export default function PaymentReceipts() {
         });
       }
 
-      // Add "No TB :" at top right corner below letterhead
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
       doc.text(`No TB : .......`, pageWidth - 20, yPos + 3, { align: "right" });
 
-      // Add "KWITANSI PEMBAYARAN" title
       yPos += 5;
       doc.setFontSize(14);
       doc.setFont("helvetica", "bold");
@@ -1028,14 +992,14 @@ export default function PaymentReceipts() {
       doc.setFont("helvetica", "normal");
       doc.text("Terbilang", leftMargin, yPos + 5);
       doc.text(":", colonX, yPos + 5);
-      
+
       const boxX = valueX;
       const boxWidth = pageWidth - valueX - 15;
       const boxHeight = 10;
       doc.setDrawColor(0);
       doc.setLineWidth(0.3);
       doc.rect(boxX, yPos, boxWidth, boxHeight);
-      
+
       doc.setFontSize(11);
       doc.setFont("helvetica", "normal");
       doc.text("Rp", boxX + 3, yPos + 6);
@@ -1045,28 +1009,28 @@ export default function PaymentReceipts() {
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
       doc.text("Informasi Potongan Pajak", leftMargin, yPos);
-      
+
       const taxStartY = yPos + 5;
       const taxLabelX = leftMargin;
       const taxColonX = leftMargin + 25;
       const taxRpX = taxColonX + 5;
       const taxValueX = pageWidth - 50;
-      
+
       doc.text("- PPh Pasal 23", taxLabelX, taxStartY);
       doc.text(":", taxColonX, taxStartY);
       doc.text("Rp", taxRpX, taxStartY);
       doc.text("-", taxValueX, taxStartY, { align: "right" });
-      
+
       doc.text("- PPh Pasal 21", taxLabelX, taxStartY + 5);
       doc.text(":", taxColonX, taxStartY + 5);
       doc.text("Rp", taxRpX, taxStartY + 5);
       doc.text("-", taxValueX, taxStartY + 5, { align: "right" });
-      
+
       doc.text("- PPN", taxLabelX, taxStartY + 10);
       doc.text(":", taxColonX, taxStartY + 10);
       doc.text("Rp", taxRpX, taxStartY + 10);
       doc.text("-", taxValueX, taxStartY + 10, { align: "right" });
-      
+
       doc.setFont("helvetica", "bold");
       doc.text("Jumlah", taxLabelX, taxStartY + 15);
       doc.text(":", taxColonX, taxStartY + 15);
@@ -1078,32 +1042,32 @@ export default function PaymentReceipts() {
       const col1X = leftMargin + colWidth / 2;
       const col2X = leftMargin + colWidth + colWidth / 2;
       const col3X = leftMargin + colWidth * 2 + colWidth / 2;
-      
+
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
-      
-      const sppdDate = receipt.official_travel_letters?.departure_date 
+
+      const sppdDate = receipt.official_travel_letters?.departure_date
         ? format(new Date(receipt.official_travel_letters.departure_date), "dd MMMM yyyy", { locale: idLocale })
         : format(new Date(receipt.receipt_date), "dd MMMM yyyy", { locale: idLocale });
-      
+
       doc.text("Menyetujui", col1X, yPos, { align: "center" });
       doc.setFont("helvetica", "bolditalic");
       doc.text(`Lunas Dibayar, ${format(new Date(receipt.receipt_date), "dd MMMM yyyy", { locale: idLocale })}`, col2X, yPos, { align: "center" });
       doc.setFont("helvetica", "normal");
       doc.text(`Ciamis, ${sppdDate}`, col3X, yPos, { align: "center" });
-      
+
       yPos += 5;
       doc.text(`Kepala ${settings?.school_name || "Sekolah"}`, col1X, yPos, { align: "center" });
       doc.text("Bendahara BOS", col2X, yPos, { align: "center" });
       doc.text("Penerima", col3X, yPos, { align: "center" });
 
       yPos += 25;
-      
+
       doc.setFont("helvetica", "bold");
       doc.text(toTitleCase(settings?.headmaster_name) || "", col1X, yPos, { align: "center" });
       doc.text(toTitleCase(settings?.bendahara_name) || ".........................", col2X, yPos, { align: "center" });
       doc.text(toTitleCase(receipt.recipient_name), col3X, yPos, { align: "center" });
-      
+
       yPos += 5;
       doc.setFontSize(8);
       doc.setFont("helvetica", "normal");
@@ -1124,7 +1088,9 @@ export default function PaymentReceipts() {
     }
   };
 
-  // Collective PDF functions for SPPD with multiple teachers and students
+  // ============================================================
+  // Kolektif PDF — urutan guru + manual + siswa pakai order_index
+  // ============================================================
   const exportCollectivePDF = async (receipt: any) => {
     try {
       const { data: settings } = await supabase
@@ -1134,20 +1100,19 @@ export default function PaymentReceipts() {
 
       const teachers = await fetchSPPDTeachers(receipt.official_travel_letters?.id);
       const students = await fetchSPPDStudents(receipt.official_travel_letters?.id);
-      
-      // Calculate travel days for rate multiplication
+
       const sppdData = receipt.official_travel_letters;
-      const travelDays = sppdData?.departure_date && sppdData?.return_date 
-        ? calculateTravelDays(sppdData.departure_date, sppdData.return_date) 
+      const travelDays = sppdData?.departure_date && sppdData?.return_date
+        ? calculateTravelDays(sppdData.departure_date, sppdData.return_date)
         : 1;
-      
+
       const doc = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
         format: 'a4'
       });
       const pageWidth = doc.internal.pageSize.getWidth();
-      
+
       let yPos = 15;
       if (settings) {
         yPos = await addLetterheadToPDF(doc, {
@@ -1162,17 +1127,15 @@ export default function PaymentReceipts() {
         });
       }
 
-      // Add "No TB :" at top right corner below letterhead
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
       doc.text(`No TB : .......`, pageWidth - 15, yPos + 3, { align: "right" });
 
-      // Add "KWITANSI KOLEKTIF" title
       yPos += 5;
       doc.setFontSize(14);
       doc.setFont("helvetica", "bold");
       doc.text("KWITANSI KOLEKTIF", pageWidth / 2, yPos, { align: "center" });
-      
+
       yPos += 5;
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
@@ -1182,7 +1145,6 @@ export default function PaymentReceipts() {
       const colonX = 50;
       const valueX = 55;
 
-      // Row 1: Sudah Diterima Dari
       yPos += 10;
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
@@ -1191,7 +1153,6 @@ export default function PaymentReceipts() {
       doc.setFont("helvetica", "bold");
       doc.text(`Bendahara BOS ${settings?.school_name || ""}`, valueX, yPos);
 
-      // Row 2: Untuk Pembayaran
       yPos += 7;
       doc.setFont("helvetica", "normal");
       doc.text("Untuk Pembayaran", leftMargin, yPos);
@@ -1201,11 +1162,10 @@ export default function PaymentReceipts() {
       doc.text(descLines, valueX, yPos);
       yPos += (descLines.length - 1) * 4;
 
-      // Table header
       yPos += 10;
       const colNo = leftMargin;
       const colName = leftMargin + 8;
-      const colNameWidth = 50; // Width for Nama column
+      const colNameWidth = 50;
       const colNIP = leftMargin + 58;
       const colJabatan = leftMargin + 90;
       const colKelas = leftMargin + 110;
@@ -1213,15 +1173,14 @@ export default function PaymentReceipts() {
       const colHari = leftMargin + 142;
       const colAmount = leftMargin + 155;
       const colTTD = pageWidth - 15;
-      
+
       doc.setFont("helvetica", "bold");
       doc.setFontSize(7);
-      
-      // Draw table header
+
       doc.setDrawColor(0);
       doc.setLineWidth(0.3);
       doc.line(leftMargin, yPos - 3, pageWidth - 15, yPos - 3);
-      
+
       doc.text("No", colNo, yPos);
       doc.text("Nama", colName, yPos);
       doc.text("NIP/NIS", colNIP, yPos);
@@ -1231,26 +1190,23 @@ export default function PaymentReceipts() {
       doc.text("Hari", colHari, yPos);
       doc.text("Jumlah (Rp)", colAmount, yPos);
       doc.text("TTD", colTTD, yPos, { align: "right" });
-      
+
       yPos += 2;
       doc.line(leftMargin, yPos, pageWidth - 15, yPos);
-      
-      // Table content
+
       doc.setFont("helvetica", "normal");
       doc.setFontSize(7);
-      
+
       let totalAmount = 0;
       let rowNumber = 0;
-      
-      // Helper function to render name with word wrap
+
       const renderNameWithWrap = (name: string, maxWidth: number) => {
-        const lines = doc.splitTextToSize(name || "-", maxWidth);
-        return lines;
+        return doc.splitTextToSize(name || "-", maxWidth);
       };
-      
-      const nameMaxWidth = colNIP - colName - 2; // Calculate max width for name column
-      
-      // Calculate and display teachers (rate per person per day * travel days)
+
+      const nameMaxWidth = colNIP - colName - 2;
+
+      // ✅ Teachers (guru + manual) sudah dalam urutan yang benar dari fetchSPPDTeachers
       teachers.forEach((teacher) => {
         const jabatan = teacher.jabatan || "Guru";
         const rate = travelRates?.find(r => r.position_type === jabatan);
@@ -1263,12 +1219,12 @@ export default function PaymentReceipts() {
           }
         }
         const amount = dailyRate * travelDays;
-        
+
         rowNumber++;
         const nameLines = renderNameWithWrap(toTitleCase(teacher.full_name) || "-", nameMaxWidth);
         const rowHeight = Math.max(7, nameLines.length * 3.5);
         yPos += rowHeight;
-        
+
         doc.text(`${rowNumber}`, colNo, yPos - (nameLines.length > 1 ? (nameLines.length - 1) * 1.75 : 0));
         nameLines.forEach((line: string, idx: number) => {
           doc.text(line, colName, yPos - (nameLines.length - 1 - idx) * 3.5);
@@ -1282,8 +1238,8 @@ export default function PaymentReceipts() {
         doc.rect(colTTD - 18, yPos - 5, 18, 6);
         totalAmount += amount;
       });
-      
-      // Calculate and display students (rate per person per day * travel days)
+
+      // ✅ Students sudah dalam urutan yang benar
       students.forEach((student) => {
         const rate = travelRates?.find(r => r.position_type === "Siswa");
         let dailyRate = 0;
@@ -1295,12 +1251,12 @@ export default function PaymentReceipts() {
           }
         }
         const amount = dailyRate * travelDays;
-        
+
         rowNumber++;
         const nameLines = renderNameWithWrap(toTitleCase(student.full_name) || "-", nameMaxWidth);
         const rowHeight = Math.max(7, nameLines.length * 3.5);
         yPos += rowHeight;
-        
+
         doc.text(`${rowNumber}`, colNo, yPos - (nameLines.length > 1 ? (nameLines.length - 1) * 1.75 : 0));
         nameLines.forEach((line: string, idx: number) => {
           doc.text(line, colName, yPos - (nameLines.length - 1 - idx) * 3.5);
@@ -1314,8 +1270,7 @@ export default function PaymentReceipts() {
         doc.rect(colTTD - 18, yPos - 5, 18, 6);
         totalAmount += amount;
       });
-      
-      // Total row
+
       yPos += 3;
       doc.line(leftMargin, yPos, pageWidth - 15, yPos);
       yPos += 5;
@@ -1326,7 +1281,6 @@ export default function PaymentReceipts() {
       yPos += 2;
       doc.line(leftMargin, yPos, pageWidth - 15, yPos);
 
-      // Terbilang
       yPos += 10;
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
@@ -1336,45 +1290,42 @@ export default function PaymentReceipts() {
       const terbilangLines = doc.splitTextToSize(amountText, pageWidth - leftMargin - 30);
       doc.text(terbilangLines, leftMargin + 20, yPos);
 
-      // Tax Section
       yPos += terbilangLines.length * 5 + 10;
       doc.setFontSize(8);
       doc.setFont("helvetica", "normal");
       doc.text("Informasi Potongan Pajak:", leftMargin, yPos);
       doc.text("PPh 21: -   |   PPh 23: -   |   PPN: -   |   Jumlah Potongan: -", leftMargin + 35, yPos);
 
-      // Signature Section - dengan jarak yang cukup dari terbilang
       yPos += 20;
       const col1X = leftMargin + 35;
       const col2X = pageWidth - leftMargin - 35;
-      
+
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
-      
-      const sppdDate = receipt.official_travel_letters?.departure_date 
+
+      const sppdDate = receipt.official_travel_letters?.departure_date
         ? format(new Date(receipt.official_travel_letters.departure_date), "dd MMMM yyyy", { locale: idLocale })
         : format(new Date(receipt.receipt_date), "dd MMMM yyyy", { locale: idLocale });
-      
+
       const receiptDate = format(new Date(receipt.receipt_date), "dd MMMM yyyy", { locale: idLocale });
-      
-      // Headers
+
       doc.text("Menyetujui,", col1X, yPos, { align: "center" });
       doc.text(`Ciamis, ${sppdDate}`, col2X, yPos, { align: "center" });
-      
+
       yPos += 5;
       doc.text(`Kepala ${settings?.school_name || "Sekolah"}`, col1X, yPos, { align: "center" });
       doc.text("Bendahara BOS", col2X, yPos, { align: "center" });
-      
+
       yPos += 4;
       doc.setFont("helvetica", "bolditalic");
       doc.text(`Lunas Dibayar Tanggal: ${receiptDate}`, col2X, yPos, { align: "center" });
 
       yPos += 20;
-      
+
       doc.setFont("helvetica", "bold");
       doc.text(toTitleCase(settings?.headmaster_name) || "", col1X, yPos, { align: "center" });
       doc.text(toTitleCase(settings?.bendahara_name) || ".........................", col2X, yPos, { align: "center" });
-      
+
       yPos += 4;
       doc.setFontSize(8);
       doc.setFont("helvetica", "normal");
@@ -1395,13 +1346,12 @@ export default function PaymentReceipts() {
     try {
       const teachers = await fetchSPPDTeachers(receipt.official_travel_letters?.id);
       const students = await fetchSPPDStudents(receipt.official_travel_letters?.id);
-      
-      // Calculate travel days for rate multiplication
+
       const sppdData = receipt.official_travel_letters;
-      const travelDays = sppdData?.departure_date && sppdData?.return_date 
-        ? calculateTravelDays(sppdData.departure_date, sppdData.return_date) 
+      const travelDays = sppdData?.departure_date && sppdData?.return_date
+        ? calculateTravelDays(sppdData.departure_date, sppdData.return_date)
         : 1;
-      
+
       setPreviewReceipt(receipt);
       setPreviewTeachers(teachers);
       setPreviewStudents(students);
@@ -1413,7 +1363,6 @@ export default function PaymentReceipts() {
     }
   };
 
-  // Smart PDF functions that choose format based on teacher + student count
   const handlePreviewPDF = (receipt: any) => {
     const totalCount = (receipt.sppd_teacher_count || 0) + (receipt.sppd_student_count || 0);
     if (totalCount > 1) {
@@ -1437,22 +1386,20 @@ export default function PaymentReceipts() {
       receipt.recipient_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       receipt.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
       receipt.official_travel_letters?.letter_number?.toLowerCase().includes(searchQuery.toLowerCase());
-    
+
     const receiptDate = new Date(receipt.receipt_date);
     const matchesStartDate = !startDateFilter || receiptDate >= startDateFilter;
     const matchesEndDate = !endDateFilter || receiptDate <= endDateFilter;
-    
-    // Month filter
+
     let matchesMonth = true;
     if (monthFilter && monthFilter !== "all") {
       const [year, month] = monthFilter.split("-");
       matchesMonth = receiptDate.getFullYear() === parseInt(year) && (receiptDate.getMonth() + 1) === parseInt(month);
     }
-    
+
     return matchesSearch && matchesStartDate && matchesEndDate && matchesMonth;
   });
 
-  // Filter RKAS budget by month
   const filteredRkasBudget = rkasBudgetData?.filter((item) => {
     if (!monthFilter || monthFilter === "all") return true;
     const [year, month] = monthFilter.split("-");
@@ -1460,7 +1407,6 @@ export default function PaymentReceipts() {
     return rkasDoc.year === parseInt(year) && rkasDoc.month === parseInt(month);
   });
 
-  // Calculate statistics from RKAS (sum of transport & travel items)
   const totalAnggaranRKAS = filteredRkasBudget?.reduce((sum, item) => {
     return sum + (Number(item.total_amount) || 0);
   }, 0) || 0;
@@ -1471,7 +1417,6 @@ export default function PaymentReceipts() {
 
   const selisih = totalAnggaranRKAS - totalRealisasiKwitansi;
 
-  // Generate month options
   const monthOptions = Array.from({ length: 12 }, (_, i) => {
     const date = new Date(new Date().getFullYear(), i, 1);
     return {
@@ -1563,8 +1508,8 @@ export default function PaymentReceipts() {
 
                   <div className="space-y-2">
                     <Label htmlFor="payment_type">Jenis Pembayaran *</Label>
-                    <Select 
-                      value={formData.payment_type} 
+                    <Select
+                      value={formData.payment_type}
                       onValueChange={handlePaymentTypeChange}
                     >
                       <SelectTrigger>
@@ -1624,7 +1569,6 @@ export default function PaymentReceipts() {
             </TabsList>
 
             <TabsContent value="receipts" className="mt-4 space-y-4">
-              {/* Statistics Cards */}
               <div className="grid gap-4 md:grid-cols-3">
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -1686,7 +1630,6 @@ export default function PaymentReceipts() {
                       />
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {/* Month Filter */}
                       <Select value={monthFilter} onValueChange={setMonthFilter}>
                         <SelectTrigger className="w-[180px]">
                           <SelectValue placeholder="Filter Bulan" />
@@ -1915,7 +1858,7 @@ export default function PaymentReceipts() {
                           <Button type="button" variant="outline" onClick={() => setIsAddPositionOpen(false)}>
                             Batal
                           </Button>
-                          <Button 
+                          <Button
                             onClick={() => createPositionMutation.mutate(newPosition)}
                             disabled={createPositionMutation.isPending || !newPosition.position_type.trim()}
                           >
@@ -2012,7 +1955,7 @@ export default function PaymentReceipts() {
                       Belum ada data tarif. Klik "Tambah Jabatan" untuk menambahkan.
                     </div>
                   )}
-                  
+
                   <div className="mt-4 p-4 bg-muted/30 rounded-lg text-sm text-muted-foreground">
                     <p className="font-medium mb-2">Keterangan:</p>
                     <ul className="list-disc list-inside space-y-1">
@@ -2027,8 +1970,7 @@ export default function PaymentReceipts() {
             </TabsContent>
           </Tabs>
         </div>
-        
-        {/* Receipt Preview Dialog */}
+
         <ReceiptPreviewDialog
           open={isPreviewOpen}
           onOpenChange={setIsPreviewOpen}
