@@ -460,14 +460,27 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: Settings, label: 'Pengaturan Bendahara', href: '/bendahara-settings' },
   ];
 
+  // ============================================================
+  // ⭐ TATA USAHA — sudah termasuk 6 menu Penggajian & Honorarium
+  // ============================================================
   const tataUsahaMenuItems: MenuItem[] = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/tata-usaha-dashboard' },
+
+    // --- Surat & Perjalanan ---
     { icon: FileSignature, label: 'Surat Tugas', href: '/assignment-letters' },
     { icon: Plane, label: 'SPPD', href: '/official-travel' },
     { icon: FileCheck, label: 'Bukti Kunjungan Guru', href: '/my-letters' },
     { icon: Receipt, label: 'Kwitansi', href: '/payment-receipts' },
     { icon: Inbox, label: 'Surat Masuk', href: '/surat-masuk' },
     { icon: Send, label: 'Surat Keluar', href: '/surat-keluar' },
+
+    // --- ⭐ Penggajian & Honorarium (Full CRUD) ---
+    { icon: Hammer, label: 'Upah Tukang', href: '/worker-payments' },
+    { icon: Moon, label: 'Piket Malam', href: '/night-shift-payments' },
+    { icon: CalendarDays, label: 'Piket Sabtu Minggu', href: '/weekend-shift-payments' },
+    { icon: GraduationCap, label: 'Honorarium GTT/PTT', href: '/gtt-ptt-honorarium' },
+    { icon: Receipt, label: 'Kwitansi Narasumber', href: '/narasumber-honorarium' },
+    { icon: Award, label: 'Honorarium Ekskul', href: '/extracurricular-honorarium' },
   ];
 
   const kesiswaanMenuItems: MenuItem[] = [
@@ -555,11 +568,13 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const filteredSiswaMenuGroups = filterMenuGroups(siswaMenuGroups);
   const filteredMenuItems = filterMenuItems(menuItems);
 
-  // ⭐ BARU: izinkan osis untuk search menu juga
+  // ⭐ BARU: izinkan osis & tata_usaha & bendahara untuk search menu
   const canSearchMenu =
     userRole === 'siswa' ||
     userRole === 'teacher' ||
-    userRole === 'osis';
+    userRole === 'osis' ||
+    userRole === 'tata_usaha' ||
+    userRole === 'bendahara';
 
   const isItemActive = (href: string) =>
     location.pathname === href || location.pathname + location.search === href;
