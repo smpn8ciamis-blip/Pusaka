@@ -18,13 +18,15 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { format, differenceInDays } from "date-fns";
 import { id } from "date-fns/locale";
-import { cn } from "@/lib/utils";
 import { Plus, Trash2, CalendarIcon, Settings, FileDown, Pencil, Users, Wallet, Receipt, Percent, ClipboardList, Eye } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { addLetterheadToPDF } from "@/lib/pdfLetterhead";
 import { WorkerReceiptPreview } from "@/components/worker/WorkerReceiptPreview";
 import { WorkerAttendancePreview } from "@/components/worker/WorkerAttendancePreview";
+
+// ⭐ MODUL PENGGajian — role yang diizinkan full CRUD
+const FINANCE_ROLES = ["tata_usaha", "bendahara", "admin", "super_admin"] as const;
 
 interface WorkerRate {
   id: string;
@@ -68,18 +70,18 @@ const WorkerPayments = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("batches");
-  
+
   // Dialog states
   const [isRateDialogOpen, setIsRateDialogOpen] = useState(false);
   const [isBatchDialogOpen, setIsBatchDialogOpen] = useState(false);
   const [isWorkerDialogOpen, setIsWorkerDialogOpen] = useState(false);
   const [editingRate, setEditingRate] = useState<WorkerRate | null>(null);
   const [selectedBatch, setSelectedBatch] = useState<WorkerPaymentBatch | null>(null);
-  
+
   // Preview states
   const [receiptPreviewBatch, setReceiptPreviewBatch] = useState<WorkerPaymentBatch | null>(null);
   const [attendancePreviewBatch, setAttendancePreviewBatch] = useState<WorkerPaymentBatch | null>(null);
-  
+
   // Form states
   const [rateForm, setRateForm] = useState({ position_type: "", daily_rate: 0 });
   const [batchForm, setBatchForm] = useState({
@@ -155,24 +157,24 @@ const WorkerPayments = () => {
     queryFn: async () => {
       const wakasekId = (schoolSettings as any)?.wakasek_sarpras_teacher_id;
       if (!wakasekId) return null;
-      
+
       const { data: teacherData, error: teacherError } = await supabase
         .from("teachers")
         .select("id, nip, jabatan, pangkat_golongan, user_id")
         .eq("id", wakasekId)
         .maybeSingle();
-      
+
       if (teacherError) throw teacherError;
       if (!teacherData) return null;
-      
+
       const { data: profileData, error: profileError } = await supabase
         .from("profiles")
         .select("full_name")
         .eq("id", teacherData.user_id)
         .maybeSingle();
-      
+
       if (profileError) throw profileError;
-      
+
       return {
         ...teacherData,
         full_name: profileData?.full_name || ""
@@ -181,10 +183,30 @@ const WorkerPayments = () => {
     enabled: !!(schoolSettings as any)?.wakasek_sarpras_teacher_id,
   });
 
+  // ==========================================================
+  // ⭐ Helper: dapatkan school_id user yang sedang login
+  // ==========================================================
+  const getUserSchoolId = async (): Promise<string | null> => {
+    if (!user?.id) return null;
+    const { data, error } = await supabase
+      .from("user_roles")
+      .select("school_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (error) {
+      console.error("Gagal ambil school_id:", error);
+      return null;
+    }
+    return data?.school_id || null;
+  };
+
   // Rate mutations
   const createRateMutation = useMutation({
     mutationFn: async (data: { position_type: string; daily_rate: number }) => {
-      const { error } = await supabase.from("worker_rates").insert(data);
+      const school_id = await getUserSchoolId();
+      const { error } = await supabase
+        .from("worker_rates")
+        .insert({ ...data, school_id });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -235,8 +257,9 @@ const WorkerPayments = () => {
       const total_gross = tempWorkers.reduce((sum, w) => sum + w.gross_amount, 0);
       const total_tax = tempWorkers.reduce((sum, w) => sum + w.tax_amount, 0);
       const total_net = tempWorkers.reduce((sum, w) => sum + w.net_amount, 0);
-      
+
       const batch_number = `KWT-${format(new Date(), "yyyyMMdd")}-${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
+      const school_id = await getUserSchoolId();
 
       const { data: batchData, error: batchError } = await supabase
         .from("worker_payment_batches")
@@ -250,6 +273,7 @@ const WorkerPayments = () => {
           total_tax,
           total_net,
           created_by: user.id,
+          school_id, // ⭐ tambahkan school_id
         })
         .select()
         .single();
@@ -267,6 +291,7 @@ const WorkerPayments = () => {
         gross_amount: w.gross_amount,
         tax_amount: w.tax_amount,
         net_amount: w.net_amount,
+        school_id, // ⭐ tambahkan school_id
       }));
 
       const { error: workersError } = await supabase
@@ -301,7 +326,7 @@ const WorkerPayments = () => {
   // Helper functions
   const calculateWorkerPayment = () => {
     if (!workerForm.start_date || !workerForm.end_date || !workerForm.position_type) return null;
-    
+
     const rate = rates.find((r) => r.position_type === workerForm.position_type);
     if (!rate) return null;
 
@@ -352,7 +377,7 @@ const WorkerPayments = () => {
 
   const numberToWords = (num: number): string => {
     const ones = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
-    
+
     if (num < 12) return ones[num];
     if (num < 20) return ones[num - 10] + ' belas';
     if (num < 100) return ones[Math.floor(num / 10)] + ' puluh' + (num % 10 ? ' ' + ones[num % 10] : '');
@@ -368,29 +393,26 @@ const WorkerPayments = () => {
   const exportPDF = async (batch: WorkerPaymentBatch) => {
     const doc = new jsPDF();
     const workers = batch.worker_payments || [];
-    
-    // Add letterhead (kop surat)
+
     const startY = await addLetterheadToPDF(doc, schoolSettings);
 
-    // Title and No TB on right
     let currentY = startY + 8;
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.text("No TB : ........", 196, currentY, { align: "right" });
-    
+
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
     doc.text("KWITANSI PEMBAYARAN TUKANG", 105, currentY, { align: "center" });
     currentY += 10;
 
-    // Sudah Diterima Dari and Untuk Pembayaran
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.text("Sudah Diterima Dari", 14, currentY);
     doc.text(":", 55, currentY);
     doc.setFont("helvetica", "bold");
     doc.text(`Bendahara BOS ${schoolSettings?.school_name || ''}`, 58, currentY);
-    
+
     currentY += 6;
     doc.setFont("helvetica", "normal");
     doc.text("Untuk Pembayaran", 14, currentY);
@@ -401,12 +423,11 @@ const WorkerPayments = () => {
     doc.text(splitPaymentDesc, 58, currentY);
     currentY += splitPaymentDesc.length * 5 + 5;
 
-    // Workers table with new format matching reference image
     const tableData = workers.map((w, i) => {
       const startDate = format(new Date(w.start_date), "dd/MM/yy");
       const endDate = format(new Date(w.end_date), "dd/MM/yy");
       const periodeKerja = `${startDate} - ${endDate}`;
-      
+
       return [
         (i + 1).toString(),
         w.worker_name,
@@ -417,11 +438,10 @@ const WorkerPayments = () => {
         `Rp ${formatCurrency(w.gross_amount).replace("Rp", "").trim()}`,
         w.tax_amount > 0 ? `Rp ${formatCurrency(w.tax_amount).replace("Rp", "").trim()}` : "Rp 0",
         `Rp ${formatCurrency(w.net_amount).replace("Rp", "").trim()}`,
-        "", // Empty cell for signature
+        "",
       ];
     });
 
-    // Add TOTAL row
     tableData.push([
       "",
       "TOTAL",
@@ -435,9 +455,8 @@ const WorkerPayments = () => {
       ""
     ]);
 
-    // Calculate page width and center the table with better column widths
     const pageWidth = doc.internal.pageSize.getWidth();
-    const tableWidth = 180; // Adjusted table width for better fit
+    const tableWidth = 180;
     const marginLeft = (pageWidth - tableWidth) / 2;
 
     autoTable(doc, {
@@ -447,12 +466,12 @@ const WorkerPayments = () => {
       theme: "grid",
       margin: { left: marginLeft },
       tableWidth: tableWidth,
-      headStyles: { 
-        fillColor: [41, 128, 185], 
-        textColor: [255, 255, 255], 
-        fontSize: 8, 
-        halign: "center", 
-        fontStyle: "bold" 
+      headStyles: {
+        fillColor: [41, 128, 185],
+        textColor: [255, 255, 255],
+        fontSize: 8,
+        halign: "center",
+        fontStyle: "bold"
       },
       bodyStyles: { fontSize: 8, textColor: [0, 0, 0] },
       columnStyles: {
@@ -468,14 +487,12 @@ const WorkerPayments = () => {
         9: { cellWidth: 18, halign: "center" },
       },
       didParseCell: function(data) {
-        // Make TOTAL row bold
         if (data.row.index === tableData.length - 1 && data.section === 'body') {
           data.cell.styles.fontStyle = 'bold';
         }
       },
     });
 
-    // Terbilang
     const finalY = (doc as any).lastAutoTable.finalY + 8;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
@@ -483,21 +500,18 @@ const WorkerPayments = () => {
     doc.setFont("helvetica", "italic");
     doc.text(`${numberToWords(batch.total_gross).charAt(0).toUpperCase() + numberToWords(batch.total_gross).slice(1)} rupiah`, 35, finalY);
 
-    // Tax information line
     const taxInfoY = finalY + 8;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     const pph21 = batch.tax_rate > 0 ? formatCurrency(batch.total_tax) : "-";
     doc.text(`Informasi Potongan Pajak: PPh 21: ${pph21}  |  PPh 23: -  |  PPN: -  |  Jumlah Potongan: ${batch.tax_rate > 0 ? formatCurrency(batch.total_tax) : "-"}`, 14, taxInfoY);
 
-    // Signatures - Kepala Sekolah (left) and Bendahara (right)
     const signY = taxInfoY + 18;
     const receiptDateFormatted = format(new Date(batch.receipt_date), "dd MMMM yyyy", { locale: id });
-    
+
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
 
-    // Kepala Sekolah (left side) - centered at 55
     const ksX = 55;
     doc.text("Menyetujui,", ksX, signY, { align: "center" });
     doc.text(`Kepala ${schoolSettings?.school_name || 'Sekolah'}`, ksX, signY + 5, { align: "center" });
@@ -512,7 +526,6 @@ const WorkerPayments = () => {
       doc.text("(___________________)", ksX, signY + 30, { align: "center" });
     }
 
-    // Bendahara (right side) - centered at 155
     const bendaharaX = 155;
     doc.text(`Ciamis, ${receiptDateFormatted}`, bendaharaX, signY, { align: "center" });
     doc.text("Bendahara BOS", bendaharaX, signY + 5, { align: "center" });
@@ -537,18 +550,15 @@ const WorkerPayments = () => {
   const exportAttendancePDF = async (batch: WorkerPaymentBatch) => {
     const doc = new jsPDF();
     const workers = batch.worker_payments || [];
-    
-    // Add letterhead (kop surat)
+
     const startY = await addLetterheadToPDF(doc, schoolSettings);
 
-    // Title
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
     doc.text("DAFTAR HADIR TUKANG", 105, startY + 5, { align: "center" });
     doc.setFontSize(11);
     doc.text(batch.job_title.toUpperCase(), 105, startY + 12, { align: "center" });
 
-    // Batch info
     let infoY = startY + 22;
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
@@ -559,7 +569,6 @@ const WorkerPayments = () => {
       infoY += 6;
     }
 
-    // Get date range from workers
     const allDates: Date[] = [];
     workers.forEach(w => {
       const start = new Date(w.start_date);
@@ -568,21 +577,18 @@ const WorkerPayments = () => {
         allDates.push(new Date(d));
       }
     });
-    
-    // Get unique dates sorted
+
     const uniqueDates = Array.from(new Set(allDates.map(d => d.toISOString().split('T')[0])))
       .sort()
       .map(d => new Date(d));
 
-    // Build table headers
     const dateHeaders = uniqueDates.map(d => format(d, "dd/MM"));
     const tableHead = ["No", "Nama Tukang", "Jabatan", ...dateHeaders, "Total\nHari"];
 
-    // Build table data
     const tableData = workers.map((w, i) => {
       const workerStart = new Date(w.start_date);
       const workerEnd = new Date(w.end_date);
-      
+
       const datePresence = uniqueDates.map(d => {
         if (d >= workerStart && d <= workerEnd) {
           return "✓";
@@ -599,8 +605,7 @@ const WorkerPayments = () => {
       ];
     });
 
-    // Calculate column widths dynamically
-    const fixedWidth = 8 + 35 + 25 + 15; // No, Nama, Jabatan, Total
+    const fixedWidth = 8 + 35 + 25 + 15;
     const dateColWidth = Math.min(12, (182 - fixedWidth) / Math.max(uniqueDates.length, 1));
 
     const columnStyles: { [key: number]: { cellWidth: number; halign?: "center" | "left" | "right" } } = {
@@ -608,7 +613,7 @@ const WorkerPayments = () => {
       1: { cellWidth: 35 },
       2: { cellWidth: 25 },
     };
-    
+
     uniqueDates.forEach((_, idx) => {
       columnStyles[3 + idx] = { cellWidth: dateColWidth, halign: "center" };
     });
@@ -624,14 +629,12 @@ const WorkerPayments = () => {
       columnStyles,
     });
 
-    // Signatures - Wakasek Sarpras and Kepala Sekolah
     const finalY = (doc as any).lastAutoTable.finalY + 15;
     const receiptDateFormatted = format(new Date(batch.receipt_date), "dd MMMM yyyy", { locale: id });
-    
+
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
 
-    // Wakasek Sarpras (left side)
     doc.text("Wakasek Sarana Prasarana,", 50, finalY, { align: "center" });
     if (wakasekSarpras?.full_name) {
       doc.setFont("helvetica", "bold");
@@ -645,7 +648,6 @@ const WorkerPayments = () => {
       doc.text("NIP. ___________________", 50, finalY + 33, { align: "center" });
     }
 
-    // Kepala Sekolah (right side)
     doc.text(`Ciamis, ${receiptDateFormatted}`, 155, finalY - 8, { align: "center" });
     doc.text("Mengetahui,", 155, finalY, { align: "center" });
     doc.text((schoolSettings as any)?.headmaster_position || "Kepala Sekolah", 155, finalY + 5, { align: "center" });
@@ -664,7 +666,8 @@ const WorkerPayments = () => {
   };
 
   return (
-    <ProtectedRoute allowedRoles={["bendahara", "admin"]}>
+    // ⭐ UBAH DI SINI: dari ["bendahara", "admin"] menjadi FINANCE_ROLES
+    <ProtectedRoute allowedRoles={[...FINANCE_ROLES]}>
       <DashboardLayout>
         <div className="space-y-6 p-4 md:p-6">
           {/* Header */}
@@ -808,7 +811,6 @@ const WorkerPayments = () => {
                             onChange={(e) => {
                               const newTaxRate = Number(e.target.value);
                               setBatchForm({ ...batchForm, tax_rate: newTaxRate });
-                              // Recalculate temp workers with new tax rate
                               setTempWorkers(tempWorkers.map(w => {
                                 const tax_amount = (w.gross_amount * newTaxRate) / 100;
                                 const net_amount = w.gross_amount - tax_amount;
@@ -903,7 +905,6 @@ const WorkerPayments = () => {
                                   </div>
                                 </div>
 
-                                {/* Preview calculation */}
                                 {calculateWorkerPayment() && (
                                   <Card className="bg-muted/50">
                                     <CardContent className="p-3 space-y-1 text-sm">
@@ -992,7 +993,7 @@ const WorkerPayments = () => {
                     </div>
                     <DialogFooter>
                       <Button variant="outline" onClick={() => setIsBatchDialogOpen(false)}>Batal</Button>
-                      <Button 
+                      <Button
                         onClick={() => createBatchMutation.mutate()}
                         disabled={!batchForm.job_title || tempWorkers.length === 0 || createBatchMutation.isPending}
                       >
@@ -1043,17 +1044,17 @@ const WorkerPayments = () => {
                             </TableCell>
                             <TableCell className="text-right">
                               <div className="flex justify-end gap-2">
-                                <Button 
-                                  variant="outline" 
-                                  size="icon" 
+                                <Button
+                                  variant="outline"
+                                  size="icon"
                                   onClick={() => setReceiptPreviewBatch(batch)}
                                   title="Preview Kwitansi"
                                 >
                                   <Eye className="h-4 w-4" />
                                 </Button>
-                                <Button 
-                                  variant="outline" 
-                                  size="icon" 
+                                <Button
+                                  variant="outline"
+                                  size="icon"
                                   onClick={() => exportPDF(batch)}
                                   title="Download PDF"
                                 >
@@ -1242,17 +1243,17 @@ const WorkerPayments = () => {
                               </TableCell>
                               <TableCell className="text-right">
                                 <div className="flex justify-end gap-2">
-                                  <Button 
-                                    variant="outline" 
-                                    size="sm" 
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
                                     onClick={() => setAttendancePreviewBatch(batch)}
                                   >
                                     <Eye className="mr-2 h-4 w-4" />
                                     Preview
                                   </Button>
-                                  <Button 
-                                    variant="outline" 
-                                    size="sm" 
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
                                     onClick={() => exportAttendancePDF(batch)}
                                   >
                                     <FileDown className="mr-2 h-4 w-4" />
