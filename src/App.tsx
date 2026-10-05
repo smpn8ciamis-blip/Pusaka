@@ -155,6 +155,12 @@ const PageLoader = () => (
   </div>
 );
 
+// =====================================================
+// ROLE CONSTANTS — Modul Penggajian & Honorarium
+// Full CRUD untuk Tata Usaha, Bendahara, dan Admin
+// =====================================================
+const FINANCE_ROLES = ['tata_usaha', 'bendahara', 'admin'] as const;
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -238,12 +244,43 @@ const App = () => (
               <Route path="/official-travel" element={<ProtectedRoute><OfficialTravel /></ProtectedRoute>} />
               <Route path="/my-letters" element={<ProtectedRoute><MyLetters /></ProtectedRoute>} />
               <Route path="/payment-receipts" element={<ProtectedRoute><PaymentReceipts /></ProtectedRoute>} />
-              <Route path="/worker-payments" element={<ProtectedRoute><WorkerPayments /></ProtectedRoute>} />
-              <Route path="/night-shift-payments" element={<ProtectedRoute allowedRoles={["bendahara", "admin"]}><NightShiftPayments /></ProtectedRoute>} />
-              <Route path="/weekend-shift-payments" element={<ProtectedRoute allowedRoles={["bendahara", "admin"]}><WeekendShiftPayments /></ProtectedRoute>} />
-              <Route path="/gtt-ptt-honorarium" element={<ProtectedRoute><GttPttHonorarium /></ProtectedRoute>} />
-              <Route path="/extracurricular-honorarium" element={<ProtectedRoute><ExtracurricularHonorarium /></ProtectedRoute>} />
-              <Route path="/narasumber-honorarium" element={<ProtectedRoute><NarasumberHonorarium /></ProtectedRoute>} />
+
+              {/* =====================================================
+                  MODUL PENGGAJIAN & HONORARIUM
+                  Full CRUD untuk Tata Usaha, Bendahara, Admin
+                  ===================================================== */}
+              <Route path="/worker-payments" element={
+                <ProtectedRoute allowedRoles={[...FINANCE_ROLES]}>
+                  <WorkerPayments />
+                </ProtectedRoute>
+              } />
+              <Route path="/night-shift-payments" element={
+                <ProtectedRoute allowedRoles={[...FINANCE_ROLES]}>
+                  <NightShiftPayments />
+                </ProtectedRoute>
+              } />
+              <Route path="/weekend-shift-payments" element={
+                <ProtectedRoute allowedRoles={[...FINANCE_ROLES]}>
+                  <WeekendShiftPayments />
+                </ProtectedRoute>
+              } />
+              <Route path="/gtt-ptt-honorarium" element={
+                <ProtectedRoute allowedRoles={[...FINANCE_ROLES]}>
+                  <GttPttHonorarium />
+                </ProtectedRoute>
+              } />
+              <Route path="/narasumber-honorarium" element={
+                <ProtectedRoute allowedRoles={[...FINANCE_ROLES]}>
+                  <NarasumberHonorarium />
+                </ProtectedRoute>
+              } />
+              <Route path="/extracurricular-honorarium" element={
+                <ProtectedRoute allowedRoles={[...FINANCE_ROLES]}>
+                  <ExtracurricularHonorarium />
+                </ProtectedRoute>
+              } />
+              {/* ===================================================== */}
+
               <Route path="/bendahara-dashboard" element={<ProtectedRoute><BendaharaDashboard /></ProtectedRoute>} />
               <Route path="/staff-registration" element={<ProtectedRoute requireRole="admin"><StaffRegistration /></ProtectedRoute>} />
               <Route path="/staff-accounts" element={<ProtectedRoute requireRole="admin"><StaffAccounts /></ProtectedRoute>} />
