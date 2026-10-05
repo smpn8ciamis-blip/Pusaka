@@ -24,7 +24,6 @@ export function DataPagination({
   const startItem = (currentPage - 1) * pageSize + 1;
   const endItem = Math.min(currentPage * pageSize, totalItems);
 
-  // Build page numbers with ellipsis
   const getPageNumbers = () => {
     const pages: (number | "ellipsis")[] = [];
     const maxVisible = 5;
@@ -36,13 +35,8 @@ export function DataPagination({
       let start = Math.max(2, currentPage - 1);
       let end = Math.min(totalPages - 1, currentPage + 1);
 
-      if (currentPage <= 3) {
-        start = 2;
-        end = 4;
-      } else if (currentPage >= totalPages - 2) {
-        start = totalPages - 3;
-        end = totalPages - 1;
-      }
+      if (currentPage <= 3) { start = 2; end = 4; }
+      else if (currentPage >= totalPages - 2) { start = totalPages - 3; end = totalPages - 1; }
 
       if (start > 2) pages.push("ellipsis");
       for (let i = start; i <= end; i++) pages.push(i);
@@ -65,10 +59,7 @@ export function DataPagination({
         {onPageSizeChange && (
           <div className="flex items-center gap-2 mr-2">
             <span className="text-xs text-muted-foreground hidden sm:inline">Per halaman:</span>
-            <Select
-              value={String(pageSize)}
-              onValueChange={(v) => onPageSizeChange(Number(v))}
-            >
+            <Select value={String(pageSize)} onValueChange={(v) => onPageSizeChange(Number(v))}>
               <SelectTrigger className="h-8 w-[70px]">
                 <SelectValue />
               </SelectTrigger>
@@ -82,61 +73,29 @@ export function DataPagination({
           </div>
         )}
 
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => onPageChange(1)}
-          disabled={currentPage === 1}
-        >
+        <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => onPageChange(1)} disabled={currentPage === 1}>
           <ChevronsLeft className="h-4 w-4" />
         </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => onPageChange(currentPage - 1)}
-          disabled={currentPage === 1}
-        >
+        <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => onPageChange(currentPage - 1)} disabled={currentPage === 1}>
           <ChevronLeft className="h-4 w-4" />
         </Button>
 
         <div className="flex items-center gap-1">
           {getPageNumbers().map((p, i) =>
             p === "ellipsis" ? (
-              <span key={`e-${i}`} className="px-2 text-muted-foreground">
-                …
-              </span>
+              <span key={`e-${i}`} className="px-2 text-muted-foreground">…</span>
             ) : (
-              <Button
-                key={p}
-                variant={p === currentPage ? "default" : "outline"}
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => onPageChange(p)}
-              >
+              <Button key={p} variant={p === currentPage ? "default" : "outline"} size="icon" className="h-8 w-8" onClick={() => onPageChange(p)}>
                 {p}
               </Button>
             )
           )}
         </div>
 
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => onPageChange(currentPage + 1)}
-          disabled={currentPage === totalPages}
-        >
+        <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => onPageChange(currentPage + 1)} disabled={currentPage === totalPages}>
           <ChevronRight className="h-4 w-4" />
         </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => onPageChange(totalPages)}
-          disabled={currentPage === totalPages}
-        >
+        <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => onPageChange(totalPages)} disabled={currentPage === totalPages}>
           <ChevronsRight className="h-4 w-4" />
         </Button>
       </div>
