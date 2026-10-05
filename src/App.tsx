@@ -156,10 +156,10 @@ const PageLoader = () => (
 );
 
 // =====================================================
-// ROLE CONSTANTS — Modul Penggajian & Honorarium
+// ⭐ ROLE CONSTANTS — Modul Penggajian & Honorarium
 // Full CRUD untuk Tata Usaha, Bendahara, dan Admin
 // =====================================================
-const FINANCE_ROLES = ['tata_usaha', 'bendahara', 'admin'] as const;
+const FINANCE_ROLES = ['tata_usaha', 'bendahara', 'admin', 'super_admin'] as const;
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -246,8 +246,8 @@ const App = () => (
               <Route path="/payment-receipts" element={<ProtectedRoute><PaymentReceipts /></ProtectedRoute>} />
 
               {/* =====================================================
-                  MODUL PENGGAJIAN & HONORARIUM
-                  Full CRUD untuk Tata Usaha, Bendahara, Admin
+                  ⭐ MODUL PENGGAJIAN & HONORARIUM
+                  Full CRUD untuk Tata Usaha, Bendahara, Admin, Super Admin
                   ===================================================== */}
               <Route path="/worker-payments" element={
                 <ProtectedRoute allowedRoles={[...FINANCE_ROLES]}>
