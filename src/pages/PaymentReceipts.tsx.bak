@@ -25,7 +25,6 @@ import jsPDF from 'jspdf';
 import { addLetterheadToPDF } from '@/lib/pdfLetterhead';
 import { z } from "zod";
 import { ReceiptPreviewDialog } from "@/components/receipt/ReceiptPreviewDialog";
-import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DataPagination } from "@/components/ui/data-pagination";
 import { usePagination } from "@/hooks/usePagination";
 
@@ -1127,23 +1126,23 @@ export default function PaymentReceipts() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Pilih SPPD *</Label>
-                      <SearchableSelect
-                        options={
-                          sppdList?.map((sppd) => ({
-                            value: sppd.id,
-                            label: `${sppd.letter_number} - ${sppd.purpose?.substring(0, 60) || ""}`,
-                            description: `${sppd.destination || ""} • ${sppd.departure_date || ""}`,
-                            keywords: `${sppd.letter_number} ${sppd.purpose || ""} ${sppd.destination || ""}`,
-                          })) || []
-                        }
-                        value={selectedSPPD}
-                        onValueChange={handleSPPDChange}
-                        placeholder="Pilih SPPD terkait..."
-                        searchPlaceholder="Cari nomor SPPD / maksud / tujuan..."
-                        emptyMessage="Tidak ada SPPD yang cocok."
-                        disabled={isEditMode}
-                        maxHeight="400px"
-                      />
+                      <Select value={selectedSPPD} onValueChange={handleSPPDChange} disabled={isEditMode}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Pilih SPPD terkait..." />
+                        </SelectTrigger>
+                        <SelectContent
+                          position="popper"
+                          className="max-h-[400px] overflow-y-auto z-[9999] min-w-[400px]"
+                        >
+                          {sppdList?.map((sppd) => (
+                            <SelectItem key={sppd.id} value={sppd.id}>
+                              <span className="block truncate max-w-[500px]">
+                                {sppd.letter_number} - {sppd.purpose?.substring(0, 60)}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="receipt_number">Nomor Kwitansi *</Label>

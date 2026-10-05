@@ -25,7 +25,6 @@ import { addLetterheadToPDF } from '@/lib/pdfLetterhead';
 import { z } from "zod";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SPDPreviewDialog } from "@/components/spd/SPDPreviewDialog";
-import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DataPagination } from "@/components/ui/data-pagination";
 import { usePagination } from "@/hooks/usePagination";
 
@@ -1181,23 +1180,35 @@ export default function OfficialTravel() {
                   {!isEditMode && (
                     <div className="space-y-2">
                       <Label>Pilih Surat Tugas *</Label>
-                      <SearchableSelect
-                        options={
-                          assignmentLetters?.map((letter: any) => ({
-                            value: letter.id,
-                            label: `${letter.letter_number} - ${letter.description?.substring(0, 60) || ""}`,
-                            description: `${letter.assignment_type || ""} • ${letter.location || ""}`,
-                            keywords: `${letter.letter_number} ${letter.description || ""} ${letter.assignment_type || ""} ${letter.location || ""}`,
-                          })) || []
-                        }
+                      <Select
                         value={selectedAssignmentLetter}
                         onValueChange={handleAssignmentLetterSelect}
-                        placeholder={loadingAssignmentLetters ? "Memuat..." : "Pilih nomor surat tugas..."}
-                        searchPlaceholder="Cari nomor surat / deskripsi / lokasi..."
-                        emptyMessage="Tidak ada surat tugas yang cocok."
-                        loading={loadingAssignmentLetters}
-                        maxHeight="400px"
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder={loadingAssignmentLetters ? "Memuat..." : "Pilih nomor surat tugas..."} />
+                        </SelectTrigger>
+                        {/* ✅ Perbaikan: dropdown tidak terpotong */}
+                        <SelectContent
+                          position="popper"
+                          sideOffset={4}
+                          align="start"
+                          className="bg-background border shadow-lg z-[9999] max-h-[400px] overflow-y-auto w-[var(--radix-select-trigger-width)] min-w-[400px]"
+                        >
+                          {loadingAssignmentLetters ? (
+                            <SelectItem value="loading" disabled>Memuat data...</SelectItem>
+                          ) : assignmentLetters && assignmentLetters.length > 0 ? (
+                            assignmentLetters.map((letter: any) => (
+                              <SelectItem key={letter.id} value={letter.id}>
+                                <span className="block truncate max-w-[500px]">
+                                  {letter.letter_number} - {letter.description?.substring(0, 80)}
+                                </span>
+                              </SelectItem>
+                            ))
+                          ) : (
+                            <SelectItem value="empty" disabled>Tidak ada surat tugas</SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
                     </div>
                   )}
 
@@ -1408,28 +1419,25 @@ export default function OfficialTravel() {
                                   })}
                                 </div>
                               )}
-                              <SearchableSelect
-                                options={
-                                  teachers
-                                    ?.filter((t) => !selectedTeachers.includes(t.id))
-                                    .map((teacher) => ({
-                                      value: teacher.id,
-                                      label: `${(teacher as any).profiles?.full_name || "-"} - ${teacher.nip || "-"}`,
-                                      description: teacher.subject || "",
-                                      keywords: `${(teacher as any).profiles?.full_name || ""} ${teacher.nip || ""} ${teacher.subject || ""}`,
-                                    })) || []
+                              <Select onValueChange={(value) => {
+                                if (!selectedTeachers.includes(value)) {
+                                  setSelectedTeachers(prev => [...prev, value]);
                                 }
-                                value=""
-                                onValueChange={(value) => {
-                                  if (value && !selectedTeachers.includes(value)) {
-                                    setSelectedTeachers((prev) => [...prev, value]);
-                                  }
-                                }}
-                                placeholder="Tambah guru..."
-                                searchPlaceholder="Cari nama guru / NIP / mapel..."
-                                emptyMessage="Tidak ada guru."
-                                maxHeight="300px"
-                              />
+                              }}>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Tambah guru..." />
+                                </SelectTrigger>
+                                <SelectContent
+                                  position="popper"
+                                  className="max-h-[300px] overflow-y-auto z-[9999]"
+                                >
+                                  {teachers?.filter(t => !selectedTeachers.includes(t.id)).map((teacher) => (
+                                    <SelectItem key={teacher.id} value={teacher.id}>
+                                      {(teacher as any).profiles?.full_name} - {teacher.nip || "-"}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                               <p className="text-xs text-muted-foreground">Guru pertama menjadi Pelaksana Utama. Klik badge untuk menghapus.</p>
                             </>
                           ) : (
