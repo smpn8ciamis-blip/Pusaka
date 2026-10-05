@@ -1131,8 +1131,8 @@ export default function PaymentReceipts() {
                         options={
                           sppdList?.map((sppd) => ({
                             value: sppd.id,
-                            label: `${sppd.letter_number} - ${sppd.purpose?.substring(0, 60) || ""}`,
-                            description: `${sppd.destination || ""} • ${sppd.departure_date || ""}`,
+                            label: sppd.letter_number,
+                            description: `${sppd.purpose?.substring(0, 80) || ""} • ${sppd.destination || ""}`,
                             keywords: `${sppd.letter_number} ${sppd.purpose || ""} ${sppd.destination || ""}`,
                           })) || []
                         }
@@ -1142,7 +1142,7 @@ export default function PaymentReceipts() {
                         searchPlaceholder="Cari nomor SPPD / maksud / tujuan..."
                         emptyMessage="Tidak ada SPPD yang cocok."
                         disabled={isEditMode}
-                        maxHeight="400px"
+                        maxHeight="min(400px, 50vh)"
                       />
                     </div>
                     <div className="space-y-2">

@@ -1185,8 +1185,8 @@ export default function OfficialTravel() {
                         options={
                           assignmentLetters?.map((letter: any) => ({
                             value: letter.id,
-                            label: `${letter.letter_number} - ${letter.description?.substring(0, 60) || ""}`,
-                            description: `${letter.assignment_type || ""} • ${letter.location || ""}`,
+                            label: letter.letter_number,
+                            description: `${letter.description?.substring(0, 80) || ""} • ${letter.location || ""}`,
                             keywords: `${letter.letter_number} ${letter.description || ""} ${letter.assignment_type || ""} ${letter.location || ""}`,
                           })) || []
                         }
@@ -1196,7 +1196,7 @@ export default function OfficialTravel() {
                         searchPlaceholder="Cari nomor surat / deskripsi / lokasi..."
                         emptyMessage="Tidak ada surat tugas yang cocok."
                         loading={loadingAssignmentLetters}
-                        maxHeight="400px"
+                        maxHeight="min(400px, 50vh)"
                       />
                     </div>
                   )}
