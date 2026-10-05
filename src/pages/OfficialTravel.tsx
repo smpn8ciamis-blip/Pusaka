@@ -25,8 +25,9 @@ import { addLetterheadToPDF } from '@/lib/pdfLetterhead';
 import { z } from "zod";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SPDPreviewDialog } from "@/components/spd/SPDPreviewDialog";
+import { DataPagination } from "@/components/ui/data-pagination";
+import { usePagination } from "@/hooks/usePagination";
 
-// Helper function to convert number to Indonesian words
 const numberToWords = (num: number): string => {
   const words = ['nol', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh',
     'sebelas', 'dua belas', 'tiga belas', 'empat belas', 'lima belas', 'enam belas', 'tujuh belas', 'delapan belas', 'sembilan belas', 'dua puluh',
@@ -78,50 +79,22 @@ export default function OfficialTravel() {
     notes: "",
   });
 
-  // ============================================================
-  // Fetch assignment letters for dropdown — dengan order_index
-  // ============================================================
+  // Fetch assignment letters dengan order_index
   const { data: assignmentLetters, isLoading: loadingAssignmentLetters } = useQuery({
     queryKey: ["assignment-letters-for-sppd"],
     queryFn: async () => {
       const { data: letters, error: lettersError } = await supabase
         .from("assignment_letters")
-        .select(`
-          id,
-          letter_number,
-          letter_date,
-          assignment_type,
-          description,
-          location,
-          start_date,
-          end_date,
-          dasar_surat_tugas,
-          tanggal_dasar_surat_tugas
-        `)
+        .select(`id, letter_number, letter_date, assignment_type, description, location, start_date, end_date, dasar_surat_tugas, tanggal_dasar_surat_tugas`)
         .order("letter_date", { ascending: false });
 
-      if (lettersError) {
-        console.error("Error fetching assignment letters:", lettersError);
-        throw lettersError;
-      }
+      if (lettersError) throw lettersError;
 
-      const lettersWithTeachers = await Promise.all(
+      return await Promise.all(
         (letters || []).map(async (letter) => {
-          // ✅ Ambil guru dengan order_index dan urutkan
           const { data: letterTeachers } = await supabase
             .from("assignment_letter_teachers")
-            .select(`
-              teacher_id,
-              order_index,
-              teachers (
-                id,
-                nip,
-                subject,
-                user_id,
-                pangkat_golongan,
-                jabatan
-              )
-            `)
+            .select(`teacher_id, order_index, teachers (id, nip, subject, user_id, pangkat_golongan, jabatan)`)
             .eq("assignment_letter_id", letter.id)
             .order("order_index", { ascending: true });
 
@@ -129,42 +102,27 @@ export default function OfficialTravel() {
             (letterTeachers || []).map(async (lt: any) => {
               if (lt.teachers?.user_id) {
                 const { data: profile } = await supabase
-                  .from("profiles_public")
-                  .select("full_name")
-                  .eq("id", lt.teachers.user_id)
-                  .maybeSingle();
-                return {
-                  ...lt,
-                  teachers: { ...lt.teachers, profiles: profile }
-                };
+                  .from("profiles_public").select("full_name").eq("id", lt.teachers.user_id).maybeSingle();
+                return { ...lt, teachers: { ...lt.teachers, profiles: profile } };
               }
               return lt;
             })
           );
 
-          // ✅ Ambil manual executor dengan order_index dan urutkan
           const { data: manualExecutors } = await supabase
             .from("assignment_letter_manual_executors")
             .select("id, full_name, nip, pangkat_golongan, jabatan, order_index")
             .eq("assignment_letter_id", letter.id)
             .order("order_index", { ascending: true });
 
-          return {
-            ...letter,
-            assignment_letter_teachers: teachersWithProfiles,
-            assignment_letter_manual_executors: manualExecutors || []
-          };
+          return { ...letter, assignment_letter_teachers: teachersWithProfiles, assignment_letter_manual_executors: manualExecutors || [] };
         })
       );
-
-      return lettersWithTeachers;
     },
   });
 
-  // Get selected assignment letter details
   const selectedLetterData = assignmentLetters?.find((al: any) => al.id === selectedAssignmentLetter);
 
-  // ✅ Gabung guru + manual, sort pakai order_index global dari surat tugas
   const combinedExecutors = [
     ...(selectedLetterData?.assignment_letter_teachers || []).map((alt: any) => ({
       ...alt.teachers,
@@ -188,7 +146,6 @@ export default function OfficialTravel() {
   const mainTeacher = allExecutors[0] || null;
   const followerTeachers = allExecutors.slice(1) || [];
 
-  // Fetch teachers
   const { data: teachers } = useQuery({
     queryKey: ["teachers-for-travel"],
     queryFn: async () => {
@@ -201,27 +158,18 @@ export default function OfficialTravel() {
     },
   });
 
-  // Fetch students for follower selection
   const { data: students } = useQuery({
     queryKey: ["students-for-travel"],
     queryFn: async () => {
       const { data: studentsData, error } = await supabase
-        .from("students")
-        .select("id, nis, nisn, full_name, class_id")
-        .eq("is_alumni", false)
-        .order("full_name");
+        .from("students").select("id, nis, nisn, full_name, class_id").eq("is_alumni", false).order("full_name");
       if (error) throw error;
 
       const classIds = [...new Set(studentsData?.map(s => s.class_id).filter(Boolean))] as string[];
       let classMap: Record<string, string> = {};
       if (classIds.length > 0) {
-        const { data: classesData } = await supabase
-          .from("classes")
-          .select("id, name")
-          .in("id", classIds);
-        if (classesData) {
-          classMap = Object.fromEntries(classesData.map(c => [c.id, c.name]));
-        }
+        const { data: classesData } = await supabase.from("classes").select("id, name").in("id", classIds);
+        if (classesData) classMap = Object.fromEntries(classesData.map(c => [c.id, c.name]));
       }
 
       return studentsData?.map(student => ({
@@ -237,39 +185,19 @@ export default function OfficialTravel() {
     (student.nisn && student.nisn.toLowerCase().includes(studentSearchQuery.toLowerCase()))
   ) || [];
 
-  // ============================================================
-  // Fetch official travel letters — dengan order_index
-  // ============================================================
   const { data: travels, isLoading } = useQuery({
     queryKey: ["official-travel-letters"],
     queryFn: async () => {
       const { data: letters, error: lettersError } = await supabase
-        .from("official_travel_letters")
-        .select("*")
-        .order("letter_date", { ascending: false });
+        .from("official_travel_letters").select("*").order("letter_date", { ascending: false });
 
-      if (lettersError) {
-        console.error("Error fetching official travel letters:", lettersError);
-        throw lettersError;
-      }
+      if (lettersError) throw lettersError;
 
-      const lettersWithData = await Promise.all(
+      return await Promise.all(
         (letters || []).map(async (letter) => {
-          // ✅ Fetch teachers dengan order_index, urutkan
           const { data: travelTeachers } = await supabase
             .from("official_travel_teachers")
-            .select(`
-              teacher_id,
-              order_index,
-              teachers (
-                id,
-                nip,
-                subject,
-                user_id,
-                pangkat_golongan,
-                jabatan
-              )
-            `)
+            .select(`teacher_id, order_index, teachers (id, nip, subject, user_id, pangkat_golongan, jabatan)`)
             .eq("official_travel_id", letter.id)
             .order("order_index", { ascending: true });
 
@@ -277,20 +205,13 @@ export default function OfficialTravel() {
             (travelTeachers || []).map(async (tt: any) => {
               if (tt.teachers?.user_id) {
                 const { data: profile } = await supabase
-                  .from("profiles_public")
-                  .select("full_name")
-                  .eq("id", tt.teachers.user_id)
-                  .maybeSingle();
-                return {
-                  ...tt,
-                  teachers: { ...tt.teachers, profiles: profile }
-                };
+                  .from("profiles_public").select("full_name").eq("id", tt.teachers.user_id).maybeSingle();
+                return { ...tt, teachers: { ...tt.teachers, profiles: profile } };
               }
               return tt;
             })
           );
 
-          // ✅ Fetch followers dengan order_index, urutkan
           const { data: followers } = await supabase
             .from("official_travel_followers")
             .select("id, follower_type, teacher_id, student_id, manual_executor_name, manual_executor_nip, manual_executor_pangkat, manual_executor_jabatan, order_index")
@@ -303,20 +224,13 @@ export default function OfficialTravel() {
           let studentsWithClass: Record<string, any> = {};
           if (studentIds.length > 0) {
             const { data: students } = await supabase
-              .from("students")
-              .select("id, nis, nisn, full_name, class_id")
-              .in("id", studentIds);
+              .from("students").select("id, nis, nisn, full_name, class_id").in("id", studentIds);
 
             const classIds = (students || []).map(s => s.class_id).filter(Boolean);
             let classMap = new Map<string, string>();
             if (classIds.length > 0) {
-              const { data: classes } = await supabase
-                .from("classes")
-                .select("id, name")
-                .in("id", classIds);
-              if (classes) {
-                classMap = new Map(classes.map(c => [c.id, c.name]));
-              }
+              const { data: classes } = await supabase.from("classes").select("id, name").in("id", classIds);
+              if (classes) classMap = new Map(classes.map(c => [c.id, c.name]));
             }
 
             (students || []).forEach(student => {
@@ -350,21 +264,12 @@ export default function OfficialTravel() {
             return { ...f, students: null };
           });
 
-          return {
-            ...letter,
-            official_travel_teachers: teachersWithProfiles,
-            official_travel_followers: followersWithData
-          };
+          return { ...letter, official_travel_teachers: teachersWithProfiles, official_travel_followers: followersWithData };
         })
       );
-
-      return lettersWithData;
     },
   });
 
-  // ============================================================
-  // Create mutation — simpan order_index
-  // ============================================================
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData & { teacher_ids: string[], student_follower_ids: string[] }) => {
       const selectedLetter = assignmentLetters?.find((al: any) => al.id === data.assignment_letter_id);
@@ -416,7 +321,6 @@ export default function OfficialTravel() {
 
       if (letterError) throw letterError;
 
-      // ✅ Insert teachers dengan order_index dari surat tugas
       const teacherOrderMap: Record<string, number> = JSON.parse(
         sessionStorage.getItem('spd_teacher_order_map') || '{}'
       );
@@ -428,31 +332,21 @@ export default function OfficialTravel() {
       }));
 
       const { error: teacherError } = await supabase
-        .from("official_travel_teachers")
-        .insert(teacherInserts);
-
+        .from("official_travel_teachers").insert(teacherInserts);
       if (teacherError) throw teacherError;
 
       sessionStorage.removeItem('spd_teacher_order_map');
 
-      // Student followers
-      const allFollowerInserts: any[] = [];
       if (data.student_follower_ids.length > 0) {
-        data.student_follower_ids.forEach((student_id, idx) => {
-          allFollowerInserts.push({
-            official_travel_id: letter.id,
-            follower_type: 'student',
-            student_id,
-            order_index: 10000 + idx, // offset besar, agar setelah guru & manual
-          });
-        });
-      }
+        const allFollowerInserts = data.student_follower_ids.map((student_id, idx) => ({
+          official_travel_id: letter.id,
+          follower_type: 'student',
+          student_id,
+          order_index: 10000 + idx,
+        }));
 
-      if (allFollowerInserts.length > 0) {
         const { error: followerError } = await supabase
-          .from("official_travel_followers")
-          .insert(allFollowerInserts);
-
+          .from("official_travel_followers").insert(allFollowerInserts);
         if (followerError) throw followerError;
       }
     },
@@ -477,9 +371,7 @@ export default function OfficialTravel() {
   const handleEditDuplicateSPD = () => {
     if (!duplicateSPD) return;
     const fullSPDData = travels?.find((t: any) => t.id === duplicateSPD.id);
-    if (fullSPDData) {
-      handleEdit(fullSPDData);
-    }
+    if (fullSPDData) handleEdit(fullSPDData);
     setDuplicateDialogOpen(false);
     setDuplicateSPD(null);
   };
@@ -498,10 +390,7 @@ export default function OfficialTravel() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from("official_travel_letters")
-        .delete()
-        .eq("id", id);
+      const { error } = await supabase.from("official_travel_letters").delete().eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -513,58 +402,36 @@ export default function OfficialTravel() {
     },
   });
 
-  // Repair: sync manual executors + order_index dari surat tugas
   const handleRepairSPDData = async () => {
     setIsRepairing(true);
     setRepairResults(null);
-
     try {
       const results = { repaired: 0, skipped: 0, errors: [] as string[] };
-
-      if (!travels || !assignmentLetters) {
-        throw new Error("Data SPD atau Surat Tugas tidak tersedia");
-      }
+      if (!travels || !assignmentLetters) throw new Error("Data SPD atau Surat Tugas tidak tersedia");
 
       for (const spd of travels) {
         try {
           const matchingLetter = assignmentLetters.find((al: any) => al.letter_number === spd.letter_number);
-
-          if (!matchingLetter) {
-            results.skipped++;
-            continue;
-          }
+          if (!matchingLetter) { results.skipped++; continue; }
 
           const manualExecutors = matchingLetter.assignment_letter_manual_executors || [];
-
           const needsAssignmentLetterLink = !spd.assignment_letter_id;
           const existingManualExecutors = spd.official_travel_followers?.filter(
             (f: any) => f.follower_type === 'manual_executor'
           ) || [];
           const needsManualExecutors = manualExecutors.length > 0 && existingManualExecutors.length < manualExecutors.length;
 
-          if (!needsAssignmentLetterLink && !needsManualExecutors) {
-            results.skipped++;
-            continue;
-          }
+          if (!needsAssignmentLetterLink && !needsManualExecutors) { results.skipped++; continue; }
 
           if (needsAssignmentLetterLink) {
             const { error: updateError } = await supabase
-              .from("official_travel_letters")
-              .update({ assignment_letter_id: matchingLetter.id })
-              .eq("id", spd.id);
-
-            if (updateError) {
-              results.errors.push(`SPD ${spd.letter_number}: ${updateError.message}`);
-              continue;
-            }
+              .from("official_travel_letters").update({ assignment_letter_id: matchingLetter.id }).eq("id", spd.id);
+            if (updateError) { results.errors.push(`SPD ${spd.letter_number}: ${updateError.message}`); continue; }
           }
 
           if (!needsAssignmentLetterLink && needsManualExecutors) {
-            await supabase
-              .from("official_travel_followers")
-              .delete()
-              .eq("official_travel_id", spd.id)
-              .eq("follower_type", "manual_executor");
+            await supabase.from("official_travel_followers").delete()
+              .eq("official_travel_id", spd.id).eq("follower_type", "manual_executor");
 
             const teacherCount = (spd.official_travel_teachers || []).length;
             const followerInserts = manualExecutors.map((executor: any) => ({
@@ -577,16 +444,9 @@ export default function OfficialTravel() {
               order_index: teacherCount + (executor.order_index ?? 0),
             }));
 
-            const { error } = await supabase
-              .from("official_travel_followers")
-              .insert(followerInserts);
-
-            if (error) {
-              results.errors.push(`SPD ${spd.letter_number}: ${error.message}`);
-              continue;
-            }
+            const { error } = await supabase.from("official_travel_followers").insert(followerInserts);
+            if (error) { results.errors.push(`SPD ${spd.letter_number}: ${error.message}`); continue; }
           }
-
           results.repaired++;
         } catch (error: any) {
           results.errors.push(`SPD ${spd.letter_number}: ${error.message || 'Unknown error'}`);
@@ -594,7 +454,6 @@ export default function OfficialTravel() {
       }
 
       setRepairResults(results);
-
       if (results.repaired > 0) {
         queryClient.invalidateQueries({ queryKey: ["official-travel-letters"] });
         toast.success(`Berhasil memperbaiki ${results.repaired} SPD`);
@@ -608,9 +467,6 @@ export default function OfficialTravel() {
     }
   };
 
-  // ============================================================
-  // Update mutation — simpan order_index
-  // ============================================================
   const updateMutation = useMutation({
     mutationFn: async (data: typeof formData & { teacher_ids: string[], student_follower_ids: string[] }) => {
       if (!editingId) throw new Error("No editing ID");
@@ -648,11 +504,7 @@ export default function OfficialTravel() {
 
       if (letterError) throw letterError;
 
-      // Delete existing teachers & re-insert dengan order_index
-      await supabase
-        .from("official_travel_teachers")
-        .delete()
-        .eq("official_travel_id", editingId);
+      await supabase.from("official_travel_teachers").delete().eq("official_travel_id", editingId);
 
       const teacherOrderMap: Record<string, number> = JSON.parse(
         sessionStorage.getItem('spd_teacher_order_map') || '{}'
@@ -665,20 +517,14 @@ export default function OfficialTravel() {
       }));
 
       if (teacherInserts.length > 0) {
-        const { error: teacherError } = await supabase
-          .from("official_travel_teachers")
-          .insert(teacherInserts);
+        const { error: teacherError } = await supabase.from("official_travel_teachers").insert(teacherInserts);
         if (teacherError) throw teacherError;
       }
 
       sessionStorage.removeItem('spd_teacher_order_map');
 
-      // Delete existing student followers & re-insert
-      await supabase
-        .from("official_travel_followers")
-        .delete()
-        .eq("official_travel_id", editingId)
-        .eq("follower_type", "student");
+      await supabase.from("official_travel_followers").delete()
+        .eq("official_travel_id", editingId).eq("follower_type", "student");
 
       if (data.student_follower_ids.length > 0) {
         const studentFollowerInserts = data.student_follower_ids.map((student_id, idx) => ({
@@ -688,9 +534,7 @@ export default function OfficialTravel() {
           order_index: 10000 + idx,
         }));
 
-        const { error: followerError } = await supabase
-          .from("official_travel_followers")
-          .insert(studentFollowerInserts);
+        const { error: followerError } = await supabase.from("official_travel_followers").insert(studentFollowerInserts);
         if (followerError) throw followerError;
       }
     },
@@ -728,22 +572,17 @@ export default function OfficialTravel() {
     sessionStorage.removeItem('spd_teacher_order_map');
   };
 
-  // ============================================================
-  // Handle assignment letter select — simpan order map
-  // ============================================================
   const handleAssignmentLetterSelect = (letterId: string) => {
     setSelectedAssignmentLetter(letterId);
     const selectedLetter = assignmentLetters?.find((al: any) => al.id === letterId);
 
     if (selectedLetter) {
-      // Ambil guru TERURUT berdasarkan order_index dari surat tugas
       const sortedTeachers = [...(selectedLetter.assignment_letter_teachers || [])]
         .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0));
 
       const teacherIds = sortedTeachers.map((alt: any) => alt.teacher_id);
       setSelectedTeachers(teacherIds);
 
-      // Simpan mapping order_index guru
       const teacherOrderMap: Record<string, number> = {};
       sortedTeachers.forEach((alt: any) => {
         teacherOrderMap[alt.teacher_id] = alt.order_index ?? 0;
@@ -766,17 +605,9 @@ export default function OfficialTravel() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (isEditMode && editingId) {
-      updateMutation.mutate({
-        ...formData,
-        teacher_ids: selectedTeachers,
-        student_follower_ids: selectedStudentFollowers,
-      });
+      updateMutation.mutate({ ...formData, teacher_ids: selectedTeachers, student_follower_ids: selectedStudentFollowers });
     } else {
-      createMutation.mutate({
-        ...formData,
-        teacher_ids: selectedTeachers,
-        student_follower_ids: selectedStudentFollowers,
-      });
+      createMutation.mutate({ ...formData, teacher_ids: selectedTeachers, student_follower_ids: selectedStudentFollowers });
     }
   };
 
@@ -800,7 +631,6 @@ export default function OfficialTravel() {
 
     setSelectedAssignmentLetter(travel.assignment_letter_id || "");
 
-    // ✅ Susun teacher order map dari SPD existing
     const sortedTeachers = [...(travel.official_travel_teachers || [])]
       .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0));
     const teacherIds = sortedTeachers.map((tt: any) => tt.teacher_id);
@@ -828,38 +658,35 @@ export default function OfficialTravel() {
 
   const toggleTeacher = (teacherId: string) => {
     setSelectedTeachers((prev) =>
-      prev.includes(teacherId)
-        ? prev.filter((id) => id !== teacherId)
-        : [...prev, teacherId]
+      prev.includes(teacherId) ? prev.filter((id) => id !== teacherId) : [...prev, teacherId]
     );
   };
 
   const toggleStudentFollower = (studentId: string) => {
     setSelectedStudentFollowers((prev) =>
-      prev.includes(studentId)
-        ? prev.filter((id) => id !== studentId)
-        : [...prev, studentId]
+      prev.includes(studentId) ? prev.filter((id) => id !== studentId) : [...prev, studentId]
     );
   };
 
-  // ============================================================
-  // Export PDF — urutan sesuai order_index
-  // ============================================================
   const exportPDF = async (travel: any) => {
     try {
-      const { data: settings } = await supabase
-        .from("school_settings")
-        .select("*")
-        .single();
+      const { data: settings } = await supabase.from("school_settings").select("*").single();
 
-      const doc = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: [210, 330]
-      });
+      // Baca font size dari localStorage (sinkron dengan SPDPreviewDialog)
+      const saved = JSON.parse(localStorage.getItem("spd_preview_settings_v1") || "{}");
+      const fontSizeTitle = saved.fontSizeTitle ?? 12;
+      const fontSizeBody = saved.fontSizeBody ?? 10;
+      const fontSizeTable = saved.fontSizeTable ?? 9;
+      const fontSizeSignature = saved.fontSizeSignature ?? 10;
+      const BLACK: [number, number, number] = [0, 0, 0];
+      const WHITE: [number, number, number] = [255, 255, 255];
+
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [210, 330] });
       const pageWidth = doc.internal.pageSize.getWidth();
 
-      // === PAGE 1 ===
+      doc.setTextColor(...BLACK);
+      doc.setDrawColor(...BLACK);
+
       let yPos = 15;
       if (settings) {
         yPos = await addLetterheadToPDF(doc, {
@@ -875,7 +702,7 @@ export default function OfficialTravel() {
       }
 
       yPos += 5;
-      doc.setFontSize(9);
+      doc.setFontSize(fontSizeBody);
       doc.setFont("helvetica", "normal");
       doc.text("Lembar ke", pageWidth - 70, yPos);
       doc.text(": .................................", pageWidth - 50, yPos);
@@ -887,7 +714,7 @@ export default function OfficialTravel() {
       doc.text(`: ${travel.letter_number}`, pageWidth - 50, yPos);
 
       yPos += 10;
-      doc.setFontSize(12);
+      doc.setFontSize(fontSizeTitle);
       doc.setFont("helvetica", "bold");
       doc.text("SURAT PERJALANAN DINAS (SPD)", pageWidth / 2, yPos, { align: "center" });
       doc.setLineWidth(0.5);
@@ -898,7 +725,6 @@ export default function OfficialTravel() {
       const diffTime = Math.abs(returnDate.getTime() - departureDate.getTime());
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
 
-      // ✅ Ambil guru utama (order_index terkecil)
       const sortedTeachers = [...(travel.official_travel_teachers || [])]
         .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0));
       const firstTeacher = sortedTeachers[0]?.teachers;
@@ -908,10 +734,6 @@ export default function OfficialTravel() {
       const teacherJabatan = firstTeacher?.jabatan || "-";
 
       yPos += 8;
-      const tableStartY = yPos;
-      const leftCol = 14;
-      const rightCol = pageWidth - 14;
-
       const tableData = [
         ["1.", "Pejabat Pembuat Komitmen", `Kepala ${settings?.school_name || "-"}`],
         ["2.", "Nama/NIP Pegawai yang\nmelaksanakan perjalanan dinas", `${teacherName}\nNIP. ${teacherNip}`],
@@ -923,22 +745,20 @@ export default function OfficialTravel() {
       ];
 
       autoTable(doc, {
-        startY: tableStartY,
+        startY: yPos,
         head: [],
         body: tableData,
-        styles: { fontSize: 9, cellPadding: 3, lineColor: [0, 0, 0], lineWidth: 0.2, valign: 'top' },
-        columnStyles: {
-          0: { cellWidth: 10, halign: 'center' },
-          1: { cellWidth: 55 },
-          2: { cellWidth: pageWidth - 93 },
-        },
+        styles: { fontSize: fontSizeTable, cellPadding: 3, lineColor: BLACK, lineWidth: 0.2, valign: 'top', textColor: BLACK, fillColor: WHITE },
+        headStyles: { textColor: BLACK, fillColor: WHITE },
+        bodyStyles: { textColor: BLACK, fillColor: WHITE },
+        alternateRowStyles: { fillColor: WHITE },
+        columnStyles: { 0: { cellWidth: 10, halign: 'center' }, 1: { cellWidth: 55 }, 2: { cellWidth: pageWidth - 93 } },
         theme: 'grid',
-        margin: { left: leftCol, right: 14 },
+        margin: { left: 14, right: 14 },
       });
 
       yPos = (doc as any).lastAutoTable.finalY;
 
-      // ✅ Pengikut (guru + manual + siswa) diurutkan berdasarkan order_index
       const followerExecutors = [
         ...sortedTeachers.slice(1).map((t: any) => ({
           name: t.teachers?.profiles?.full_name || "-",
@@ -964,13 +784,6 @@ export default function OfficialTravel() {
       const followerData = followerExecutors.map((f) => [f.name, "", f.ket]);
       if (followerData.length === 0) followerData.push(["", "", ""]);
 
-      const followerCount = followerData.length;
-      let followerFontSize = 9;
-      let followerCellPadding = 3;
-      if (followerCount > 10) { followerFontSize = 6; followerCellPadding = 1.5; }
-      else if (followerCount > 7) { followerFontSize = 7; followerCellPadding = 2; }
-      else if (followerCount > 5) { followerFontSize = 8; followerCellPadding = 2.5; }
-
       autoTable(doc, {
         startY: yPos,
         head: [],
@@ -978,7 +791,10 @@ export default function OfficialTravel() {
           [{ content: "8.", rowSpan: followerData.length + 1 }, { content: "Pengikut", rowSpan: followerData.length + 1 }, "Nama", "Tgl lahir", "Keterangan"],
           ...followerData,
         ],
-        styles: { fontSize: followerFontSize, cellPadding: followerCellPadding, lineColor: [0, 0, 0], lineWidth: 0.2, valign: 'middle' },
+        styles: { fontSize: fontSizeTable - 1, cellPadding: 2, lineColor: BLACK, lineWidth: 0.2, valign: 'middle', textColor: BLACK, fillColor: WHITE },
+        headStyles: { textColor: BLACK, fillColor: WHITE },
+        bodyStyles: { textColor: BLACK, fillColor: WHITE },
+        alternateRowStyles: { fillColor: WHITE },
         columnStyles: {
           0: { cellWidth: 10, halign: 'center' },
           1: { cellWidth: 55 },
@@ -987,7 +803,7 @@ export default function OfficialTravel() {
           4: { cellWidth: pageWidth - 93 - 45 - 28 },
         },
         theme: 'grid',
-        margin: { left: leftCol, right: 14 },
+        margin: { left: 14, right: 14 },
       });
 
       yPos = (doc as any).lastAutoTable.finalY;
@@ -999,26 +815,26 @@ export default function OfficialTravel() {
           ["9.", "Pembebanan Anggaran\na. Instansi\nb. Akun", `a. ${settings?.school_name || "-"}\nb. ..............................`],
           ["10.", "Keterangan lain-lain", travel.notes || "-"],
         ],
-        styles: { fontSize: 9, cellPadding: 2, lineColor: [0, 0, 0], lineWidth: 0.2, valign: 'top' },
-        columnStyles: {
-          0: { cellWidth: 10, halign: 'center' },
-          1: { cellWidth: 55 },
-          2: { cellWidth: pageWidth - 93 },
-        },
+        styles: { fontSize: fontSizeTable, cellPadding: 2, lineColor: BLACK, lineWidth: 0.2, valign: 'top', textColor: BLACK, fillColor: WHITE },
+        headStyles: { textColor: BLACK, fillColor: WHITE },
+        bodyStyles: { textColor: BLACK, fillColor: WHITE },
+        alternateRowStyles: { fillColor: WHITE },
+        columnStyles: { 0: { cellWidth: 10, halign: 'center' }, 1: { cellWidth: 55 }, 2: { cellWidth: pageWidth - 93 } },
         theme: 'grid',
-        margin: { left: leftCol, right: 14 },
+        margin: { left: 14, right: 14 },
       });
 
       yPos = (doc as any).lastAutoTable.finalY + 8;
 
-      doc.setFontSize(10);
+      // TTD Pejabat Pembuat Komitmen — ruang TTD 25mm
+      doc.setFontSize(fontSizeSignature);
       doc.setFont("helvetica", "normal");
       doc.text(`Dikeluarkan di : Ciamis`, pageWidth - 80, yPos);
       yPos += 4;
       doc.text(`Tanggal : ${format(new Date(travel.letter_date), "dd MMMM yyyy", { locale: idLocale })}`, pageWidth - 80, yPos);
       yPos += 5;
       doc.text("Pejabat Pembuat Komitmen", pageWidth - 80, yPos);
-      yPos += 20;
+      yPos += 25;
       doc.setFont("helvetica", "bold");
       doc.text(settings?.headmaster_name || "", pageWidth - 80, yPos);
       doc.setFont("helvetica", "normal");
@@ -1036,7 +852,7 @@ export default function OfficialTravel() {
       const numColWidth = 12;
 
       doc.setLineWidth(0.2);
-      doc.setFontSize(9);
+      doc.setFontSize(fontSizeBody);
 
       const section1Height = 52;
       doc.rect(col1X, yPos, colWidth, section1Height);
@@ -1050,12 +866,13 @@ export default function OfficialTravel() {
       doc.text("(tempat kedudukan)", s1LabelX + 5, yPos + 10);
       doc.text("Ke", s1LabelX + 5, yPos + 15);
       doc.text("Pada Tanggal", s1LabelX + 5, yPos + 20);
-      doc.text(`Kepala ${settings?.school_name || ""}`, s1LabelX + 5, yPos + 25);
+      doc.text(`Kepala ${settings?.school_name || ""}`, s1LabelX + 5, yPos + 26);
 
       doc.text(`: ${settings?.school_name || ""}`, s1ValueX, yPos + 6);
       doc.text(`: ${travel.destination}`, s1ValueX, yPos + 15);
       doc.text(`: ${format(departureDate, "dd MMMM yyyy", { locale: idLocale })}`, s1ValueX, yPos + 20);
 
+      doc.setFontSize(fontSizeSignature);
       doc.setFont("helvetica", "bold");
       doc.text(settings?.headmaster_name || "", s1LabelX + 5, yPos + 42);
       doc.setFont("helvetica", "normal");
@@ -1081,7 +898,7 @@ export default function OfficialTravel() {
       const rightLabelX = col2X + 3;
       const rightValueX = col2X + 35;
 
-      doc.setFontSize(8);
+      doc.setFontSize(fontSizeTable - 1);
 
       let rowY = yPos;
       doc.text("II.", col1X + 3, rowY + 5);
@@ -1137,6 +954,7 @@ export default function OfficialTravel() {
       doc.text(`: ${settings?.school_name || ""}`, leftValueX, rowY + 6);
       doc.text(`: ${format(returnDate, "dd MMMM yyyy", { locale: idLocale })}`, leftValueX, rowY + 11);
 
+      doc.setFontSize(fontSizeSignature);
       doc.setFont("helvetica", "bold");
       doc.text(toTitleCase(settings?.headmaster_name) || "", leftLabelX, rowY + 32);
       doc.setFont("helvetica", "normal");
@@ -1147,30 +965,31 @@ export default function OfficialTravel() {
 
       yPos = rowY + section6Height;
 
-      doc.setFontSize(9);
+      doc.setFontSize(fontSizeBody);
       doc.rect(col1X, yPos, tableWidth, 12);
       doc.text("VII. Catatan Lain-lain", col1X + 3, yPos + 8);
 
       yPos += 12;
 
       doc.rect(col1X, yPos, tableWidth, 24);
-      doc.setFontSize(7);
+      doc.setFontSize(fontSizeTable - 2);
       doc.text("VIII. PERHATIAN:", col1X + 3, yPos + 6);
       const perhatian = doc.splitTextToSize("PPK yang menerbitkan SPD, pegawai yang melakukan perjalanan dinas, para pejabat yang mengesahkan tanggal berangkat/tiba, serta bendahara pengeluaran bertanggung jawab berdasarkan peraturan-peraturan Keuangan Negara apabila negara menderita rugi akibat kesalahan, kelalaian, dan kealpaannya.", tableWidth - 10);
       doc.text(perhatian, col1X + 3, yPos + 11);
 
       yPos += 24 + 12;
 
-      doc.setFontSize(10);
+      doc.setFontSize(fontSizeSignature);
+      doc.setFont("helvetica", "normal");
       doc.text("Pejabat Pembuat Komitmen", pageWidth - 60, yPos, { align: "center" });
-      yPos += 15;
+      yPos += 25;
       doc.setFont("helvetica", "bold");
       doc.text(toTitleCase(settings?.headmaster_name) || "", pageWidth - 60, yPos, { align: "center" });
       doc.setFont("helvetica", "normal");
       yPos += 4;
       doc.text(`NIP. ${settings?.headmaster_nip || ""}`, pageWidth - 60, yPos, { align: "center" });
 
-      // === LPT PAGES — urutan guru + manual sesuai order_index ===
+      // LPT pages
       const lptExecutors = [
         ...sortedTeachers.map((tt: any) => ({
           name: tt.teachers?.profiles?.full_name || "-",
@@ -1191,14 +1010,14 @@ export default function OfficialTravel() {
         doc.addPage();
         let lptYPos = 30;
 
-        doc.setFontSize(14);
+        doc.setFontSize(fontSizeTitle + 2);
         doc.setFont("helvetica", "bold");
         doc.text("LAPORAN PELAKSANAAN TUGAS", pageWidth / 2, lptYPos, { align: "center" });
         lptYPos += 7;
         doc.text("(LPT)", pageWidth / 2, lptYPos, { align: "center" });
 
         lptYPos += 20;
-        doc.setFontSize(11);
+        doc.setFontSize(fontSizeBody + 1);
         doc.setFont("helvetica", "normal");
 
         const labelX = 14;
@@ -1213,19 +1032,16 @@ export default function OfficialTravel() {
         doc.setFont("helvetica", "normal");
 
         lptYPos += lineHeight;
-
         doc.text("2. NIP", labelX, lptYPos);
         doc.text(":", colonX, lptYPos);
         doc.text(nip, valueX, lptYPos);
 
         lptYPos += lineHeight;
-
         doc.text("3. Dasar Surat Tugas Nomor", labelX, lptYPos);
         doc.text(":", colonX, lptYPos);
         doc.text(travel.letter_number, valueX, lptYPos);
 
         lptYPos += lineHeight;
-
         doc.text("4. Tujuan", labelX, lptYPos);
         doc.text(":", colonX, lptYPos);
         const purposeText = doc.splitTextToSize(`Untuk ${travel.purpose}`, pageWidth - valueX - 14);
@@ -1323,6 +1139,17 @@ export default function OfficialTravel() {
     return matchesSearch && matchesStartDate && matchesEndDate;
   });
 
+  // ✅ Pagination
+  const {
+    currentPage,
+    setCurrentPage,
+    pageSize,
+    setPageSize,
+    totalPages,
+    totalItems,
+    paginatedItems: paginatedTravels,
+  } = usePagination(filteredTravels, 10);
+
   return (
     <ProtectedRoute>
       <DashboardLayout>
@@ -1360,13 +1187,21 @@ export default function OfficialTravel() {
                         <SelectTrigger>
                           <SelectValue placeholder={loadingAssignmentLetters ? "Memuat..." : "Pilih nomor surat tugas..."} />
                         </SelectTrigger>
-                        <SelectContent className="bg-background border shadow-lg z-50">
+                        {/* ✅ Perbaikan: dropdown tidak terpotong */}
+                        <SelectContent
+                          position="popper"
+                          sideOffset={4}
+                          align="start"
+                          className="bg-background border shadow-lg z-[9999] max-h-[400px] overflow-y-auto w-[var(--radix-select-trigger-width)] min-w-[400px]"
+                        >
                           {loadingAssignmentLetters ? (
                             <SelectItem value="loading" disabled>Memuat data...</SelectItem>
                           ) : assignmentLetters && assignmentLetters.length > 0 ? (
                             assignmentLetters.map((letter: any) => (
                               <SelectItem key={letter.id} value={letter.id}>
-                                {letter.letter_number} - {letter.description?.substring(0, 50)}
+                                <span className="block truncate max-w-[500px]">
+                                  {letter.letter_number} - {letter.description?.substring(0, 80)}
+                                </span>
                               </SelectItem>
                             ))
                           ) : (
@@ -1564,7 +1399,7 @@ export default function OfficialTravel() {
 
                       <div className="space-y-2">
                         <Label>{isEditMode ? "Guru yang Diperintahkan *" : "Guru yang Diperintahkan (dari Surat Tugas)"}</Label>
-                        <div className="border rounded-md p-4 bg-muted/30 space-y-3">
+                        <div className="border rounded-md p-4 bg-muted/30 space-y-3 max-h-[300px] overflow-y-auto">
                           {isEditMode ? (
                             <>
                               {selectedTeachers.length > 0 && (
@@ -1592,7 +1427,10 @@ export default function OfficialTravel() {
                                 <SelectTrigger>
                                   <SelectValue placeholder="Tambah guru..." />
                                 </SelectTrigger>
-                                <SelectContent>
+                                <SelectContent
+                                  position="popper"
+                                  className="max-h-[300px] overflow-y-auto z-[9999]"
+                                >
                                   {teachers?.filter(t => !selectedTeachers.includes(t.id)).map((teacher) => (
                                     <SelectItem key={teacher.id} value={teacher.id}>
                                       {(teacher as any).profiles?.full_name} - {teacher.nip || "-"}
@@ -1771,113 +1609,125 @@ export default function OfficialTravel() {
               {isLoading ? (
                 <div className="text-center py-8 text-muted-foreground">Memuat data...</div>
               ) : filteredTravels && filteredTravels.length > 0 ? (
-                <div className="border rounded-md overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-12">No</TableHead>
-                        <TableHead>Nomor SPD</TableHead>
-                        <TableHead>Tanggal</TableHead>
-                        <TableHead>Maksud</TableHead>
-                        <TableHead>Tujuan</TableHead>
-                        <TableHead>Pelaksana</TableHead>
-                        <TableHead>Pengikut</TableHead>
-                        <TableHead>Waktu</TableHead>
-                        <TableHead className="text-right">Aksi</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredTravels.map((travel, index) => {
-                        // ✅ Gabung guru + manual executor + siswa, sort pakai order_index
-                        const teacherExecs = (travel.official_travel_teachers || []).map((tt: any) => ({
-                          key: `t-${tt.teacher_id}`,
-                          name: tt.teachers?.profiles?.full_name || "-",
-                          isManual: false,
-                          isStudent: false,
-                          order_index: tt.order_index ?? 0,
-                        }));
+                <>
+                  <div className="border rounded-md overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-12">No</TableHead>
+                          <TableHead>Nomor SPD</TableHead>
+                          <TableHead>Tanggal</TableHead>
+                          <TableHead>Maksud</TableHead>
+                          <TableHead>Tujuan</TableHead>
+                          <TableHead>Pelaksana</TableHead>
+                          <TableHead>Pengikut</TableHead>
+                          <TableHead>Waktu</TableHead>
+                          <TableHead className="text-right">Aksi</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {paginatedTravels.map((travel, index) => {
+                          const actualIndex = (currentPage - 1) * pageSize + index + 1;
 
-                        const manualExecs = (travel.official_travel_followers || [])
-                          .filter((f: any) => f.follower_type === 'manual_executor')
-                          .map((f: any) => ({
-                            key: `m-${f.id}`,
-                            name: f.manual_executor?.full_name || f.manual_executor_name || "-",
-                            isManual: true,
-                            isStudent: false,
-                            order_index: f.order_index ?? 0,
-                          }));
-
-                        const studentFollowers = (travel.official_travel_followers || [])
-                          .filter((f: any) => f.follower_type === 'student')
-                          .map((f: any) => ({
-                            key: `s-${f.id}`,
-                            name: `${f.students?.full_name || "-"} (NIS: ${f.students?.nis || "-"}${f.students?.class_name ? ` - ${f.students.class_name}` : ""})`,
+                          const teacherExecs = (travel.official_travel_teachers || []).map((tt: any) => ({
+                            key: `t-${tt.teacher_id}`,
+                            name: tt.teachers?.profiles?.full_name || "-",
                             isManual: false,
-                            isStudent: true,
-                            order_index: f.order_index ?? 9999,
+                            isStudent: false,
+                            order_index: tt.order_index ?? 0,
                           }));
 
-                        const sortedAll = [...teacherExecs, ...manualExecs, ...studentFollowers]
-                          .sort((a, b) => a.order_index - b.order_index);
+                          const manualExecs = (travel.official_travel_followers || [])
+                            .filter((f: any) => f.follower_type === 'manual_executor')
+                            .map((f: any) => ({
+                              key: `m-${f.id}`,
+                              name: f.manual_executor?.full_name || f.manual_executor_name || "-",
+                              isManual: true,
+                              isStudent: false,
+                              order_index: f.order_index ?? 0,
+                            }));
 
-                        const mainExec = sortedAll[0];
-                        const followersList = sortedAll.slice(1);
+                          const studentFollowers = (travel.official_travel_followers || [])
+                            .filter((f: any) => f.follower_type === 'student')
+                            .map((f: any) => ({
+                              key: `s-${f.id}`,
+                              name: `${f.students?.full_name || "-"} (NIS: ${f.students?.nis || "-"}${f.students?.class_name ? ` - ${f.students.class_name}` : ""})`,
+                              isManual: false,
+                              isStudent: true,
+                              order_index: f.order_index ?? 9999,
+                            }));
 
-                        return (
-                          <TableRow key={travel.id}>
-                            <TableCell>{index + 1}</TableCell>
-                            <TableCell className="font-medium">{travel.letter_number}</TableCell>
-                            <TableCell>{format(new Date(travel.letter_date), "dd/MM/yyyy")}</TableCell>
-                            <TableCell>{travel.purpose}</TableCell>
-                            <TableCell>{travel.destination}</TableCell>
-                            <TableCell>
-                              {mainExec && (
-                                <Badge variant="default" className="text-xs">
-                                  {mainExec.name}
-                                </Badge>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex flex-wrap gap-1">
-                                {followersList.map((f: any) => (
-                                  <Badge
-                                    key={f.key}
-                                    variant={f.isManual ? "outline" : f.isStudent ? "outline" : "secondary"}
-                                    className="text-xs"
-                                  >
-                                    {f.name}{f.isManual ? " (Manual)" : ""}
+                          const sortedAll = [...teacherExecs, ...manualExecs, ...studentFollowers]
+                            .sort((a, b) => a.order_index - b.order_index);
+
+                          const mainExec = sortedAll[0];
+                          const followersList = sortedAll.slice(1);
+
+                          return (
+                            <TableRow key={travel.id}>
+                              <TableCell>{actualIndex}</TableCell>
+                              <TableCell className="font-medium">{travel.letter_number}</TableCell>
+                              <TableCell>{format(new Date(travel.letter_date), "dd/MM/yyyy")}</TableCell>
+                              <TableCell>{travel.purpose}</TableCell>
+                              <TableCell>{travel.destination}</TableCell>
+                              <TableCell>
+                                {mainExec && (
+                                  <Badge variant="default" className="text-xs">
+                                    {mainExec.name}
                                   </Badge>
-                                ))}
-                                {followersList.length === 0 && (
-                                  <span className="text-xs text-muted-foreground">-</span>
                                 )}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {format(new Date(travel.departure_date), "dd/MM/yy")} - {format(new Date(travel.return_date), "dd/MM/yy")}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-2">
-                                <Button variant="outline" size="icon" onClick={() => handleEdit(travel)} title="Edit">
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                <Button variant="outline" size="icon" onClick={() => previewPDF(travel)} title="Preview PDF">
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                                <Button variant="outline" size="icon" onClick={() => exportPDF(travel)} title="Download PDF">
-                                  <FileDown className="h-4 w-4" />
-                                </Button>
-                                <Button variant="destructive" size="icon" onClick={() => handleDelete(travel.id)} title="Hapus">
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex flex-wrap gap-1">
+                                  {followersList.map((f: any) => (
+                                    <Badge
+                                      key={f.key}
+                                      variant={f.isManual ? "outline" : f.isStudent ? "outline" : "secondary"}
+                                      className="text-xs"
+                                    >
+                                      {f.name}{f.isManual ? " (Manual)" : ""}
+                                    </Badge>
+                                  ))}
+                                  {followersList.length === 0 && (
+                                    <span className="text-xs text-muted-foreground">-</span>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-sm">
+                                {format(new Date(travel.departure_date), "dd/MM/yy")} - {format(new Date(travel.return_date), "dd/MM/yy")}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex justify-end gap-2">
+                                  <Button variant="outline" size="icon" onClick={() => handleEdit(travel)} title="Edit">
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                  <Button variant="outline" size="icon" onClick={() => previewPDF(travel)} title="Preview PDF">
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                  <Button variant="outline" size="icon" onClick={() => exportPDF(travel)} title="Download PDF">
+                                    <FileDown className="h-4 w-4" />
+                                  </Button>
+                                  <Button variant="destructive" size="icon" onClick={() => handleDelete(travel.id)} title="Hapus">
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  <DataPagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalItems={totalItems}
+                    pageSize={pageSize}
+                    onPageChange={setCurrentPage}
+                    onPageSizeChange={setPageSize}
+                  />
+                </>
               ) : (
                 <div className="text-center py-8 text-muted-foreground">
                   {searchQuery ? "Tidak ada SPD yang cocok dengan pencarian" : "Belum ada SPD"}
@@ -1942,13 +1792,6 @@ export default function OfficialTravel() {
                     <p>
                       Fitur ini akan menyalin ulang data <strong className="text-foreground">pelaksana manual</strong> dari surat tugas yang terhubung ke masing-masing SPD.
                     </p>
-                    <div className="bg-muted/50 p-3 rounded-lg border text-sm space-y-2">
-                      <p className="font-medium text-foreground">Yang akan diperbaiki:</p>
-                      <ul className="list-disc list-inside text-muted-foreground space-y-1">
-                        <li>SPD yang belum memiliki data pelaksana manual</li>
-                        <li>SPD yang data pelaksana manualnya tidak lengkap</li>
-                      </ul>
-                    </div>
                     {repairResults && (
                       <div className={cn(
                         "p-3 rounded-lg border text-sm space-y-2",
@@ -1966,7 +1809,7 @@ export default function OfficialTravel() {
                             <Badge variant="secondary" className="text-xs">
                               {repairResults.skipped}
                             </Badge>
-                            <span className="text-muted-foreground">SPD dilewati (sudah lengkap/tidak ada surat tugas)</span>
+                            <span className="text-muted-foreground">SPD dilewati</span>
                           </li>
                           {repairResults.errors.length > 0 && (
                             <li className="text-destructive text-xs mt-2">
@@ -1999,10 +1842,7 @@ export default function OfficialTravel() {
                   )}
                 </Button>
                 <Button
-                  onClick={() => {
-                    setRepairDialogOpen(false);
-                    setRepairResults(null);
-                  }}
+                  onClick={() => { setRepairDialogOpen(false); setRepairResults(null); }}
                   variant="ghost"
                   className="w-full"
                   disabled={isRepairing}
