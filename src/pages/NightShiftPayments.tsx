@@ -35,8 +35,11 @@ import { NightShiftAttendancePreview } from "@/components/night-shift/NightShift
 import type { NightShiftRate, NightShiftBatch, SchoolSettings, TaxType } from "@/types/nightShift";
 import { TAX_TYPE_LABELS } from "@/types/nightShift";
 
+// ⭐ MODUL PENGGajian — role yang diizinkan full CRUD
+const FINANCE_ROLES = ["tata_usaha", "bendahara", "admin", "super_admin"] as const;
+
 interface TempWorker {
-  id?: string;             // ada kalau dari DB (edit mode)
+  id?: string;
   worker_name: string;
   position_type: string;
   shift_count: number;
@@ -289,7 +292,6 @@ const NightShiftPayments = () => {
       const total_tax = tempWorkers.reduce((sum, w) => sum + w.tax_amount, 0);
       const total_net = tempWorkers.reduce((sum, w) => sum + w.net_amount, 0);
 
-      // 1. Update batch header
       const { error: batchError } = await supabase
         .from("night_shift_batches")
         .update({
@@ -307,7 +309,6 @@ const NightShiftPayments = () => {
 
       if (batchError) throw batchError;
 
-      // 2. Delete semua worker lama, insert ulang
       const { error: deleteError } = await supabase
         .from("night_shift_payments")
         .delete()
@@ -368,7 +369,6 @@ const NightShiftPayments = () => {
       const originalWorkers = copyDialogBatch.night_shift_payments || [];
       if (originalWorkers.length === 0) throw new Error("Kwitansi asal tidak memiliki petugas");
 
-      // Tanggal baru berdasarkan bulan & tahun yang dipilih
       const targetDate = new Date(copyTargetYear, copyTargetMonth - 1, 1);
       const monthNames = [
         "Januari", "Februari", "Maret", "April", "Mei", "Juni",
@@ -376,10 +376,8 @@ const NightShiftPayments = () => {
       ];
       const monthName = monthNames[copyTargetMonth - 1];
 
-      // Generate new batch_number
       const batch_number = `KPM-${format(new Date(), "yyyyMMdd")}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 
-      // Judul baru: replace bulan & tahun dalam judul asal
       let newTitle = copyDialogBatch.job_title;
       const monthRegex = /(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+\d{4}/i;
       if (monthRegex.test(newTitle)) {
@@ -388,7 +386,6 @@ const NightShiftPayments = () => {
         newTitle = `${newTitle} - ${monthName} ${copyTargetYear}`;
       }
 
-      // Insert batch baru
       const { data: newBatch, error: batchError } = await supabase
         .from("night_shift_batches")
         .insert({
@@ -409,7 +406,6 @@ const NightShiftPayments = () => {
 
       if (batchError) throw batchError;
 
-      // Insert semua worker
       const today = format(new Date(), "yyyy-MM-dd");
       const workersToInsert = originalWorkers.map((w) => ({
         batch_id: newBatch.id,
@@ -444,7 +440,6 @@ const NightShiftPayments = () => {
     onError: (error: Error) => toast.error(error.message),
   });
 
-
   // ============================================
   // HELPERS
   // ============================================
@@ -478,7 +473,6 @@ const NightShiftPayments = () => {
       shift_type: batch.shift_type || "malam",
     });
 
-    // Convert night_shift_payments ke TempWorker
     const workers: TempWorker[] = (batch.night_shift_payments || []).map((w) => ({
       id: w.id,
       worker_name: w.worker_name,
@@ -523,7 +517,6 @@ const NightShiftPayments = () => {
     }
 
     if (editingWorkerIndex !== null) {
-      // Mode edit — replace worker
       setTempWorkers((prev) => prev.map((w, i) =>
         i === editingWorkerIndex
           ? {
@@ -538,7 +531,6 @@ const NightShiftPayments = () => {
       ));
       toast.success("Data petugas diperbarui");
     } else {
-      // Mode tambah baru
       setTempWorkers((prev) => [
         ...prev,
         {
@@ -685,7 +677,6 @@ const NightShiftPayments = () => {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
 
-    // Kepala Sekolah
     const ksX = 55;
     doc.text("Menyetujui,", ksX, signY, { align: "center" });
     doc.text(`${schoolSettings?.headmaster_position || "Kepala"} ${schoolSettings?.school_name || "Sekolah"}`, ksX, signY + 5, { align: "center" });
@@ -698,7 +689,6 @@ const NightShiftPayments = () => {
       doc.text("(___________________)", ksX, signY + 30, { align: "center" });
     }
 
-    // Bendahara
     const bendaharaX = 155;
     doc.text(`${city ? city + ", " : ""}${receiptDateFormatted}`, bendaharaX, signY, { align: "center" });
     doc.text("Bendahara BOS", bendaharaX, signY + 5, { align: "center" });
@@ -787,7 +777,6 @@ const NightShiftPayments = () => {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
 
-    // Wakasek Sarpras
     doc.text("Wakasek Sarana Prasarana,", 50, finalY, { align: "center" });
     if (wakasekSarpras?.full_name) {
       doc.setFont("helvetica", "bold");
@@ -799,7 +788,6 @@ const NightShiftPayments = () => {
       doc.text("NIP. ___________________", 50, finalY + 33, { align: "center" });
     }
 
-    // Kepala Sekolah
     doc.text(`${city ? city + ", " : ""}${receiptDateFormatted}`, 155, finalY - 8, { align: "center" });
     doc.text("Mengetahui,", 155, finalY, { align: "center" });
     doc.text(schoolSettings?.headmaster_position || "Kepala Sekolah", 155, finalY + 5, { align: "center" });
@@ -819,7 +807,8 @@ const NightShiftPayments = () => {
   // RENDER
   // ============================================
   return (
-    <ProtectedRoute allowedRoles={["bendahara", "admin"]}>
+    // ⭐ PERUBAHAN KUNCI: tambah tata_usaha & super_admin
+    <ProtectedRoute allowedRoles={[...FINANCE_ROLES]}>
       <DashboardLayout>
         <div className="space-y-6 p-4 md:p-6">
           {/* Header */}
@@ -1249,6 +1238,9 @@ const NightShiftPayments = () => {
                                 >
                                   <Pencil className="h-4 w-4 text-blue-500" />
                                 </Button>
+                                <Button variant="outline" size="icon" onClick={() => setCopyDialogBatch(batch)} title="Salin ke Bulan Lain">
+                                  <CopyPlus className="h-4 w-4 text-emerald-600" />
+                                </Button>
                                 <Button variant="outline" size="icon" onClick={() => setReceiptPreviewBatch(batch)} title="Preview Kwitansi">
                                   <Eye className="h-4 w-4" />
                                 </Button>
@@ -1486,10 +1478,7 @@ const NightShiftPayments = () => {
             }}
           />
 
-          {/* Delete Confirmations */}
-          {/* ============================================ */}
-          {/* COPY DIALOG                                   */}
-          {/* ============================================ */}
+          {/* COPY DIALOG */}
           <Dialog open={!!copyDialogBatch} onOpenChange={(open) => !open && setCopyDialogBatch(null)}>
             <DialogContent className="max-w-md">
               <DialogHeader>
@@ -1588,6 +1577,7 @@ const NightShiftPayments = () => {
             </DialogContent>
           </Dialog>
 
+          {/* Delete Confirmations */}
           <AlertDialog open={!!deleteBatchId} onOpenChange={(open) => !open && setDeleteBatchId(null)}>
             <AlertDialogContent>
               <AlertDialogHeader>
