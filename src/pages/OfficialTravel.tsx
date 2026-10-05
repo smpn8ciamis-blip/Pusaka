@@ -13,7 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, Trash2, Search, FileDown, Plane, Eye, Pencil, Calendar as CalendarIcon, X, FileText, Users, MapPin, Wrench, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Search, FileDown, Plane, Eye, Pencil, Calendar as CalendarIcon, X, FileText, Wrench, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { cn, toTitleCase } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -24,7 +24,6 @@ import autoTable from 'jspdf-autotable';
 import { addLetterheadToPDF } from '@/lib/pdfLetterhead';
 import { z } from "zod";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ModernPageHeader, ModernDocumentCard, ModernFilterBar, ModernEmptyState, ModernStatsGrid } from "@/components/ui/modern-document-card";
 import { SPDPreviewDialog } from "@/components/spd/SPDPreviewDialog";
 
 // Helper function to convert number to Indonesian words
@@ -79,11 +78,12 @@ export default function OfficialTravel() {
     notes: "",
   });
 
-  // Fetch assignment letters for dropdown with full teacher data and manual executors
+  // ============================================================
+  // Fetch assignment letters for dropdown — dengan order_index
+  // ============================================================
   const { data: assignmentLetters, isLoading: loadingAssignmentLetters } = useQuery({
     queryKey: ["assignment-letters-for-sppd"],
     queryFn: async () => {
-      // First fetch assignment letters
       const { data: letters, error: lettersError } = await supabase
         .from("assignment_letters")
         .select(`
@@ -99,20 +99,20 @@ export default function OfficialTravel() {
           tanggal_dasar_surat_tugas
         `)
         .order("letter_date", { ascending: false });
-      
+
       if (lettersError) {
         console.error("Error fetching assignment letters:", lettersError);
         throw lettersError;
       }
-      
-      // Then fetch teachers and manual executors for each letter
+
       const lettersWithTeachers = await Promise.all(
         (letters || []).map(async (letter) => {
-          // Fetch teachers
+          // ✅ Ambil guru dengan order_index dan urutkan
           const { data: letterTeachers } = await supabase
             .from("assignment_letter_teachers")
             .select(`
               teacher_id,
+              order_index,
               teachers (
                 id,
                 nip,
@@ -122,9 +122,9 @@ export default function OfficialTravel() {
                 jabatan
               )
             `)
-            .eq("assignment_letter_id", letter.id);
-          
-          // Fetch profiles for each teacher
+            .eq("assignment_letter_id", letter.id)
+            .order("order_index", { ascending: true });
+
           const teachersWithProfiles = await Promise.all(
             (letterTeachers || []).map(async (lt: any) => {
               if (lt.teachers?.user_id) {
@@ -135,22 +135,20 @@ export default function OfficialTravel() {
                   .maybeSingle();
                 return {
                   ...lt,
-                  teachers: {
-                    ...lt.teachers,
-                    profiles: profile
-                  }
+                  teachers: { ...lt.teachers, profiles: profile }
                 };
               }
               return lt;
             })
           );
 
-          // Fetch manual executors
+          // ✅ Ambil manual executor dengan order_index dan urutkan
           const { data: manualExecutors } = await supabase
             .from("assignment_letter_manual_executors")
-            .select("id, full_name, nip, pangkat_golongan, jabatan")
-            .eq("assignment_letter_id", letter.id);
-          
+            .select("id, full_name, nip, pangkat_golongan, jabatan, order_index")
+            .eq("assignment_letter_id", letter.id)
+            .order("order_index", { ascending: true });
+
           return {
             ...letter,
             assignment_letter_teachers: teachersWithProfiles,
@@ -158,33 +156,35 @@ export default function OfficialTravel() {
           };
         })
       );
-      
+
       return lettersWithTeachers;
     },
   });
 
   // Get selected assignment letter details
   const selectedLetterData = assignmentLetters?.find((al: any) => al.id === selectedAssignmentLetter);
-  
-  // Combine database teachers and manual executors
-  const assignedTeachers = selectedLetterData?.assignment_letter_teachers?.map((alt: any) => alt.teachers).filter(Boolean) || [];
-  const manualExecutors = selectedLetterData?.assignment_letter_manual_executors || [];
-  
-  // Combine all executors (database teachers + manual executors)
-  const allExecutors = [
-    ...assignedTeachers.map((t: any) => ({ ...t, isManual: false })),
-    ...manualExecutors.map((m: any) => ({ 
+
+  // ✅ Gabung guru + manual, sort pakai order_index global dari surat tugas
+  const combinedExecutors = [
+    ...(selectedLetterData?.assignment_letter_teachers || []).map((alt: any) => ({
+      ...alt.teachers,
+      isManual: false,
+      order_index: alt.order_index ?? 0,
+      profiles: alt.teachers?.profiles,
+    })),
+    ...(selectedLetterData?.assignment_letter_manual_executors || []).map((m: any) => ({
       id: m.id,
       nip: m.nip,
       jabatan: m.jabatan,
       pangkat_golongan: m.pangkat_golongan,
       profiles: { full_name: m.full_name },
       subject: m.jabatan || 'Pelaksana Manual',
-      isManual: true 
-    }))
-  ];
-  
-  // Separate main executor (first) and followers (rest)
+      isManual: true,
+      order_index: m.order_index ?? 0,
+    })),
+  ].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
+
+  const allExecutors = combinedExecutors;
   const mainTeacher = allExecutors[0] || null;
   const followerTeachers = allExecutors.slice(1) || [];
 
@@ -205,31 +205,25 @@ export default function OfficialTravel() {
   const { data: students } = useQuery({
     queryKey: ["students-for-travel"],
     queryFn: async () => {
-      // Fetch students first
       const { data: studentsData, error } = await supabase
         .from("students")
         .select("id, nis, nisn, full_name, class_id")
         .eq("is_alumni", false)
         .order("full_name");
       if (error) throw error;
-      
-      // Get unique class IDs
+
       const classIds = [...new Set(studentsData?.map(s => s.class_id).filter(Boolean))] as string[];
-      
-      // Fetch classes separately
       let classMap: Record<string, string> = {};
       if (classIds.length > 0) {
         const { data: classesData } = await supabase
           .from("classes")
           .select("id, name")
           .in("id", classIds);
-        
         if (classesData) {
           classMap = Object.fromEntries(classesData.map(c => [c.id, c.name]));
         }
       }
-      
-      // Return students with class_name property
+
       return studentsData?.map(student => ({
         ...student,
         class_name: student.class_id ? classMap[student.class_id] || "" : ""
@@ -237,36 +231,36 @@ export default function OfficialTravel() {
     },
   });
 
-  // Filtered students based on search
   const filteredStudents = students?.filter((student) =>
     student.full_name.toLowerCase().includes(studentSearchQuery.toLowerCase()) ||
     student.nis.toLowerCase().includes(studentSearchQuery.toLowerCase()) ||
     (student.nisn && student.nisn.toLowerCase().includes(studentSearchQuery.toLowerCase()))
   ) || [];
 
-  // Fetch official travel letters
+  // ============================================================
+  // Fetch official travel letters — dengan order_index
+  // ============================================================
   const { data: travels, isLoading } = useQuery({
     queryKey: ["official-travel-letters"],
     queryFn: async () => {
-      // First fetch official travel letters
       const { data: letters, error: lettersError } = await supabase
         .from("official_travel_letters")
         .select("*")
         .order("letter_date", { ascending: false });
-      
+
       if (lettersError) {
         console.error("Error fetching official travel letters:", lettersError);
         throw lettersError;
       }
-      
-      // Then fetch teachers and followers for each letter
+
       const lettersWithData = await Promise.all(
         (letters || []).map(async (letter) => {
-          // Fetch teachers
+          // ✅ Fetch teachers dengan order_index, urutkan
           const { data: travelTeachers } = await supabase
             .from("official_travel_teachers")
             .select(`
               teacher_id,
+              order_index,
               teachers (
                 id,
                 nip,
@@ -276,9 +270,9 @@ export default function OfficialTravel() {
                 jabatan
               )
             `)
-            .eq("official_travel_id", letter.id);
-          
-          // Fetch profiles for each teacher
+            .eq("official_travel_id", letter.id)
+            .order("order_index", { ascending: true });
+
           const teachersWithProfiles = await Promise.all(
             (travelTeachers || []).map(async (tt: any) => {
               if (tt.teachers?.user_id) {
@@ -289,50 +283,42 @@ export default function OfficialTravel() {
                   .maybeSingle();
                 return {
                   ...tt,
-                  teachers: {
-                    ...tt.teachers,
-                    profiles: profile
-                  }
+                  teachers: { ...tt.teachers, profiles: profile }
                 };
               }
               return tt;
             })
           );
 
-          // Fetch followers (including manual executors)
+          // ✅ Fetch followers dengan order_index, urutkan
           const { data: followers } = await supabase
             .from("official_travel_followers")
-            .select("id, follower_type, teacher_id, student_id, manual_executor_name, manual_executor_nip, manual_executor_pangkat, manual_executor_jabatan")
-            .eq("official_travel_id", letter.id);
-          
-          // Get student IDs from followers
+            .select("id, follower_type, teacher_id, student_id, manual_executor_name, manual_executor_nip, manual_executor_pangkat, manual_executor_jabatan, order_index")
+            .eq("official_travel_id", letter.id)
+            .order("order_index", { ascending: true });
+
           const studentFollowers = (followers || []).filter(f => f.follower_type === "student" && f.student_id);
           const studentIds = studentFollowers.map(f => f.student_id);
-          
-          // Fetch student data separately if there are student followers
+
           let studentsWithClass: Record<string, any> = {};
           if (studentIds.length > 0) {
             const { data: students } = await supabase
               .from("students")
               .select("id, nis, nisn, full_name, class_id")
               .in("id", studentIds);
-            
-            // Get class IDs and fetch class names
+
             const classIds = (students || []).map(s => s.class_id).filter(Boolean);
             let classMap = new Map<string, string>();
-            
             if (classIds.length > 0) {
               const { data: classes } = await supabase
                 .from("classes")
                 .select("id, name")
                 .in("id", classIds);
-              
               if (classes) {
                 classMap = new Map(classes.map(c => [c.id, c.name]));
               }
             }
-            
-            // Map students with their class names
+
             (students || []).forEach(student => {
               studentsWithClass[student.id] = {
                 id: student.id,
@@ -344,14 +330,10 @@ export default function OfficialTravel() {
               };
             });
           }
-          
-          // Transform followers to include student data with class_name and manual executor data
+
           const followersWithData = (followers || []).map(f => {
             if (f.follower_type === "student" && f.student_id && studentsWithClass[f.student_id]) {
-              return {
-                ...f,
-                students: studentsWithClass[f.student_id]
-              };
+              return { ...f, students: studentsWithClass[f.student_id] };
             }
             if (f.follower_type === "manual_executor") {
               return {
@@ -367,7 +349,7 @@ export default function OfficialTravel() {
             }
             return { ...f, students: null };
           });
-          
+
           return {
             ...letter,
             official_travel_teachers: teachersWithProfiles,
@@ -375,19 +357,20 @@ export default function OfficialTravel() {
           };
         })
       );
-      
+
       return lettersWithData;
     },
   });
 
+  // ============================================================
+  // Create mutation — simpan order_index
+  // ============================================================
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData & { teacher_ids: string[], student_follower_ids: string[] }) => {
-      // Get manual executors count from selected assignment letter
       const selectedLetter = assignmentLetters?.find((al: any) => al.id === data.assignment_letter_id);
       const manualExecutorsCount = selectedLetter?.assignment_letter_manual_executors?.length || 0;
       const totalExecutors = selectedTeachers.length + manualExecutorsCount;
 
-      // Validate
       travelSchema.parse({
         assignment_letter_id: data.assignment_letter_id,
         letter_date: data.letter_date,
@@ -398,7 +381,6 @@ export default function OfficialTravel() {
         total_executors: totalExecutors,
       });
 
-      // Check if SPPD with this letter number already exists
       const { data: existingLetter, error: checkError } = await supabase
         .from("official_travel_letters")
         .select("id, letter_number, purpose, departure_date")
@@ -406,15 +388,13 @@ export default function OfficialTravel() {
         .maybeSingle();
 
       if (checkError) throw checkError;
-      
+
       if (existingLetter) {
-        // Store duplicate info and show dialog
         const duplicateError = new Error('DUPLICATE_SPD');
         (duplicateError as any).duplicateData = existingLetter;
         throw duplicateError;
       }
 
-      // Create official travel letter with assignment_letter_id for automatic manual executor copy
       const { data: letter, error: letterError } = await supabase
         .from("official_travel_letters")
         .insert({
@@ -429,17 +409,22 @@ export default function OfficialTravel() {
           travel_budget: data.travel_budget ? parseFloat(data.travel_budget) : null,
           notes: data.notes || null,
           created_by: user?.id!,
-          assignment_letter_id: data.assignment_letter_id || null, // Link to assignment letter for auto-copy trigger
+          assignment_letter_id: data.assignment_letter_id || null,
         })
         .select()
         .single();
 
       if (letterError) throw letterError;
 
-      // Add teachers
+      // ✅ Insert teachers dengan order_index dari surat tugas
+      const teacherOrderMap: Record<string, number> = JSON.parse(
+        sessionStorage.getItem('spd_teacher_order_map') || '{}'
+      );
+
       const teacherInserts = data.teacher_ids.map((teacher_id) => ({
         official_travel_id: letter.id,
         teacher_id,
+        order_index: teacherOrderMap[teacher_id] ?? 0,
       }));
 
       const { error: teacherError } = await supabase
@@ -448,21 +433,21 @@ export default function OfficialTravel() {
 
       if (teacherError) throw teacherError;
 
-      // Prepare student follower inserts only (manual executors are now auto-copied by database trigger)
-      const allFollowerInserts: any[] = [];
+      sessionStorage.removeItem('spd_teacher_order_map');
 
-      // Add student followers
+      // Student followers
+      const allFollowerInserts: any[] = [];
       if (data.student_follower_ids.length > 0) {
-        data.student_follower_ids.forEach((student_id) => {
+        data.student_follower_ids.forEach((student_id, idx) => {
           allFollowerInserts.push({
             official_travel_id: letter.id,
             follower_type: 'student',
             student_id,
+            order_index: 10000 + idx, // offset besar, agar setelah guru & manual
           });
         });
       }
 
-      // Insert student followers if any (manual executors are handled by trigger)
       if (allFollowerInserts.length > 0) {
         const { error: followerError } = await supabase
           .from("official_travel_followers")
@@ -489,23 +474,18 @@ export default function OfficialTravel() {
     },
   });
 
-  // Function to handle editing the duplicate SPD
   const handleEditDuplicateSPD = () => {
     if (!duplicateSPD) return;
-    
     const fullSPDData = travels?.find((t: any) => t.id === duplicateSPD.id);
     if (fullSPDData) {
       handleEdit(fullSPDData);
     }
-    
     setDuplicateDialogOpen(false);
     setDuplicateSPD(null);
   };
 
-  // Function to delete duplicate SPD and create new one
   const handleDeleteAndCreateNew = async () => {
     if (!duplicateSPD) return;
-    
     try {
       await deleteMutation.mutateAsync(duplicateSPD.id);
       setDuplicateDialogOpen(false);
@@ -533,68 +513,60 @@ export default function OfficialTravel() {
     },
   });
 
-  // Repair function to sync manual executors from assignment letters to SPD followers
+  // Repair: sync manual executors + order_index dari surat tugas
   const handleRepairSPDData = async () => {
     setIsRepairing(true);
     setRepairResults(null);
-    
+
     try {
       const results = { repaired: 0, skipped: 0, errors: [] as string[] };
-      
+
       if (!travels || !assignmentLetters) {
         throw new Error("Data SPD atau Surat Tugas tidak tersedia");
       }
-      
+
       for (const spd of travels) {
         try {
-          // Find matching assignment letter by letter_number
           const matchingLetter = assignmentLetters.find((al: any) => al.letter_number === spd.letter_number);
-          
+
           if (!matchingLetter) {
             results.skipped++;
             continue;
           }
-          
+
           const manualExecutors = matchingLetter.assignment_letter_manual_executors || [];
-          
-          // Check if SPD already has assignment_letter_id set
+
           const needsAssignmentLetterLink = !spd.assignment_letter_id;
-          
-          // Check if SPD already has manual executors
           const existingManualExecutors = spd.official_travel_followers?.filter(
             (f: any) => f.follower_type === 'manual_executor'
           ) || [];
-          
           const needsManualExecutors = manualExecutors.length > 0 && existingManualExecutors.length < manualExecutors.length;
-          
+
           if (!needsAssignmentLetterLink && !needsManualExecutors) {
             results.skipped++;
             continue;
           }
-          
-          // Update SPD with assignment_letter_id (this will trigger auto-copy of manual executors)
+
           if (needsAssignmentLetterLink) {
             const { error: updateError } = await supabase
               .from("official_travel_letters")
               .update({ assignment_letter_id: matchingLetter.id })
               .eq("id", spd.id);
-            
+
             if (updateError) {
               results.errors.push(`SPD ${spd.letter_number}: ${updateError.message}`);
               continue;
             }
           }
-          
-          // If only needs manual executors and assignment_letter_id was already set, manually insert
+
           if (!needsAssignmentLetterLink && needsManualExecutors) {
-            // Delete existing manual executors and re-insert fresh ones
             await supabase
               .from("official_travel_followers")
               .delete()
               .eq("official_travel_id", spd.id)
               .eq("follower_type", "manual_executor");
-            
-            // Insert manual executors as followers
+
+            const teacherCount = (spd.official_travel_teachers || []).length;
             const followerInserts = manualExecutors.map((executor: any) => ({
               official_travel_id: spd.id,
               follower_type: 'manual_executor',
@@ -602,26 +574,27 @@ export default function OfficialTravel() {
               manual_executor_nip: executor.nip || null,
               manual_executor_pangkat: executor.pangkat_golongan || null,
               manual_executor_jabatan: executor.jabatan || null,
+              order_index: teacherCount + (executor.order_index ?? 0),
             }));
-            
+
             const { error } = await supabase
               .from("official_travel_followers")
               .insert(followerInserts);
-            
+
             if (error) {
               results.errors.push(`SPD ${spd.letter_number}: ${error.message}`);
               continue;
             }
           }
-          
+
           results.repaired++;
         } catch (error: any) {
           results.errors.push(`SPD ${spd.letter_number}: ${error.message || 'Unknown error'}`);
         }
       }
-      
+
       setRepairResults(results);
-      
+
       if (results.repaired > 0) {
         queryClient.invalidateQueries({ queryKey: ["official-travel-letters"] });
         toast.success(`Berhasil memperbaiki ${results.repaired} SPD`);
@@ -635,16 +608,17 @@ export default function OfficialTravel() {
     }
   };
 
+  // ============================================================
+  // Update mutation — simpan order_index
+  // ============================================================
   const updateMutation = useMutation({
     mutationFn: async (data: typeof formData & { teacher_ids: string[], student_follower_ids: string[] }) => {
       if (!editingId) throw new Error("No editing ID");
 
-      // Get manual executors count from selected assignment letter for validation
       const selectedLetterForUpdate = assignmentLetters?.find((al: any) => al.id === data.assignment_letter_id);
       const manualExecutorsCountForUpdate = selectedLetterForUpdate?.assignment_letter_manual_executors?.length || 0;
       const totalExecutorsForUpdate = selectedTeachers.length + manualExecutorsCountForUpdate;
 
-      // Validate
       travelSchema.parse({
         assignment_letter_id: data.assignment_letter_id,
         letter_date: data.letter_date,
@@ -654,8 +628,7 @@ export default function OfficialTravel() {
         return_date: data.return_date,
         total_executors: totalExecutorsForUpdate,
       });
-      // Update official travel letter with assignment_letter_id
-      // The database trigger will auto-sync manual executors if assignment_letter_id changes
+
       const { error: letterError } = await supabase
         .from("official_travel_letters")
         .update({
@@ -675,15 +648,20 @@ export default function OfficialTravel() {
 
       if (letterError) throw letterError;
 
-      // Delete existing teachers and re-insert
+      // Delete existing teachers & re-insert dengan order_index
       await supabase
         .from("official_travel_teachers")
         .delete()
         .eq("official_travel_id", editingId);
 
+      const teacherOrderMap: Record<string, number> = JSON.parse(
+        sessionStorage.getItem('spd_teacher_order_map') || '{}'
+      );
+
       const teacherInserts = data.teacher_ids.map((teacher_id) => ({
         official_travel_id: editingId,
         teacher_id,
+        order_index: teacherOrderMap[teacher_id] ?? 0,
       }));
 
       if (teacherInserts.length > 0) {
@@ -693,19 +671,21 @@ export default function OfficialTravel() {
         if (teacherError) throw teacherError;
       }
 
-      // Delete existing student followers only (manual executors are handled by trigger)
+      sessionStorage.removeItem('spd_teacher_order_map');
+
+      // Delete existing student followers & re-insert
       await supabase
         .from("official_travel_followers")
         .delete()
         .eq("official_travel_id", editingId)
         .eq("follower_type", "student");
 
-      // Add student followers only
       if (data.student_follower_ids.length > 0) {
-        const studentFollowerInserts = data.student_follower_ids.map((student_id) => ({
+        const studentFollowerInserts = data.student_follower_ids.map((student_id, idx) => ({
           official_travel_id: editingId,
           follower_type: 'student',
           student_id,
+          order_index: 10000 + idx,
         }));
 
         const { error: followerError } = await supabase
@@ -745,18 +725,31 @@ export default function OfficialTravel() {
     setStudentSearchQuery("");
     setIsEditMode(false);
     setEditingId(null);
+    sessionStorage.removeItem('spd_teacher_order_map');
   };
 
+  // ============================================================
+  // Handle assignment letter select — simpan order map
+  // ============================================================
   const handleAssignmentLetterSelect = (letterId: string) => {
     setSelectedAssignmentLetter(letterId);
     const selectedLetter = assignmentLetters?.find((al: any) => al.id === letterId);
-    
+
     if (selectedLetter) {
-      // Get teacher IDs from assignment letter
-      const teacherIds = selectedLetter.assignment_letter_teachers?.map((alt: any) => alt.teacher_id) || [];
+      // Ambil guru TERURUT berdasarkan order_index dari surat tugas
+      const sortedTeachers = [...(selectedLetter.assignment_letter_teachers || [])]
+        .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0));
+
+      const teacherIds = sortedTeachers.map((alt: any) => alt.teacher_id);
       setSelectedTeachers(teacherIds);
-      
-      // Auto-fill form data
+
+      // Simpan mapping order_index guru
+      const teacherOrderMap: Record<string, number> = {};
+      sortedTeachers.forEach((alt: any) => {
+        teacherOrderMap[alt.teacher_id] = alt.order_index ?? 0;
+      });
+      sessionStorage.setItem('spd_teacher_order_map', JSON.stringify(teacherOrderMap));
+
       setFormData({
         ...formData,
         assignment_letter_id: letterId,
@@ -790,10 +783,9 @@ export default function OfficialTravel() {
   const handleEdit = (travel: any) => {
     setIsEditMode(true);
     setEditingId(travel.id);
-    
-    // Set form data
+
     setFormData({
-      assignment_letter_id: "",
+      assignment_letter_id: travel.assignment_letter_id || "",
       letter_number: travel.letter_number,
       letter_date: travel.letter_date,
       purpose: travel.purpose,
@@ -805,17 +797,26 @@ export default function OfficialTravel() {
       travel_budget: travel.travel_budget?.toString() || "",
       notes: travel.notes || "",
     });
-    
-    // Set selected teachers
-    const teacherIds = travel.official_travel_teachers?.map((tt: any) => tt.teacher_id) || [];
+
+    setSelectedAssignmentLetter(travel.assignment_letter_id || "");
+
+    // ✅ Susun teacher order map dari SPD existing
+    const sortedTeachers = [...(travel.official_travel_teachers || [])]
+      .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0));
+    const teacherIds = sortedTeachers.map((tt: any) => tt.teacher_id);
     setSelectedTeachers(teacherIds);
-    
-    // Set selected student followers
+
+    const teacherOrderMap: Record<string, number> = {};
+    sortedTeachers.forEach((tt: any) => {
+      teacherOrderMap[tt.teacher_id] = tt.order_index ?? 0;
+    });
+    sessionStorage.setItem('spd_teacher_order_map', JSON.stringify(teacherOrderMap));
+
     const studentIds = travel.official_travel_followers
       ?.filter((f: any) => f.follower_type === 'student')
       .map((f: any) => f.student_id) || [];
     setSelectedStudentFollowers(studentIds);
-    
+
     setIsDialogOpen(true);
   };
 
@@ -841,6 +842,9 @@ export default function OfficialTravel() {
     );
   };
 
+  // ============================================================
+  // Export PDF — urutan sesuai order_index
+  // ============================================================
   const exportPDF = async (travel: any) => {
     try {
       const { data: settings } = await supabase
@@ -851,10 +855,10 @@ export default function OfficialTravel() {
       const doc = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
-        format: [210, 330] // F4 paper size
+        format: [210, 330]
       });
       const pageWidth = doc.internal.pageSize.getWidth();
-      
+
       // === PAGE 1 ===
       let yPos = 15;
       if (settings) {
@@ -870,7 +874,6 @@ export default function OfficialTravel() {
         });
       }
 
-      // Header info (right side)
       yPos += 5;
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
@@ -883,7 +886,6 @@ export default function OfficialTravel() {
       doc.text("Nomor", pageWidth - 70, yPos);
       doc.text(`: ${travel.letter_number}`, pageWidth - 50, yPos);
 
-      // Title
       yPos += 10;
       doc.setFontSize(12);
       doc.setFont("helvetica", "bold");
@@ -891,27 +893,25 @@ export default function OfficialTravel() {
       doc.setLineWidth(0.5);
       doc.line(pageWidth / 2 - 45, yPos + 1, pageWidth / 2 + 45, yPos + 1);
 
-      // Calculate days
       const departureDate = new Date(travel.departure_date);
       const returnDate = new Date(travel.return_date);
       const diffTime = Math.abs(returnDate.getTime() - departureDate.getTime());
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
 
-      // Main table data
-      yPos += 8;
-      const tableStartY = yPos;
-      const leftCol = 14;
-      const midCol = 80;
-      const rightCol = pageWidth - 14;
-
-      // Get first teacher info
-      const firstTeacher = travel.official_travel_teachers[0]?.teachers;
+      // ✅ Ambil guru utama (order_index terkecil)
+      const sortedTeachers = [...(travel.official_travel_teachers || [])]
+        .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0));
+      const firstTeacher = sortedTeachers[0]?.teachers;
       const teacherName = toTitleCase(firstTeacher?.profiles?.full_name) || "-";
       const teacherNip = firstTeacher?.nip || "-";
       const teacherPangkat = firstTeacher?.pangkat_golongan || "-";
       const teacherJabatan = firstTeacher?.jabatan || "-";
 
-      // Table rows data with proper labels
+      yPos += 8;
+      const tableStartY = yPos;
+      const leftCol = 14;
+      const rightCol = pageWidth - 14;
+
       const tableData = [
         ["1.", "Pejabat Pembuat Komitmen", `Kepala ${settings?.school_name || "-"}`],
         ["2.", "Nama/NIP Pegawai yang\nmelaksanakan perjalanan dinas", `${teacherName}\nNIP. ${teacherNip}`],
@@ -926,13 +926,7 @@ export default function OfficialTravel() {
         startY: tableStartY,
         head: [],
         body: tableData,
-        styles: { 
-          fontSize: 9, 
-          cellPadding: 3, 
-          lineColor: [0, 0, 0], 
-          lineWidth: 0.2,
-          valign: 'top'
-        },
+        styles: { fontSize: 9, cellPadding: 3, lineColor: [0, 0, 0], lineWidth: 0.2, valign: 'top' },
         columnStyles: {
           0: { cellWidth: 10, halign: 'center' },
           1: { cellWidth: 55 },
@@ -944,53 +938,39 @@ export default function OfficialTravel() {
 
       yPos = (doc as any).lastAutoTable.finalY;
 
-      // Row 8: Pengikut with nested table - get follower teachers (index 1 onwards), manual executors, AND student followers
-      const allTeachers = travel.official_travel_teachers || [];
-      const teacherFollowerData = allTeachers.slice(1).map((t: any) => [
-        toTitleCase(t.teachers?.profiles?.full_name) || "-",
-        "",  // Tgl lahir - can be left empty
-        `Guru - NIP. ${t.teachers?.nip || "-"}`
-      ]);
-      
-      // Add manual executor followers
-      const manualExecutorFollowers = travel.official_travel_followers?.filter((f: any) => f.follower_type === 'manual_executor') || [];
-      const manualExecutorFollowerData = manualExecutorFollowers.map((f: any) => [
-        toTitleCase(f.manual_executor?.full_name || f.manual_executor_name) || "-",
-        "",  // Tgl lahir - can be left empty
-        `${f.manual_executor?.jabatan || f.manual_executor_jabatan || "-"} - NIP. ${f.manual_executor?.nip || f.manual_executor_nip || "-"}`
-      ]);
-      
-      // Add student followers
-      const studentFollowers = travel.official_travel_followers?.filter((f: any) => f.follower_type === 'student') || [];
-      const studentFollowerData = studentFollowers.map((f: any) => [
-        toTitleCase(f.students?.full_name) || "-",
-        "",  // Tgl lahir - can be left empty
-        `Siswa - NIS. ${f.students?.nis || "-"}${f.students?.class_name ? ` (${f.students.class_name})` : ""}`
-      ]);
-      
-      const followerData = [...teacherFollowerData, ...manualExecutorFollowerData, ...studentFollowerData];
-      
-      // Add empty row if no followers
-      if (followerData.length === 0) {
-        followerData.push(["", "", ""]);
-      }
-      
-      // Calculate dynamic font size based on number of followers to fit page
+      // ✅ Pengikut (guru + manual + siswa) diurutkan berdasarkan order_index
+      const followerExecutors = [
+        ...sortedTeachers.slice(1).map((t: any) => ({
+          name: t.teachers?.profiles?.full_name || "-",
+          ket: `Guru - NIP. ${t.teachers?.nip || "-"}`,
+          order_index: t.order_index ?? 0,
+        })),
+        ...(travel.official_travel_followers || [])
+          .filter((f: any) => f.follower_type === 'manual_executor')
+          .map((f: any) => ({
+            name: f.manual_executor?.full_name || f.manual_executor_name || "-",
+            ket: `${f.manual_executor?.jabatan || "-"} - NIP. ${f.manual_executor?.nip || "-"}`,
+            order_index: f.order_index ?? 0,
+          })),
+        ...(travel.official_travel_followers || [])
+          .filter((f: any) => f.follower_type === 'student')
+          .map((f: any) => ({
+            name: f.students?.full_name || "-",
+            ket: `Siswa - NIS. ${f.students?.nis || "-"}${f.students?.class_name ? ` (${f.students.class_name})` : ""}`,
+            order_index: f.order_index ?? 9999,
+          })),
+      ].sort((a, b) => a.order_index - b.order_index);
+
+      const followerData = followerExecutors.map((f) => [f.name, "", f.ket]);
+      if (followerData.length === 0) followerData.push(["", "", ""]);
+
       const followerCount = followerData.length;
       let followerFontSize = 9;
       let followerCellPadding = 3;
-      
-      if (followerCount > 10) {
-        followerFontSize = 6;
-        followerCellPadding = 1.5;
-      } else if (followerCount > 7) {
-        followerFontSize = 7;
-        followerCellPadding = 2;
-      } else if (followerCount > 5) {
-        followerFontSize = 8;
-        followerCellPadding = 2.5;
-      }
-      
+      if (followerCount > 10) { followerFontSize = 6; followerCellPadding = 1.5; }
+      else if (followerCount > 7) { followerFontSize = 7; followerCellPadding = 2; }
+      else if (followerCount > 5) { followerFontSize = 8; followerCellPadding = 2.5; }
+
       autoTable(doc, {
         startY: yPos,
         head: [],
@@ -998,13 +978,7 @@ export default function OfficialTravel() {
           [{ content: "8.", rowSpan: followerData.length + 1 }, { content: "Pengikut", rowSpan: followerData.length + 1 }, "Nama", "Tgl lahir", "Keterangan"],
           ...followerData,
         ],
-        styles: { 
-          fontSize: followerFontSize, 
-          cellPadding: followerCellPadding, 
-          lineColor: [0, 0, 0], 
-          lineWidth: 0.2,
-          valign: 'middle'
-        },
+        styles: { fontSize: followerFontSize, cellPadding: followerCellPadding, lineColor: [0, 0, 0], lineWidth: 0.2, valign: 'middle' },
         columnStyles: {
           0: { cellWidth: 10, halign: 'center' },
           1: { cellWidth: 55 },
@@ -1018,7 +992,6 @@ export default function OfficialTravel() {
 
       yPos = (doc as any).lastAutoTable.finalY;
 
-      // Row 9 & 10 - reduced cell padding for compact layout
       autoTable(doc, {
         startY: yPos,
         head: [],
@@ -1026,13 +999,7 @@ export default function OfficialTravel() {
           ["9.", "Pembebanan Anggaran\na. Instansi\nb. Akun", `a. ${settings?.school_name || "-"}\nb. ..............................`],
           ["10.", "Keterangan lain-lain", travel.notes || "-"],
         ],
-        styles: { 
-          fontSize: 9, 
-          cellPadding: 2, 
-          lineColor: [0, 0, 0], 
-          lineWidth: 0.2,
-          valign: 'top'
-        },
+        styles: { fontSize: 9, cellPadding: 2, lineColor: [0, 0, 0], lineWidth: 0.2, valign: 'top' },
         columnStyles: {
           0: { cellWidth: 10, halign: 'center' },
           1: { cellWidth: 55 },
@@ -1044,7 +1011,6 @@ export default function OfficialTravel() {
 
       yPos = (doc as any).lastAutoTable.finalY + 8;
 
-      // Signature section page 1 - moved up with compact spacing
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
       doc.text(`Dikeluarkan di : Ciamis`, pageWidth - 80, yPos);
@@ -1063,39 +1029,33 @@ export default function OfficialTravel() {
       doc.addPage();
       yPos = 15;
 
-      // Page 2 layout constants - optimized for F4 (330mm height)
       const col1X = 14;
       const col2X = pageWidth / 2;
       const colWidth = (pageWidth - 28) / 2;
       const tableWidth = pageWidth - 28;
       const numColWidth = 12;
-      
+
       doc.setLineWidth(0.2);
       doc.setFontSize(9);
 
-      // Section I - Top section with left empty column and right departure info
       const section1Height = 52;
-      // Left empty column
       doc.rect(col1X, yPos, colWidth, section1Height);
-      // Right column for Section I
       doc.rect(col2X, yPos, colWidth, section1Height);
-      
-      // Section I content (right column) - compact line spacing
+
       const s1LabelX = col2X + 5;
       const s1ValueX = col2X + 40;
-      
+
       doc.text("I.", col2X + 3, yPos + 6);
       doc.text("Berangkat Dari", s1LabelX + 5, yPos + 6);
       doc.text("(tempat kedudukan)", s1LabelX + 5, yPos + 10);
       doc.text("Ke", s1LabelX + 5, yPos + 15);
       doc.text("Pada Tanggal", s1LabelX + 5, yPos + 20);
       doc.text(`Kepala ${settings?.school_name || ""}`, s1LabelX + 5, yPos + 25);
-      
+
       doc.text(`: ${settings?.school_name || ""}`, s1ValueX, yPos + 6);
       doc.text(`: ${travel.destination}`, s1ValueX, yPos + 15);
       doc.text(`: ${format(departureDate, "dd MMMM yyyy", { locale: idLocale })}`, s1ValueX, yPos + 20);
-      
-      // Headmaster signature in Section I (more space for signature)
+
       doc.setFont("helvetica", "bold");
       doc.text(settings?.headmaster_name || "", s1LabelX + 5, yPos + 42);
       doc.setFont("helvetica", "normal");
@@ -1103,33 +1063,26 @@ export default function OfficialTravel() {
 
       yPos += section1Height;
 
-      // Sections II-VI (travel log table) - optimized heights with better spacing
-      const rowHeight = 42; // Increased for signature space
+      const rowHeight = 42;
       const section6Height = 46;
-      const totalTableHeight = (4 * rowHeight) + section6Height; // 4 rows (II-V) + section VI
-      
-      // Draw outer border for sections II-VI
+      const totalTableHeight = (4 * rowHeight) + section6Height;
+
       doc.rect(col1X, yPos, tableWidth, totalTableHeight);
-      
-      // Draw vertical divider in the middle
       doc.line(col2X, yPos, col2X, yPos + totalTableHeight);
-      
-      // Draw horizontal lines between rows
+
       let lineY = yPos;
       for (let i = 0; i < 4; i++) {
         lineY += rowHeight;
         doc.line(col1X, lineY, col1X + tableWidth, lineY);
       }
 
-      // Left and right column positions
       const leftLabelX = col1X + numColWidth + 2;
       const leftValueX = col1X + 35;
       const rightLabelX = col2X + 3;
       const rightValueX = col2X + 35;
-      
-      doc.setFontSize(8); // Smaller font for compact layout
-      
-      // Section II - First row with actual data (compact spacing)
+
+      doc.setFontSize(8);
+
       let rowY = yPos;
       doc.text("II.", col1X + 3, rowY + 5);
       doc.text("Tiba di", leftLabelX, rowY + 5);
@@ -1139,7 +1092,7 @@ export default function OfficialTravel() {
       doc.text(`: ${format(departureDate, "dd MMMM yyyy", { locale: idLocale })}`, leftValueX, rowY + 9);
       doc.text("(..............................................)", leftLabelX, rowY + 32);
       doc.text("NIP.", leftLabelX, rowY + 37);
-      
+
       doc.text("Berangkat Dari", rightLabelX, rowY + 5);
       doc.text("Ke", rightLabelX, rowY + 9);
       doc.text("Pada Tanggal", rightLabelX, rowY + 13);
@@ -1149,10 +1102,9 @@ export default function OfficialTravel() {
       doc.text(`: ${format(departureDate, "dd MMMM yyyy", { locale: idLocale })}`, rightValueX, rowY + 13);
       doc.text("(..............................................)", rightLabelX, rowY + 32);
       doc.text("NIP.", rightLabelX, rowY + 37);
-      
+
       rowY += rowHeight;
 
-      // Sections III, IV, V - Empty rows with dotted lines (compact spacing)
       const emptyRows = ["III", "IV", "V"];
       emptyRows.forEach((num) => {
         doc.text(`${num}.`, col1X + 3, rowY + 5);
@@ -1164,7 +1116,7 @@ export default function OfficialTravel() {
         doc.text(": .................................", leftValueX, rowY + 13);
         doc.text("(..............................................)", leftLabelX, rowY + 32);
         doc.text("NIP.", leftLabelX, rowY + 37);
-        
+
         doc.text("Berangkat Dari", rightLabelX, rowY + 5);
         doc.text("Ke", rightLabelX, rowY + 9);
         doc.text("Pada Tanggal", rightLabelX, rowY + 13);
@@ -1174,48 +1126,41 @@ export default function OfficialTravel() {
         doc.text(": .................................", rightValueX, rowY + 13);
         doc.text("(..............................................)", rightLabelX, rowY + 32);
         doc.text("NIP.", rightLabelX, rowY + 37);
-        
+
         rowY += rowHeight;
       });
 
-      // Section VI - Return row
       doc.text("VI.", col1X + 3, rowY + 6);
       doc.text("Tiba di", leftLabelX, rowY + 6);
       doc.text("Pada Tanggal", leftLabelX, rowY + 11);
       doc.text(`Kepala ${settings?.school_name || ""}`, leftLabelX, rowY + 16);
       doc.text(`: ${settings?.school_name || ""}`, leftValueX, rowY + 6);
       doc.text(`: ${format(returnDate, "dd MMMM yyyy", { locale: idLocale })}`, leftValueX, rowY + 11);
-      
-      // Headmaster signature aligned left with spacing
+
       doc.setFont("helvetica", "bold");
       doc.text(toTitleCase(settings?.headmaster_name) || "", leftLabelX, rowY + 32);
       doc.setFont("helvetica", "normal");
       doc.text(`NIP. ${settings?.headmaster_nip || ""}`, leftLabelX, rowY + 37);
 
-      // Right side - Disclaimer text
       const disclaimer = doc.splitTextToSize("Telah diperiksa, dengan keterangan bahwa perjalanan tersebut diatas benar dilakukan atas perintahnya dan semata-mata untuk kepentingan jabatan dalam kurun waktu yang sesingkat-singkatnya", colWidth - 10);
       doc.text(disclaimer, rightLabelX, rowY + 8);
 
       yPos = rowY + section6Height;
 
-      // Section VII - Catatan Lain-lain
       doc.setFontSize(9);
       doc.rect(col1X, yPos, tableWidth, 12);
       doc.text("VII. Catatan Lain-lain", col1X + 3, yPos + 8);
 
       yPos += 12;
 
-      // Section VIII - PERHATIAN
       doc.rect(col1X, yPos, tableWidth, 24);
       doc.setFontSize(7);
       doc.text("VIII. PERHATIAN:", col1X + 3, yPos + 6);
       const perhatian = doc.splitTextToSize("PPK yang menerbitkan SPD, pegawai yang melakukan perjalanan dinas, para pejabat yang mengesahkan tanggal berangkat/tiba, serta bendahara pengeluaran bertanggung jawab berdasarkan peraturan-peraturan Keuangan Negara apabila negara menderita rugi akibat kesalahan, kelalaian, dan kealpaannya.", tableWidth - 10);
       doc.text(perhatian, col1X + 3, yPos + 11);
 
-      // Pastikan blok tanda tangan berada DI BAWAH kotak Section VIII (tidak overlap)
       yPos += 24 + 12;
 
-      // Final signature - Pejabat Pembuat Komitmen
       doc.setFontSize(10);
       doc.text("Pejabat Pembuat Komitmen", pageWidth - 60, yPos, { align: "center" });
       yPos += 15;
@@ -1225,123 +1170,121 @@ export default function OfficialTravel() {
       yPos += 4;
       doc.text(`NIP. ${settings?.headmaster_nip || ""}`, pageWidth - 60, yPos, { align: "center" });
 
-      // === LPT PAGES - Generate one page for each teacher AND manual executor ===
-      const allTeachersForLPT = travel.official_travel_teachers || [];
-      const manualExecutorsForLPT = travel.official_travel_followers?.filter((f: any) => f.follower_type === 'manual_executor') || [];
-      
-      // Helper function to generate LPT page
+      // === LPT PAGES — urutan guru + manual sesuai order_index ===
+      const lptExecutors = [
+        ...sortedTeachers.map((tt: any) => ({
+          name: tt.teachers?.profiles?.full_name || "-",
+          nip: tt.teachers?.nip || "-",
+          order_index: tt.order_index ?? 0,
+        })),
+        ...(travel.official_travel_followers || [])
+          .filter((f: any) => f.follower_type === 'manual_executor')
+          .map((f: any) => ({
+            name: f.manual_executor?.full_name || f.manual_executor_name || "-",
+            nip: f.manual_executor?.nip || f.manual_executor_nip || "-",
+            order_index: f.order_index ?? 0,
+          })),
+      ].sort((a, b) => a.order_index - b.order_index);
+
       const generateLPTPage = (name: string, nip: string) => {
         const formattedName = toTitleCase(name);
         doc.addPage();
         let lptYPos = 30;
 
-        // Title
         doc.setFontSize(14);
         doc.setFont("helvetica", "bold");
         doc.text("LAPORAN PELAKSANAAN TUGAS", pageWidth / 2, lptYPos, { align: "center" });
         lptYPos += 7;
         doc.text("(LPT)", pageWidth / 2, lptYPos, { align: "center" });
-        
+
         lptYPos += 20;
         doc.setFontSize(11);
         doc.setFont("helvetica", "normal");
-        
+
         const labelX = 14;
         const colonX = 60;
         const valueX = 65;
         const lineHeight = 8;
 
-        // 1. Nama
         doc.text("1. Nama", labelX, lptYPos);
         doc.text(":", colonX, lptYPos);
         doc.setFont("helvetica", "bold");
         doc.text(formattedName, valueX, lptYPos);
         doc.setFont("helvetica", "normal");
-        
+
         lptYPos += lineHeight;
 
-        // 2. NIP
         doc.text("2. NIP", labelX, lptYPos);
         doc.text(":", colonX, lptYPos);
         doc.text(nip, valueX, lptYPos);
-        
+
         lptYPos += lineHeight;
 
-        // 3. Dasar Surat Tugas Nomor
         doc.text("3. Dasar Surat Tugas Nomor", labelX, lptYPos);
         doc.text(":", colonX, lptYPos);
         doc.text(travel.letter_number, valueX, lptYPos);
-        
+
         lptYPos += lineHeight;
 
-        // 4. Tujuan
         doc.text("4. Tujuan", labelX, lptYPos);
         doc.text(":", colonX, lptYPos);
         const purposeText = doc.splitTextToSize(`Untuk ${travel.purpose}`, pageWidth - valueX - 14);
         doc.text(purposeText, valueX, lptYPos);
         lptYPos += purposeText.length > 1 ? lineHeight * purposeText.length : lineHeight;
 
-        // 5. Waktu
         doc.text("5. Waktu", labelX, lptYPos);
         doc.text(":", colonX, lptYPos);
         doc.text("08.30 s.d selesai", valueX, lptYPos);
-        
+
         lptYPos += lineHeight;
         doc.text("    a. Berangkat", labelX, lptYPos);
         doc.text(":", colonX, lptYPos);
         doc.text(format(departureDate, "dd MMMM yyyy", { locale: idLocale }), valueX, lptYPos);
-        
+
         lptYPos += lineHeight;
         doc.text("    b. Kembali", labelX, lptYPos);
         doc.text(":", colonX, lptYPos);
         doc.text(format(returnDate, "dd MMMM yyyy", { locale: idLocale }), valueX, lptYPos);
-        
+
         lptYPos += lineHeight + 2;
 
-        // 6. Sasaran (with dotted lines)
         doc.text("6. Sasaran", labelX, lptYPos);
         doc.text(":", colonX, lptYPos);
         for (let i = 0; i < 3; i++) {
           doc.text("..........................................................................................................", valueX, lptYPos + (i * 6));
         }
-        
+
         lptYPos += 22;
 
-        // 7. Hasil yang dicapai (with dotted lines)
         doc.text("7.Hasil yang dicapai", labelX, lptYPos);
         doc.text(":", colonX, lptYPos);
         for (let i = 0; i < 6; i++) {
           doc.text("..........................................................................................................", valueX, lptYPos + (i * 6));
         }
-        
+
         lptYPos += 40;
 
-        // 8. Saran-saran (with dotted lines)
         doc.text("8. Saran-saran", labelX, lptYPos);
         doc.text(":", colonX, lptYPos);
         for (let i = 0; i < 3; i++) {
           doc.text("..........................................................................................................", valueX, lptYPos + (i * 6));
         }
-        
+
         lptYPos += 35;
 
-        // Signature section for LPT
         const leftSignX = 14;
         const rightSignX = pageWidth / 2 + 20;
-        
-        // Left signature - Mengetahui
+
         doc.text("Mengetahui,", leftSignX, lptYPos);
         lptYPos += 5;
         doc.text(`Kepala ${settings?.school_name || ""}`, leftSignX, lptYPos);
-        
-        // Right signature - Pelapor
+
         const lptSignDate = `Ciamis, ${format(returnDate, "dd MMMM yyyy", { locale: idLocale })}`;
         doc.text(lptSignDate, rightSignX, lptYPos - 5);
         doc.text("Pelapor,", rightSignX, lptYPos);
-        
+
         lptYPos += 30;
-        
-        // Names and NIPs
+
         doc.setFont("helvetica", "bold");
         doc.text(settings?.headmaster_name || "", leftSignX, lptYPos);
         doc.text(name, rightSignX, lptYPos);
@@ -1351,20 +1294,8 @@ export default function OfficialTravel() {
         doc.text(`NIP. ${nip}`, rightSignX, lptYPos);
       };
 
-      // Generate LPT for each teacher
-      for (let tIdx = 0; tIdx < allTeachersForLPT.length; tIdx++) {
-        const currentTeacher = allTeachersForLPT[tIdx]?.teachers;
-        const currentTeacherName = currentTeacher?.profiles?.full_name || "-";
-        const currentTeacherNip = currentTeacher?.nip || "-";
-        generateLPTPage(currentTeacherName, currentTeacherNip);
-      }
-
-      // Generate LPT for each manual executor
-      for (let mIdx = 0; mIdx < manualExecutorsForLPT.length; mIdx++) {
-        const executor = manualExecutorsForLPT[mIdx];
-        const executorName = executor.manual_executor?.full_name || executor.manual_executor_name || "-";
-        const executorNip = executor.manual_executor?.nip || executor.manual_executor_nip || "-";
-        generateLPTPage(executorName, executorNip);
+      for (let i = 0; i < lptExecutors.length; i++) {
+        generateLPTPage(lptExecutors[i].name, lptExecutors[i].nip);
       }
 
       doc.save(`SPD-${travel.letter_number}.pdf`);
@@ -1384,11 +1315,11 @@ export default function OfficialTravel() {
     const matchesSearch = travel.letter_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
       travel.purpose.toLowerCase().includes(searchQuery.toLowerCase()) ||
       travel.destination.toLowerCase().includes(searchQuery.toLowerCase());
-    
+
     const travelDate = new Date(travel.letter_date);
     const matchesStartDate = !startDateFilter || travelDate >= startDateFilter;
     const matchesEndDate = !endDateFilter || travelDate <= endDateFilter;
-    
+
     return matchesSearch && matchesStartDate && matchesEndDate;
   });
 
@@ -1448,7 +1379,6 @@ export default function OfficialTravel() {
 
                   {((selectedAssignmentLetter && selectedLetterData) || isEditMode) && (
                     <>
-                      {/* Data Surat Tugas Preview - only when creating from assignment letter */}
                       {!isEditMode && selectedLetterData && (
                         <div className="border rounded-lg p-4 bg-muted/30 space-y-3">
                           <h4 className="font-semibold text-sm border-b pb-2">Data dari Surat Tugas</h4>
@@ -1482,8 +1412,7 @@ export default function OfficialTravel() {
                               <p className="font-medium">{format(new Date(selectedLetterData.end_date), "dd MMMM yyyy", { locale: idLocale })}</p>
                             </div>
                           </div>
-                          
-                          {/* Pelaksana Utama */}
+
                           {mainTeacher && (
                             <div className="mt-3 pt-3 border-t">
                               <span className="text-muted-foreground text-sm">Pelaksana Utama:</span>
@@ -1498,14 +1427,13 @@ export default function OfficialTravel() {
                               </div>
                             </div>
                           )}
-                          
-                          {/* Pengikut */}
+
                           {followerTeachers.length > 0 && (
                             <div className="mt-2">
                               <span className="text-muted-foreground text-sm">Pengikut ({followerTeachers.length} orang):</span>
                               <div className="space-y-1 mt-1">
                                 {followerTeachers.map((executor: any, idx: number) => (
-                                  <div key={executor.id} className="flex items-center gap-2">
+                                  <div key={executor.id ?? idx} className="flex items-center gap-2">
                                     <Badge variant="secondary" className="text-xs">Pengikut {idx + 1}</Badge>
                                     {executor.isManual && (
                                       <Badge variant="outline" className="text-xs">Manual</Badge>
@@ -1634,21 +1562,19 @@ export default function OfficialTravel() {
                         />
                       </div>
 
-                      {/* Teacher Selection - editable in edit mode, read-only when creating */}
                       <div className="space-y-2">
                         <Label>{isEditMode ? "Guru yang Diperintahkan *" : "Guru yang Diperintahkan (dari Surat Tugas)"}</Label>
                         <div className="border rounded-md p-4 bg-muted/30 space-y-3">
                           {isEditMode ? (
                             <>
-                              {/* Show selected teachers */}
                               {selectedTeachers.length > 0 && (
                                 <div className="flex flex-wrap gap-2 mb-3">
                                   {selectedTeachers.map((teacherId, idx) => {
                                     const teacher = teachers?.find((t) => t.id === teacherId);
                                     return (
-                                      <Badge 
-                                        key={teacherId} 
-                                        variant={idx === 0 ? "default" : "secondary"} 
+                                      <Badge
+                                        key={teacherId}
+                                        variant={idx === 0 ? "default" : "secondary"}
                                         className="text-xs cursor-pointer hover:bg-destructive/20"
                                         onClick={() => toggleTeacher(teacherId)}
                                       >
@@ -1658,7 +1584,6 @@ export default function OfficialTravel() {
                                   })}
                                 </div>
                               )}
-                              {/* Teacher search/select */}
                               <Select onValueChange={(value) => {
                                 if (!selectedTeachers.includes(value)) {
                                   setSelectedTeachers(prev => [...prev, value]);
@@ -1678,11 +1603,11 @@ export default function OfficialTravel() {
                               <p className="text-xs text-muted-foreground">Guru pertama menjadi Pelaksana Utama. Klik badge untuk menghapus.</p>
                             </>
                           ) : (
-                              <>
+                            <>
                               {allExecutors.length > 0 ? (
                                 <div className="space-y-2">
                                   {allExecutors.map((executor: any, idx: number) => (
-                                    <div key={executor.id} className="flex items-center gap-2">
+                                    <div key={executor.id ?? idx} className="flex items-center gap-2">
                                       <Badge variant={idx === 0 ? "default" : "secondary"} className="text-xs">
                                         {idx === 0 ? "Pelaksana" : `Pengikut ${idx}`}
                                       </Badge>
@@ -1703,7 +1628,6 @@ export default function OfficialTravel() {
                         </div>
                       </div>
 
-                      {/* Siswa Pengikut */}
                       <div className="space-y-2">
                         <Label>Siswa Pengikut (Opsional)</Label>
                         <div className="border rounded-md p-4 space-y-3">
@@ -1716,16 +1640,16 @@ export default function OfficialTravel() {
                               className="pl-10"
                             />
                           </div>
-                          
+
                           {selectedStudentFollowers.length > 0 && (
                             <div className="flex flex-wrap gap-2 p-2 bg-muted/30 rounded-md">
                               <span className="text-xs text-muted-foreground">Dipilih:</span>
                               {selectedStudentFollowers.map((studentId) => {
                                 const student = students?.find((s) => s.id === studentId);
                                 return (
-                                  <Badge 
-                                    key={studentId} 
-                                    variant="secondary" 
+                                  <Badge
+                                    key={studentId}
+                                    variant="secondary"
                                     className="text-xs cursor-pointer hover:bg-destructive/20"
                                     onClick={() => toggleStudentFollower(studentId)}
                                   >
@@ -1761,7 +1685,7 @@ export default function OfficialTravel() {
                               )}
                             </div>
                           )}
-                          
+
                           <p className="text-xs text-muted-foreground">
                             Ketik nama atau NIS untuk mencari siswa. Klik untuk memilih/hapus.
                           </p>
@@ -1801,8 +1725,7 @@ export default function OfficialTravel() {
                     className="pl-10"
                   />
                 </div>
-                
-                {/* Date Filters and Repair Button */}
+
                 <div className="flex flex-wrap gap-2 items-center justify-between">
                   <div className="flex flex-wrap gap-2">
                     <Popover>
@@ -1833,10 +1756,9 @@ export default function OfficialTravel() {
                       </Button>
                     )}
                   </div>
-                  
-                  {/* Repair Data Button */}
-                  <Button 
-                    variant="outline" 
+
+                  <Button
+                    variant="outline"
                     onClick={() => setRepairDialogOpen(true)}
                     className="text-amber-600 border-amber-200 hover:bg-amber-50 hover:text-amber-700 dark:border-amber-800 dark:hover:bg-amber-950"
                   >
@@ -1866,10 +1788,41 @@ export default function OfficialTravel() {
                     </TableHeader>
                     <TableBody>
                       {filteredTravels.map((travel, index) => {
-                        const teacherFollowers = travel.official_travel_teachers.slice(1);
-                        const studentFollowers = travel.official_travel_followers?.filter((f: any) => f.follower_type === 'student') || [];
-                        const totalFollowers = teacherFollowers.length + studentFollowers.length;
-                        
+                        // ✅ Gabung guru + manual executor + siswa, sort pakai order_index
+                        const teacherExecs = (travel.official_travel_teachers || []).map((tt: any) => ({
+                          key: `t-${tt.teacher_id}`,
+                          name: tt.teachers?.profiles?.full_name || "-",
+                          isManual: false,
+                          isStudent: false,
+                          order_index: tt.order_index ?? 0,
+                        }));
+
+                        const manualExecs = (travel.official_travel_followers || [])
+                          .filter((f: any) => f.follower_type === 'manual_executor')
+                          .map((f: any) => ({
+                            key: `m-${f.id}`,
+                            name: f.manual_executor?.full_name || f.manual_executor_name || "-",
+                            isManual: true,
+                            isStudent: false,
+                            order_index: f.order_index ?? 0,
+                          }));
+
+                        const studentFollowers = (travel.official_travel_followers || [])
+                          .filter((f: any) => f.follower_type === 'student')
+                          .map((f: any) => ({
+                            key: `s-${f.id}`,
+                            name: `${f.students?.full_name || "-"} (NIS: ${f.students?.nis || "-"}${f.students?.class_name ? ` - ${f.students.class_name}` : ""})`,
+                            isManual: false,
+                            isStudent: true,
+                            order_index: f.order_index ?? 9999,
+                          }));
+
+                        const sortedAll = [...teacherExecs, ...manualExecs, ...studentFollowers]
+                          .sort((a, b) => a.order_index - b.order_index);
+
+                        const mainExec = sortedAll[0];
+                        const followersList = sortedAll.slice(1);
+
                         return (
                           <TableRow key={travel.id}>
                             <TableCell>{index + 1}</TableCell>
@@ -1878,25 +1831,24 @@ export default function OfficialTravel() {
                             <TableCell>{travel.purpose}</TableCell>
                             <TableCell>{travel.destination}</TableCell>
                             <TableCell>
-                              {travel.official_travel_teachers[0] && (
+                              {mainExec && (
                                 <Badge variant="default" className="text-xs">
-                                  {travel.official_travel_teachers[0].teachers?.profiles?.full_name || "-"}
+                                  {mainExec.name}
                                 </Badge>
                               )}
                             </TableCell>
                             <TableCell>
                               <div className="flex flex-wrap gap-1">
-                                {teacherFollowers.map((tt: any) => (
-                                  <Badge key={tt.teacher_id} variant="secondary" className="text-xs">
-                                    {tt.teachers?.profiles?.full_name || "-"} (Guru)
+                                {followersList.map((f: any) => (
+                                  <Badge
+                                    key={f.key}
+                                    variant={f.isManual ? "outline" : f.isStudent ? "outline" : "secondary"}
+                                    className="text-xs"
+                                  >
+                                    {f.name}{f.isManual ? " (Manual)" : ""}
                                   </Badge>
                                 ))}
-                                {studentFollowers.map((sf: any) => (
-                                  <Badge key={sf.id} variant="outline" className="text-xs">
-                                    {sf.students?.full_name || "-"} (NIS: {sf.students?.nis || "-"}{sf.students?.class_name ? ` - ${sf.students.class_name}` : ""})
-                                  </Badge>
-                                ))}
-                                {totalFollowers === 0 && (
+                                {followersList.length === 0 && (
                                   <span className="text-xs text-muted-foreground">-</span>
                                 )}
                               </div>
@@ -1906,36 +1858,16 @@ export default function OfficialTravel() {
                             </TableCell>
                             <TableCell className="text-right">
                               <div className="flex justify-end gap-2">
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  onClick={() => handleEdit(travel)}
-                                  title="Edit"
-                                >
+                                <Button variant="outline" size="icon" onClick={() => handleEdit(travel)} title="Edit">
                                   <Pencil className="h-4 w-4" />
                                 </Button>
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  onClick={() => previewPDF(travel)}
-                                  title="Preview PDF"
-                                >
+                                <Button variant="outline" size="icon" onClick={() => previewPDF(travel)} title="Preview PDF">
                                   <Eye className="h-4 w-4" />
                                 </Button>
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  onClick={() => exportPDF(travel)}
-                                  title="Download PDF"
-                                >
+                                <Button variant="outline" size="icon" onClick={() => exportPDF(travel)} title="Download PDF">
                                   <FileDown className="h-4 w-4" />
                                 </Button>
-                                <Button
-                                  variant="destructive"
-                                  size="icon"
-                                  onClick={() => handleDelete(travel.id)}
-                                  title="Hapus"
-                                >
+                                <Button variant="destructive" size="icon" onClick={() => handleDelete(travel.id)} title="Hapus">
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
                               </div>
@@ -1954,14 +1886,12 @@ export default function OfficialTravel() {
             </CardContent>
           </Card>
 
-          {/* Preview PDF Dialog with Real-time Settings */}
           <SPDPreviewDialog
             open={isPreviewOpen}
             onOpenChange={setIsPreviewOpen}
             travel={previewTravel}
           />
 
-          {/* Duplicate SPD Dialog */}
           <Dialog open={duplicateDialogOpen} onOpenChange={setDuplicateDialogOpen}>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
@@ -2000,7 +1930,6 @@ export default function OfficialTravel() {
             </DialogContent>
           </Dialog>
 
-          {/* Repair SPD Data Dialog */}
           <Dialog open={repairDialogOpen} onOpenChange={setRepairDialogOpen}>
             <DialogContent className="sm:max-w-lg">
               <DialogHeader>
@@ -2056,11 +1985,7 @@ export default function OfficialTravel() {
                 </DialogDescription>
               </DialogHeader>
               <div className="flex flex-col gap-2 pt-2">
-                <Button 
-                  onClick={handleRepairSPDData} 
-                  disabled={isRepairing}
-                  className="w-full"
-                >
+                <Button onClick={handleRepairSPDData} disabled={isRepairing} className="w-full">
                   {isRepairing ? (
                     <>
                       <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
@@ -2073,12 +1998,12 @@ export default function OfficialTravel() {
                     </>
                   )}
                 </Button>
-                <Button 
-                  onClick={() => { 
-                    setRepairDialogOpen(false); 
-                    setRepairResults(null); 
-                  }} 
-                  variant="ghost" 
+                <Button
+                  onClick={() => {
+                    setRepairDialogOpen(false);
+                    setRepairResults(null);
+                  }}
+                  variant="ghost"
                   className="w-full"
                   disabled={isRepairing}
                 >
