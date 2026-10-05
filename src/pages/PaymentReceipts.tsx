@@ -25,6 +25,8 @@ import jsPDF from 'jspdf';
 import { addLetterheadToPDF } from '@/lib/pdfLetterhead';
 import { z } from "zod";
 import { ReceiptPreviewDialog } from "@/components/receipt/ReceiptPreviewDialog";
+import { DataPagination } from "@/components/ui/data-pagination";
+import { usePagination } from "@/hooks/usePagination";
 
 const numberToWords = (num: number): string => {
   const satuan = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
@@ -105,14 +107,10 @@ export default function PaymentReceipts() {
   const [previewStudents, setPreviewStudents] = useState<any[]>([]);
   const [previewTravelDays, setPreviewTravelDays] = useState(1);
 
-  // Fetch travel payment rates
   const { data: travelRates, isLoading: isLoadingRates } = useQuery({
     queryKey: ["travel-payment-rates"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("travel_payment_rates")
-        .select("*")
-        .order("position_type");
+      const { data, error } = await supabase.from("travel_payment_rates").select("*").order("position_type");
       if (error) throw error;
       return data as TravelRate[];
     },
@@ -134,24 +132,18 @@ export default function PaymentReceipts() {
       queryClient.invalidateQueries({ queryKey: ["travel-payment-rates"] });
       toast.success("Tarif berhasil diperbarui");
     },
-    onError: (error: any) => {
-      toast.error(error.message || "Gagal memperbarui tarif");
-    },
+    onError: (error: any) => toast.error(error.message || "Gagal memperbarui tarif"),
   });
 
   const createPositionMutation = useMutation({
     mutationFn: async (data: typeof newPosition) => {
-      if (!data.position_type.trim()) {
-        throw new Error("Nama jabatan wajib diisi");
-      }
-      const { error } = await supabase
-        .from("travel_payment_rates")
-        .insert({
-          position_type: data.position_type.trim(),
-          daily_rate: parseFloat(data.daily_rate) || 0,
-          transport_rate: parseFloat(data.transport_rate) || 0,
-          accommodation_rate: parseFloat(data.accommodation_rate) || 0,
-        });
+      if (!data.position_type.trim()) throw new Error("Nama jabatan wajib diisi");
+      const { error } = await supabase.from("travel_payment_rates").insert({
+        position_type: data.position_type.trim(),
+        daily_rate: parseFloat(data.daily_rate) || 0,
+        transport_rate: parseFloat(data.transport_rate) || 0,
+        accommodation_rate: parseFloat(data.accommodation_rate) || 0,
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -160,43 +152,31 @@ export default function PaymentReceipts() {
       setIsAddPositionOpen(false);
       setNewPosition({ position_type: "", daily_rate: "", transport_rate: "", accommodation_rate: "" });
     },
-    onError: (error: any) => {
-      toast.error(error.message || "Gagal menambahkan jenis jabatan");
-    },
+    onError: (error: any) => toast.error(error.message || "Gagal menambahkan jenis jabatan"),
   });
 
   const deletePositionMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from("travel_payment_rates")
-        .delete()
-        .eq("id", id);
+      const { error } = await supabase.from("travel_payment_rates").delete().eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["travel-payment-rates"] });
       toast.success("Jenis jabatan berhasil dihapus");
     },
-    onError: (error: any) => {
-      toast.error(error.message || "Gagal menghapus jenis jabatan");
-    },
+    onError: (error: any) => toast.error(error.message || "Gagal menghapus jenis jabatan"),
   });
 
   const toggleSpjMutation = useMutation({
     mutationFn: async ({ id, is_spj }: { id: string; is_spj: boolean }) => {
-      const { error } = await supabase
-        .from("payment_receipts")
-        .update({ is_spj })
-        .eq("id", id);
+      const { error } = await supabase.from("payment_receipts").update({ is_spj }).eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["payment-receipts"] });
       toast.success("Status SPJ berhasil diperbarui");
     },
-    onError: (error: any) => {
-      toast.error(error.message || "Gagal memperbarui status SPJ");
-    },
+    onError: (error: any) => toast.error(error.message || "Gagal memperbarui status SPJ"),
   });
 
   const { data: sppdList } = useQuery({
@@ -206,40 +186,28 @@ export default function PaymentReceipts() {
         .from("official_travel_letters")
         .select("id, letter_number, purpose, destination, departure_date, return_date")
         .order("letter_date", { ascending: false });
-
       if (error) throw error;
 
-      const sppdWithTeachers = await Promise.all(
+      return await Promise.all(
         (letters || []).map(async (letter) => {
           const { data: teachers } = await supabase
-            .from("official_travel_teachers")
-            .select("id")
-            .eq("official_travel_id", letter.id);
-
+            .from("official_travel_teachers").select("id").eq("official_travel_id", letter.id);
           const { data: manualFollowers } = await supabase
-            .from("official_travel_followers")
-            .select("id")
-            .eq("official_travel_id", letter.id)
-            .eq("follower_type", "manual_executor");
+            .from("official_travel_followers").select("id")
+            .eq("official_travel_id", letter.id).eq("follower_type", "manual_executor");
 
           const teacherCount = (teachers?.length || 0) + (manualFollowers?.length || 0);
           return { ...letter, teacher_count: teacherCount };
         })
       );
-
-      return sppdWithTeachers;
     },
   });
 
   const selectedSPPDData = sppdList?.find((s) => s.id === selectedSPPD);
 
-  // ============================================================
-  // fetchSPPDTeachers — gabung guru + manual, urut pakai order_index
-  // ============================================================
   const fetchSPPDTeachers = async (sppdId: string) => {
     if (!sppdId) return [];
 
-    // 1. Guru dari official_travel_teachers (sudah urut via query order_index)
     const { data: sppdTeachers } = await supabase
       .from("official_travel_teachers")
       .select("teacher_id, order_index")
@@ -258,14 +226,11 @@ export default function PaymentReceipts() {
       if (teachers && teachers.length > 0) {
         const userIds = teachers.map((t) => t.user_id);
         const { data: profiles } = await supabase
-          .from("profiles_public")
-          .select("id, full_name")
-          .in("id", userIds);
+          .from("profiles_public").select("id, full_name").in("id", userIds);
 
         const profileMap = new Map(profiles?.map((p) => [p.id, p.full_name]) || []);
         const teacherMap = new Map(teachers.map((t) => [t.id, t]));
 
-        // ✅ Pertahankan urutan dari sppdTeachers (yang sudah di-order)
         mappedTeachers = sppdTeachers
           .map((st) => {
             const t = teacherMap.get(st.teacher_id);
@@ -282,7 +247,6 @@ export default function PaymentReceipts() {
       }
     }
 
-    // 2. Manual executor dari followers (sudah urut via query order_index)
     const { data: manualFollowers } = await supabase
       .from("official_travel_followers")
       .select("id, manual_executor_name, manual_executor_nip, manual_executor_pangkat, manual_executor_jabatan, order_index")
@@ -302,15 +266,11 @@ export default function PaymentReceipts() {
       order_index: f.order_index ?? 0,
     }));
 
-    // ✅ Gabung & sort final
     return [...mappedTeachers, ...manualTeachers]
       .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
       .map(({ order_index, ...rest }) => rest);
   };
 
-  // ============================================================
-  // fetchSPPDStudents — pertahankan urutan via order_index
-  // ============================================================
   const fetchSPPDStudents = async (sppdId: string) => {
     if (!sppdId) return [];
     try {
@@ -327,23 +287,19 @@ export default function PaymentReceipts() {
       if (studentIds.length === 0) return [];
 
       const { data: students } = await supabase
-        .from("students")
-        .select("id, full_name, nis, class_id")
-        .in("id", studentIds);
+        .from("students").select("id, full_name, nis, class_id").in("id", studentIds);
 
       if (!students || students.length === 0) return [];
 
       const classIds = students.map(s => s.class_id).filter(Boolean);
       let classMap = new Map<string, string>();
       if (classIds.length > 0) {
-        const { data: classes } = await supabase
-          .from("classes").select("id, name").in("id", classIds);
+        const { data: classes } = await supabase.from("classes").select("id, name").in("id", classIds);
         if (classes) classMap = new Map(classes.map(c => [c.id, c.name]));
       }
 
       const studentMap = new Map(students.map(s => [s.id, s]));
 
-      // ✅ Pertahankan urutan dari followers
       return followers
         .map(f => {
           const s = studentMap.get(f.student_id);
@@ -372,38 +328,23 @@ export default function PaymentReceipts() {
         .select(`
           *,
           official_travel_letters (
-            id,
-            letter_number,
-            purpose,
-            destination,
-            departure_date,
-            return_date,
-            travel_budget,
-            accommodation_budget
+            id, letter_number, purpose, destination, departure_date, return_date, travel_budget, accommodation_budget
           )
         `)
         .order("receipt_date", { ascending: false });
       if (error) throw error;
 
-      const receiptsWithCounts = await Promise.all(
+      return await Promise.all(
         (data || []).map(async (receipt) => {
           if (receipt.official_travel_letters?.id) {
             const { data: teachers } = await supabase
-              .from("official_travel_teachers")
-              .select("id")
-              .eq("official_travel_id", receipt.official_travel_letters.id);
-
+              .from("official_travel_teachers").select("id").eq("official_travel_id", receipt.official_travel_letters.id);
             const { data: manualFollowers } = await supabase
-              .from("official_travel_followers")
-              .select("id")
-              .eq("official_travel_id", receipt.official_travel_letters.id)
-              .eq("follower_type", "manual_executor");
-
+              .from("official_travel_followers").select("id")
+              .eq("official_travel_id", receipt.official_travel_letters.id).eq("follower_type", "manual_executor");
             const { data: students } = await supabase
-              .from("official_travel_followers")
-              .select("id")
-              .eq("official_travel_id", receipt.official_travel_letters.id)
-              .eq("follower_type", "student");
+              .from("official_travel_followers").select("id")
+              .eq("official_travel_id", receipt.official_travel_letters.id).eq("follower_type", "student");
 
             const teacherCount = (teachers?.length || 0) + (manualFollowers?.length || 0);
 
@@ -416,8 +357,6 @@ export default function PaymentReceipts() {
           return { ...receipt, sppd_teacher_count: 0, sppd_student_count: 0 };
         })
       );
-
-      return receiptsWithCounts;
     },
   });
 
@@ -426,27 +365,12 @@ export default function PaymentReceipts() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("rkas_items")
-        .select(`
-          id,
-          total_amount,
-          activity_name,
-          kode_rekening,
-          rkas_id,
-          rkas_documents!inner (
-            month,
-            year,
-            status
-          )
-        `)
+        .select(`id, total_amount, activity_name, kode_rekening, rkas_id, rkas_documents!inner (month, year, status)`)
         .eq("rkas_documents.status", "parsed");
-
       if (error) throw error;
-
-      const filteredItems = (data || []).filter(item => {
-        return item.kode_rekening === "5.1.02.04.01.0003" || item.kode_rekening === "5.1.02.04.01.0001";
-      });
-
-      return filteredItems;
+      return (data || []).filter(item =>
+        item.kode_rekening === "5.1.02.04.01.0003" || item.kode_rekening === "5.1.02.04.01.0001"
+      );
     },
   });
 
@@ -485,24 +409,18 @@ export default function PaymentReceipts() {
       setFormData(prev => ({ ...prev, receipt_number: "" }));
       setAutoData({
         receipt_date: format(new Date(), "yyyy-MM-dd"),
-        recipient_name: "",
-        recipient_position: "",
-        recipient_nip: "",
-        amount: "",
-        description: "",
+        recipient_name: "", recipient_position: "", recipient_nip: "", amount: "", description: "",
       });
       return;
     }
 
     const sppdData = sppdList?.find(s => s.id === sppdId);
-
     if (sppdData?.letter_number) {
       setFormData(prev => ({ ...prev, receipt_number: sppdData.letter_number }));
     }
     if (!sppdData) return;
 
     const travelDays = calculateTravelDays(sppdData.departure_date, sppdData.return_date);
-
     const teachers = await fetchSPPDTeachers(sppdId);
     const students = await fetchSPPDStudents(sppdId);
     setSPPDTeachersData(teachers);
@@ -514,10 +432,8 @@ export default function PaymentReceipts() {
 
       let totalAmount = 0;
       teachers.forEach(teacher => {
-        const teacherJabatan = teacher.jabatan || "Guru";
-        totalAmount += getRateForJabatan(teacherJabatan, formData.payment_type) * travelDays;
+        totalAmount += getRateForJabatan(teacher.jabatan || "Guru", formData.payment_type) * travelDays;
       });
-
       students.forEach(() => {
         totalAmount += getRateForJabatan("Siswa", formData.payment_type) * travelDays;
       });
@@ -542,10 +458,8 @@ export default function PaymentReceipts() {
 
       let totalAmount = 0;
       sppdTeachersData.forEach(teacher => {
-        const teacherJabatan = teacher.jabatan || "Guru";
-        totalAmount += getRateForJabatan(teacherJabatan, paymentType) * travelDays;
+        totalAmount += getRateForJabatan(teacher.jabatan || "Guru", paymentType) * travelDays;
       });
-
       sppdStudentsData.forEach(() => {
         totalAmount += getRateForJabatan("Siswa", paymentType) * travelDays;
       });
@@ -560,11 +474,7 @@ export default function PaymentReceipts() {
 
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
-      const submitData = {
-        ...data,
-        ...autoData,
-        official_travel_id: selectedSPPD,
-      };
+      const submitData = { ...data, ...autoData, official_travel_id: selectedSPPD };
 
       receiptSchema.parse({
         ...submitData,
@@ -572,22 +482,19 @@ export default function PaymentReceipts() {
       });
 
       const amountNum = parseFloat(autoData.amount) || 0;
-      const { error } = await supabase
-        .from("payment_receipts")
-        .insert({
-          official_travel_id: selectedSPPD,
-          receipt_number: data.receipt_number,
-          receipt_date: autoData.receipt_date,
-          recipient_name: autoData.recipient_name,
-          recipient_position: autoData.recipient_position || null,
-          recipient_nip: autoData.recipient_nip || null,
-          amount: amountNum,
-          amount_text: formatAmountToWords(amountNum),
-          description: autoData.description,
-          payment_type: data.payment_type,
-          created_by: user?.id!,
-        });
-
+      const { error } = await supabase.from("payment_receipts").insert({
+        official_travel_id: selectedSPPD,
+        receipt_number: data.receipt_number,
+        receipt_date: autoData.receipt_date,
+        recipient_name: autoData.recipient_name,
+        recipient_position: autoData.recipient_position || null,
+        recipient_nip: autoData.recipient_nip || null,
+        amount: amountNum,
+        amount_text: formatAmountToWords(amountNum),
+        description: autoData.description,
+        payment_type: data.payment_type,
+        created_by: user?.id!,
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -597,21 +504,14 @@ export default function PaymentReceipts() {
       resetForm();
     },
     onError: (error: any) => {
-      if (error instanceof z.ZodError) {
-        toast.error(error.errors[0].message);
-      } else {
-        toast.error(error.message || "Gagal membuat kwitansi");
-      }
+      if (error instanceof z.ZodError) toast.error(error.errors[0].message);
+      else toast.error(error.message || "Gagal membuat kwitansi");
     },
   });
 
   const updateMutation = useMutation({
     mutationFn: async (data: any) => {
-      const submitData = {
-        ...data,
-        ...autoData,
-        official_travel_id: selectedSPPD,
-      };
+      const submitData = { ...data, ...autoData, official_travel_id: selectedSPPD };
 
       receiptSchema.parse({
         ...submitData,
@@ -619,22 +519,18 @@ export default function PaymentReceipts() {
       });
 
       const amountNum = parseFloat(autoData.amount) || 0;
-      const { error } = await supabase
-        .from("payment_receipts")
-        .update({
-          official_travel_id: selectedSPPD,
-          receipt_number: data.receipt_number,
-          receipt_date: autoData.receipt_date,
-          recipient_name: autoData.recipient_name,
-          recipient_position: autoData.recipient_position || null,
-          recipient_nip: autoData.recipient_nip || null,
-          amount: amountNum,
-          amount_text: formatAmountToWords(amountNum),
-          description: autoData.description,
-          payment_type: data.payment_type,
-        })
-        .eq("id", editingId);
-
+      const { error } = await supabase.from("payment_receipts").update({
+        official_travel_id: selectedSPPD,
+        receipt_number: data.receipt_number,
+        receipt_date: autoData.receipt_date,
+        recipient_name: autoData.recipient_name,
+        recipient_position: autoData.recipient_position || null,
+        recipient_nip: autoData.recipient_nip || null,
+        amount: amountNum,
+        amount_text: formatAmountToWords(amountNum),
+        description: autoData.description,
+        payment_type: data.payment_type,
+      }).eq("id", editingId);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -644,43 +540,28 @@ export default function PaymentReceipts() {
       resetForm();
     },
     onError: (error: any) => {
-      if (error instanceof z.ZodError) {
-        toast.error(error.errors[0].message);
-      } else {
-        toast.error(error.message || "Gagal memperbarui kwitansi");
-      }
+      if (error instanceof z.ZodError) toast.error(error.errors[0].message);
+      else toast.error(error.message || "Gagal memperbarui kwitansi");
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from("payment_receipts")
-        .delete()
-        .eq("id", id);
+      const { error } = await supabase.from("payment_receipts").delete().eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["payment-receipts"] });
       toast.success("Kwitansi berhasil dihapus");
     },
-    onError: (error: any) => {
-      toast.error(error.message || "Gagal menghapus kwitansi");
-    },
+    onError: (error: any) => toast.error(error.message || "Gagal menghapus kwitansi"),
   });
 
   const resetForm = () => {
-    setFormData({
-      receipt_number: "",
-      payment_type: "transport",
-    });
+    setFormData({ receipt_number: "", payment_type: "transport" });
     setAutoData({
       receipt_date: format(new Date(), "yyyy-MM-dd"),
-      recipient_name: "",
-      recipient_position: "",
-      recipient_nip: "",
-      amount: "",
-      description: "",
+      recipient_name: "", recipient_position: "", recipient_nip: "", amount: "", description: "",
     });
     setSelectedSPPD("");
     setSPPDTeachersData([]);
@@ -691,11 +572,8 @@ export default function PaymentReceipts() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isEditMode && editingId) {
-      updateMutation.mutate(formData);
-    } else {
-      createMutation.mutate(formData);
-    }
+    if (isEditMode && editingId) updateMutation.mutate(formData);
+    else createMutation.mutate(formData);
   };
 
   const handleEdit = async (receipt: any) => {
@@ -708,10 +586,7 @@ export default function PaymentReceipts() {
     setSPPDTeachersData(teachers);
     setSPPDStudentsData(students);
 
-    setFormData({
-      receipt_number: receipt.receipt_number,
-      payment_type: receipt.payment_type,
-    });
+    setFormData({ receipt_number: receipt.receipt_number, payment_type: receipt.payment_type });
     setAutoData({
       receipt_date: receipt.receipt_date,
       recipient_name: receipt.recipient_name,
@@ -724,9 +599,7 @@ export default function PaymentReceipts() {
   };
 
   const handleDelete = (id: string) => {
-    if (confirm("Yakin ingin menghapus kwitansi ini?")) {
-      deleteMutation.mutate(id);
-    }
+    if (confirm("Yakin ingin menghapus kwitansi ini?")) deleteMutation.mutate(id);
   };
 
   const handleRateChange = (rateId: string, field: keyof TravelRate, value: string) => {
@@ -734,11 +607,7 @@ export default function PaymentReceipts() {
     if (rate) {
       setEditingRates(prev => ({
         ...prev,
-        [rateId]: {
-          ...rate,
-          ...(prev[rateId] || {}),
-          [field]: parseFloat(value) || 0,
-        }
+        [rateId]: { ...rate, ...(prev[rateId] || {}), [field]: parseFloat(value) || 0 }
       }));
     }
   };
@@ -757,29 +626,17 @@ export default function PaymentReceipts() {
 
   const exportPDF = async (receipt: any) => {
     try {
-      const { data: settings } = await supabase
-        .from("school_settings")
-        .select("*")
-        .maybeSingle();
-
-      const doc = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      });
+      const { data: settings } = await supabase.from("school_settings").select("*").maybeSingle();
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       const pageWidth = doc.internal.pageSize.getWidth();
 
       let yPos = 15;
       if (settings) {
         yPos = await addLetterheadToPDF(doc, {
-          school_name: settings.school_name,
-          district_name: settings.district_name,
-          school_address: settings.school_address,
-          school_phone: settings.school_phone,
-          logo_url: settings.logo_url,
-          right_logo_url: settings.right_logo_url,
-          show_address: settings.show_address,
-          show_phone: settings.show_phone,
+          school_name: settings.school_name, district_name: settings.district_name,
+          school_address: settings.school_address, school_phone: settings.school_phone,
+          logo_url: settings.logo_url, right_logo_url: settings.right_logo_url,
+          show_address: settings.show_address, show_phone: settings.show_phone,
         });
       }
 
@@ -896,7 +753,6 @@ export default function PaymentReceipts() {
       doc.text("Penerima", col3X, yPos, { align: "center" });
 
       yPos += 25;
-
       doc.setFont("helvetica", "bold");
       doc.text(toTitleCase(settings?.headmaster_name) || "", col1X, yPos, { align: "center" });
       doc.text(toTitleCase(settings?.bendahara_name) || ".........................", col2X, yPos, { align: "center" });
@@ -905,13 +761,9 @@ export default function PaymentReceipts() {
       yPos += 5;
       doc.setFontSize(8);
       doc.setFont("helvetica", "normal");
-      if (settings?.headmaster_nip) {
-        doc.text(`NIP. ${settings.headmaster_nip}`, col1X, yPos, { align: "center" });
-      }
+      if (settings?.headmaster_nip) doc.text(`NIP. ${settings.headmaster_nip}`, col1X, yPos, { align: "center" });
       doc.text(settings?.bendahara_nip ? `NIP. ${settings.bendahara_nip}` : "NIP. .........................", col2X, yPos, { align: "center" });
-      if (receipt.recipient_nip) {
-        doc.text(`NIP. ${receipt.recipient_nip}`, col3X, yPos, { align: "center" });
-      }
+      if (receipt.recipient_nip) doc.text(`NIP. ${receipt.recipient_nip}`, col3X, yPos, { align: "center" });
 
       doc.save(`Kwitansi-${receipt.receipt_number}.pdf`);
       toast.success("PDF berhasil diunduh");
@@ -921,209 +773,26 @@ export default function PaymentReceipts() {
     }
   };
 
-  const previewPDF = async (receipt: any) => {
-    try {
-      const { data: settings } = await supabase
-        .from("school_settings")
-        .select("*")
-        .maybeSingle();
-
-      const doc = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      });
-      const pageWidth = doc.internal.pageSize.getWidth();
-
-      let yPos = 15;
-      if (settings) {
-        yPos = await addLetterheadToPDF(doc, {
-          school_name: settings.school_name,
-          district_name: settings.district_name,
-          school_address: settings.school_address,
-          school_phone: settings.school_phone,
-          logo_url: settings.logo_url,
-          right_logo_url: settings.right_logo_url,
-          show_address: settings.show_address,
-          show_phone: settings.show_phone,
-        });
-      }
-
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-      doc.text(`No TB : .......`, pageWidth - 20, yPos + 3, { align: "right" });
-
-      yPos += 5;
-      doc.setFontSize(14);
-      doc.setFont("helvetica", "bold");
-      doc.text("KWITANSI PEMBAYARAN", pageWidth / 2, yPos, { align: "center" });
-
-      const leftMargin = 20;
-      const colonX = 55;
-      const valueX = 60;
-
-      yPos += 10;
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
-      doc.text("Sudah Diterima Dari", leftMargin, yPos);
-      doc.text(":", colonX, yPos);
-      doc.setFont("helvetica", "bold");
-      doc.text(`Bendahara BOS ${settings?.school_name || ""}`, valueX, yPos);
-
-      yPos += 8;
-      doc.setFont("helvetica", "normal");
-      doc.text("Banyaknya Uang", leftMargin, yPos);
-      doc.text(":", colonX, yPos);
-      doc.setFont("helvetica", "bolditalic");
-      const amountTextLines = doc.splitTextToSize(receipt.amount_text, pageWidth - valueX - 15);
-      doc.text(amountTextLines, valueX, yPos);
-      yPos += (amountTextLines.length - 1) * 5;
-
-      yPos += 8;
-      doc.setFont("helvetica", "normal");
-      doc.text("Untuk Pembayaran", leftMargin, yPos);
-      doc.text(":", colonX, yPos);
-      doc.setFont("helvetica", "italic");
-      const descLines = doc.splitTextToSize(receipt.description, pageWidth - valueX - 15);
-      doc.text(descLines, valueX, yPos);
-      yPos += (descLines.length - 1) * 5;
-
-      yPos += 10;
-      doc.setFont("helvetica", "normal");
-      doc.text("Terbilang", leftMargin, yPos + 5);
-      doc.text(":", colonX, yPos + 5);
-
-      const boxX = valueX;
-      const boxWidth = pageWidth - valueX - 15;
-      const boxHeight = 10;
-      doc.setDrawColor(0);
-      doc.setLineWidth(0.3);
-      doc.rect(boxX, yPos, boxWidth, boxHeight);
-
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "normal");
-      doc.text("Rp", boxX + 3, yPos + 6);
-      doc.text(`${Number(receipt.amount).toLocaleString('id-ID')},00`, boxX + boxWidth - 5, yPos + 6, { align: "right" });
-
-      yPos += boxHeight + 8;
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-      doc.text("Informasi Potongan Pajak", leftMargin, yPos);
-
-      const taxStartY = yPos + 5;
-      const taxLabelX = leftMargin;
-      const taxColonX = leftMargin + 25;
-      const taxRpX = taxColonX + 5;
-      const taxValueX = pageWidth - 50;
-
-      doc.text("- PPh Pasal 23", taxLabelX, taxStartY);
-      doc.text(":", taxColonX, taxStartY);
-      doc.text("Rp", taxRpX, taxStartY);
-      doc.text("-", taxValueX, taxStartY, { align: "right" });
-
-      doc.text("- PPh Pasal 21", taxLabelX, taxStartY + 5);
-      doc.text(":", taxColonX, taxStartY + 5);
-      doc.text("Rp", taxRpX, taxStartY + 5);
-      doc.text("-", taxValueX, taxStartY + 5, { align: "right" });
-
-      doc.text("- PPN", taxLabelX, taxStartY + 10);
-      doc.text(":", taxColonX, taxStartY + 10);
-      doc.text("Rp", taxRpX, taxStartY + 10);
-      doc.text("-", taxValueX, taxStartY + 10, { align: "right" });
-
-      doc.setFont("helvetica", "bold");
-      doc.text("Jumlah", taxLabelX, taxStartY + 15);
-      doc.text(":", taxColonX, taxStartY + 15);
-      doc.text("Rp", taxRpX, taxStartY + 15);
-      doc.text("-", taxValueX, taxStartY + 15, { align: "right" });
-
-      yPos = taxStartY + 30;
-      const colWidth = (pageWidth - 40) / 3;
-      const col1X = leftMargin + colWidth / 2;
-      const col2X = leftMargin + colWidth + colWidth / 2;
-      const col3X = leftMargin + colWidth * 2 + colWidth / 2;
-
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-
-      const sppdDate = receipt.official_travel_letters?.departure_date
-        ? format(new Date(receipt.official_travel_letters.departure_date), "dd MMMM yyyy", { locale: idLocale })
-        : format(new Date(receipt.receipt_date), "dd MMMM yyyy", { locale: idLocale });
-
-      doc.text("Menyetujui", col1X, yPos, { align: "center" });
-      doc.setFont("helvetica", "bolditalic");
-      doc.text(`Lunas Dibayar, ${format(new Date(receipt.receipt_date), "dd MMMM yyyy", { locale: idLocale })}`, col2X, yPos, { align: "center" });
-      doc.setFont("helvetica", "normal");
-      doc.text(`Ciamis, ${sppdDate}`, col3X, yPos, { align: "center" });
-
-      yPos += 5;
-      doc.text(`Kepala ${settings?.school_name || "Sekolah"}`, col1X, yPos, { align: "center" });
-      doc.text("Bendahara BOS", col2X, yPos, { align: "center" });
-      doc.text("Penerima", col3X, yPos, { align: "center" });
-
-      yPos += 25;
-
-      doc.setFont("helvetica", "bold");
-      doc.text(toTitleCase(settings?.headmaster_name) || "", col1X, yPos, { align: "center" });
-      doc.text(toTitleCase(settings?.bendahara_name) || ".........................", col2X, yPos, { align: "center" });
-      doc.text(toTitleCase(receipt.recipient_name), col3X, yPos, { align: "center" });
-
-      yPos += 5;
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "normal");
-      if (settings?.headmaster_nip) {
-        doc.text(`NIP. ${settings.headmaster_nip}`, col1X, yPos, { align: "center" });
-      }
-      doc.text(settings?.bendahara_nip ? `NIP. ${settings.bendahara_nip}` : "NIP. .........................", col2X, yPos, { align: "center" });
-      if (receipt.recipient_nip) {
-        doc.text(`NIP. ${receipt.recipient_nip}`, col3X, yPos, { align: "center" });
-      }
-
-      const pdfBlob = doc.output('blob');
-      const pdfUrl = URL.createObjectURL(pdfBlob);
-      window.open(pdfUrl, '_blank');
-    } catch (error) {
-      console.error("Error generating PDF preview:", error);
-      toast.error("Gagal membuat preview PDF");
-    }
-  };
-
-  // ============================================================
-  // Kolektif PDF — urutan guru + manual + siswa pakai order_index
-  // ============================================================
   const exportCollectivePDF = async (receipt: any) => {
     try {
-      const { data: settings } = await supabase
-        .from("school_settings")
-        .select("*")
-        .maybeSingle();
-
+      const { data: settings } = await supabase.from("school_settings").select("*").maybeSingle();
       const teachers = await fetchSPPDTeachers(receipt.official_travel_letters?.id);
       const students = await fetchSPPDStudents(receipt.official_travel_letters?.id);
 
       const sppdData = receipt.official_travel_letters;
       const travelDays = sppdData?.departure_date && sppdData?.return_date
-        ? calculateTravelDays(sppdData.departure_date, sppdData.return_date)
-        : 1;
+        ? calculateTravelDays(sppdData.departure_date, sppdData.return_date) : 1;
 
-      const doc = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      });
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       const pageWidth = doc.internal.pageSize.getWidth();
 
       let yPos = 15;
       if (settings) {
         yPos = await addLetterheadToPDF(doc, {
-          school_name: settings.school_name,
-          district_name: settings.district_name,
-          school_address: settings.school_address,
-          school_phone: settings.school_phone,
-          logo_url: settings.logo_url,
-          right_logo_url: settings.right_logo_url,
-          show_address: settings.show_address,
-          show_phone: settings.show_phone,
+          school_name: settings.school_name, district_name: settings.district_name,
+          school_address: settings.school_address, school_phone: settings.school_phone,
+          logo_url: settings.logo_url, right_logo_url: settings.right_logo_url,
+          show_address: settings.show_address, show_phone: settings.show_phone,
         });
       }
 
@@ -1200,13 +869,9 @@ export default function PaymentReceipts() {
       let totalAmount = 0;
       let rowNumber = 0;
 
-      const renderNameWithWrap = (name: string, maxWidth: number) => {
-        return doc.splitTextToSize(name || "-", maxWidth);
-      };
-
+      const renderNameWithWrap = (name: string, maxWidth: number) => doc.splitTextToSize(name || "-", maxWidth);
       const nameMaxWidth = colNIP - colName - 2;
 
-      // ✅ Teachers (guru + manual) sudah dalam urutan yang benar dari fetchSPPDTeachers
       teachers.forEach((teacher) => {
         const jabatan = teacher.jabatan || "Guru";
         const rate = travelRates?.find(r => r.position_type === jabatan);
@@ -1239,7 +904,6 @@ export default function PaymentReceipts() {
         totalAmount += amount;
       });
 
-      // ✅ Students sudah dalam urutan yang benar
       students.forEach((student) => {
         const rate = travelRates?.find(r => r.position_type === "Siswa");
         let dailyRate = 0;
@@ -1321,7 +985,6 @@ export default function PaymentReceipts() {
       doc.text(`Lunas Dibayar Tanggal: ${receiptDate}`, col2X, yPos, { align: "center" });
 
       yPos += 20;
-
       doc.setFont("helvetica", "bold");
       doc.text(toTitleCase(settings?.headmaster_name) || "", col1X, yPos, { align: "center" });
       doc.text(toTitleCase(settings?.bendahara_name) || ".........................", col2X, yPos, { align: "center" });
@@ -1329,9 +992,7 @@ export default function PaymentReceipts() {
       yPos += 4;
       doc.setFontSize(8);
       doc.setFont("helvetica", "normal");
-      if (settings?.headmaster_nip) {
-        doc.text(`NIP. ${settings.headmaster_nip}`, col1X, yPos, { align: "center" });
-      }
+      if (settings?.headmaster_nip) doc.text(`NIP. ${settings.headmaster_nip}`, col1X, yPos, { align: "center" });
       doc.text(settings?.bendahara_nip ? `NIP. ${settings.bendahara_nip}` : "NIP. .........................", col2X, yPos, { align: "center" });
 
       doc.save(`Kwitansi-Kolektif-${receipt.receipt_number}.pdf`);
@@ -1349,8 +1010,7 @@ export default function PaymentReceipts() {
 
       const sppdData = receipt.official_travel_letters;
       const travelDays = sppdData?.departure_date && sppdData?.return_date
-        ? calculateTravelDays(sppdData.departure_date, sppdData.return_date)
-        : 1;
+        ? calculateTravelDays(sppdData.departure_date, sppdData.return_date) : 1;
 
       setPreviewReceipt(receipt);
       setPreviewTeachers(teachers);
@@ -1365,20 +1025,20 @@ export default function PaymentReceipts() {
 
   const handlePreviewPDF = (receipt: any) => {
     const totalCount = (receipt.sppd_teacher_count || 0) + (receipt.sppd_student_count || 0);
-    if (totalCount > 1) {
-      previewCollectivePDF(receipt);
-    } else {
-      previewPDF(receipt);
+    if (totalCount > 1) previewCollectivePDF(receipt);
+    else {
+      setPreviewReceipt(receipt);
+      setPreviewTeachers([]);
+      setPreviewStudents([]);
+      setPreviewTravelDays(1);
+      setIsPreviewOpen(true);
     }
   };
 
   const handleExportPDF = (receipt: any) => {
     const totalCount = (receipt.sppd_teacher_count || 0) + (receipt.sppd_student_count || 0);
-    if (totalCount > 1) {
-      exportCollectivePDF(receipt);
-    } else {
-      exportPDF(receipt);
-    }
+    if (totalCount > 1) exportCollectivePDF(receipt);
+    else exportPDF(receipt);
   };
 
   const filteredReceipts = receipts?.filter((receipt) => {
@@ -1407,37 +1067,34 @@ export default function PaymentReceipts() {
     return rkasDoc.year === parseInt(year) && rkasDoc.month === parseInt(month);
   });
 
-  const totalAnggaranRKAS = filteredRkasBudget?.reduce((sum, item) => {
-    return sum + (Number(item.total_amount) || 0);
-  }, 0) || 0;
-
-  const totalRealisasiKwitansi = filteredReceipts?.reduce((sum, receipt) => {
-    return sum + (Number(receipt.amount) || 0);
-  }, 0) || 0;
-
+  const totalAnggaranRKAS = filteredRkasBudget?.reduce((sum, item) => sum + (Number(item.total_amount) || 0), 0) || 0;
+  const totalRealisasiKwitansi = filteredReceipts?.reduce((sum, receipt) => sum + (Number(receipt.amount) || 0), 0) || 0;
   const selisih = totalAnggaranRKAS - totalRealisasiKwitansi;
 
   const monthOptions = Array.from({ length: 12 }, (_, i) => {
     const date = new Date(new Date().getFullYear(), i, 1);
-    return {
-      value: format(date, "yyyy-MM"),
-      label: format(date, "MMMM yyyy", { locale: idLocale }),
-    };
+    return { value: format(date, "yyyy-MM"), label: format(date, "MMMM yyyy", { locale: idLocale }) };
   });
 
-  const formatCurrency = (amount: number) => {
-    return `Rp ${amount.toLocaleString("id-ID")}`;
-  };
+  const formatCurrency = (amount: number) => `Rp ${amount.toLocaleString("id-ID")}`;
 
   const getPaymentTypeLabel = (type: string) => {
     const labels: Record<string, string> = {
-      transport: "Transportasi",
-      accommodation: "Akomodasi",
-      meals: "Konsumsi",
-      other: "Lainnya",
+      transport: "Transportasi", accommodation: "Akomodasi", meals: "Konsumsi", other: "Lainnya",
     };
     return labels[type] || type;
   };
+
+  // ✅ Pagination
+  const {
+    currentPage,
+    setCurrentPage,
+    pageSize,
+    setPageSize,
+    totalPages,
+    totalItems,
+    paginatedItems: paginatedReceipts,
+  } = usePagination(filteredReceipts, 10);
 
   return (
     <ProtectedRoute>
@@ -1473,10 +1130,15 @@ export default function PaymentReceipts() {
                         <SelectTrigger>
                           <SelectValue placeholder="Pilih SPPD terkait..." />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent
+                          position="popper"
+                          className="max-h-[400px] overflow-y-auto z-[9999] min-w-[400px]"
+                        >
                           {sppdList?.map((sppd) => (
                             <SelectItem key={sppd.id} value={sppd.id}>
-                              {sppd.letter_number} - {sppd.purpose?.substring(0, 40)}
+                              <span className="block truncate max-w-[500px]">
+                                {sppd.letter_number} - {sppd.purpose?.substring(0, 60)}
+                              </span>
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -1508,10 +1170,7 @@ export default function PaymentReceipts() {
 
                   <div className="space-y-2">
                     <Label htmlFor="payment_type">Jenis Pembayaran *</Label>
-                    <Select
-                      value={formData.payment_type}
-                      onValueChange={handlePaymentTypeChange}
-                    >
+                    <Select value={formData.payment_type} onValueChange={handlePaymentTypeChange}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
@@ -1577,9 +1236,7 @@ export default function PaymentReceipts() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-primary">{formatCurrency(totalAnggaranRKAS)}</div>
-                    <p className="text-xs text-muted-foreground">
-                      Transport & Perjalanan Dinas
-                    </p>
+                    <p className="text-xs text-muted-foreground">Transport & Perjalanan Dinas</p>
                   </CardContent>
                 </Card>
                 <Card>
@@ -1589,9 +1246,7 @@ export default function PaymentReceipts() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-green-600">{formatCurrency(totalRealisasiKwitansi)}</div>
-                    <p className="text-xs text-muted-foreground">
-                      Total pembayaran kwitansi
-                    </p>
+                    <p className="text-xs text-muted-foreground">Total pembayaran kwitansi</p>
                   </CardContent>
                 </Card>
                 <Card>
@@ -1603,9 +1258,7 @@ export default function PaymentReceipts() {
                     <div className={cn("text-2xl font-bold", selisih >= 0 ? "text-blue-600" : "text-destructive")}>
                       {formatCurrency(selisih)}
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Anggaran - Realisasi
-                    </p>
+                    <p className="text-xs text-muted-foreground">Anggaran - Realisasi</p>
                   </CardContent>
                 </Card>
               </div>
@@ -1634,7 +1287,7 @@ export default function PaymentReceipts() {
                         <SelectTrigger className="w-[180px]">
                           <SelectValue placeholder="Filter Bulan" />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="max-h-[300px] overflow-y-auto">
                           <SelectItem value="all">Semua Bulan</SelectItem>
                           {monthOptions.map((month) => (
                             <SelectItem key={month.value} value={month.value}>
@@ -1676,107 +1329,101 @@ export default function PaymentReceipts() {
                   {isLoading ? (
                     <div className="text-center py-8 text-muted-foreground">Memuat data...</div>
                   ) : filteredReceipts && filteredReceipts.length > 0 ? (
-                    <div className="border rounded-md overflow-x-auto">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="w-12">No</TableHead>
-                            <TableHead>No. Kwitansi</TableHead>
-                            <TableHead>Tanggal</TableHead>
-                            <TableHead>SPPD</TableHead>
-                            <TableHead>Penerima</TableHead>
-                            <TableHead>Jenis</TableHead>
-                            <TableHead className="text-right">Anggaran SPD</TableHead>
-                            <TableHead className="text-right">Jumlah</TableHead>
-                            <TableHead className="text-center">SPJ</TableHead>
-                            <TableHead className="text-right">Aksi</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {filteredReceipts.map((receipt, index) => (
-                            <TableRow key={receipt.id}>
-                              <TableCell>{index + 1}</TableCell>
-                              <TableCell className="font-medium">{receipt.receipt_number}</TableCell>
-                              <TableCell>{format(new Date(receipt.receipt_date), "dd/MM/yyyy")}</TableCell>
-                              <TableCell>
-                                <Badge variant="outline" className="text-xs">
-                                  {receipt.official_travel_letters?.letter_number || "-"}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>{receipt.recipient_name}</TableCell>
-                              <TableCell>
-                                <Badge variant="secondary" className="text-xs">
-                                  {getPaymentTypeLabel(receipt.payment_type)}
-                                </Badge>
-                                {receipt.sppd_teacher_count > 1 && (
-                                  <Badge variant="default" className="text-xs">
-                                    Kolektif
-                                  </Badge>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right text-muted-foreground">
-                                {receipt.official_travel_letters?.travel_budget || receipt.official_travel_letters?.accommodation_budget ? (
-                                  <>Rp {Number((receipt.official_travel_letters?.travel_budget || 0) + (receipt.official_travel_letters?.accommodation_budget || 0)).toLocaleString('id-ID')}</>
-                                ) : (
-                                  <span className="text-xs">-</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right font-medium">
-                                Rp {Number(receipt.amount).toLocaleString('id-ID')}
-                              </TableCell>
-                              <TableCell className="text-center">
-                                <div className="flex items-center justify-center gap-2">
-                                  <Switch
-                                    checked={receipt.is_spj || false}
-                                    onCheckedChange={(checked) => toggleSpjMutation.mutate({ id: receipt.id, is_spj: checked })}
-                                    disabled={toggleSpjMutation.isPending}
-                                  />
-                                  {receipt.is_spj && (
-                                    <CheckCircle2 className="h-4 w-4 text-green-600" />
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <div className="flex justify-end gap-2">
-                                  <Button
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={() => handleEdit(receipt)}
-                                    title="Edit"
-                                  >
-                                    <Pencil className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="secondary"
-                                    size="icon"
-                                    onClick={() => handlePreviewPDF(receipt)}
-                                    title={receipt.sppd_teacher_count > 1 ? "Preview Kwitansi Kolektif" : "Preview PDF"}
-                                  >
-                                    <Eye className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="default"
-                                    size="icon"
-                                    onClick={() => handleExportPDF(receipt)}
-                                    title={receipt.sppd_teacher_count > 1 ? "Download Kwitansi Kolektif" : "Download PDF"}
-                                  >
-                                    <FileDown className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="destructive"
-                                    size="icon"
-                                    onClick={() => handleDelete(receipt.id)}
-                                    title="Hapus"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </TableCell>
+                    <>
+                      <div className="border rounded-md overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-12">No</TableHead>
+                              <TableHead>No. Kwitansi</TableHead>
+                              <TableHead>Tanggal</TableHead>
+                              <TableHead>SPPD</TableHead>
+                              <TableHead>Penerima</TableHead>
+                              <TableHead>Jenis</TableHead>
+                              <TableHead className="text-right">Anggaran SPD</TableHead>
+                              <TableHead className="text-right">Jumlah</TableHead>
+                              <TableHead className="text-center">SPJ</TableHead>
+                              <TableHead className="text-right">Aksi</TableHead>
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
+                          </TableHeader>
+                          <TableBody>
+                            {paginatedReceipts.map((receipt, index) => {
+                              const actualIndex = (currentPage - 1) * pageSize + index + 1;
+                              return (
+                                <TableRow key={receipt.id}>
+                                  <TableCell>{actualIndex}</TableCell>
+                                  <TableCell className="font-medium">{receipt.receipt_number}</TableCell>
+                                  <TableCell>{format(new Date(receipt.receipt_date), "dd/MM/yyyy")}</TableCell>
+                                  <TableCell>
+                                    <Badge variant="outline" className="text-xs">
+                                      {receipt.official_travel_letters?.letter_number || "-"}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>{receipt.recipient_name}</TableCell>
+                                  <TableCell>
+                                    <Badge variant="secondary" className="text-xs">
+                                      {getPaymentTypeLabel(receipt.payment_type)}
+                                    </Badge>
+                                    {receipt.sppd_teacher_count > 1 && (
+                                      <Badge variant="default" className="text-xs ml-1">
+                                        Kolektif
+                                      </Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="text-right text-muted-foreground">
+                                    {receipt.official_travel_letters?.travel_budget || receipt.official_travel_letters?.accommodation_budget ? (
+                                      <>Rp {Number((receipt.official_travel_letters?.travel_budget || 0) + (receipt.official_travel_letters?.accommodation_budget || 0)).toLocaleString('id-ID')}</>
+                                    ) : (
+                                      <span className="text-xs">-</span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="text-right font-medium">
+                                    Rp {Number(receipt.amount).toLocaleString('id-ID')}
+                                  </TableCell>
+                                  <TableCell className="text-center">
+                                    <div className="flex items-center justify-center gap-2">
+                                      <Switch
+                                        checked={receipt.is_spj || false}
+                                        onCheckedChange={(checked) => toggleSpjMutation.mutate({ id: receipt.id, is_spj: checked })}
+                                        disabled={toggleSpjMutation.isPending}
+                                      />
+                                      {receipt.is_spj && (
+                                        <CheckCircle2 className="h-4 w-4 text-green-600" />
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <div className="flex justify-end gap-2">
+                                      <Button variant="outline" size="icon" onClick={() => handleEdit(receipt)} title="Edit">
+                                        <Pencil className="h-4 w-4" />
+                                      </Button>
+                                      <Button variant="secondary" size="icon" onClick={() => handlePreviewPDF(receipt)} title="Preview">
+                                        <Eye className="h-4 w-4" />
+                                      </Button>
+                                      <Button variant="default" size="icon" onClick={() => handleExportPDF(receipt)} title="Download">
+                                        <FileDown className="h-4 w-4" />
+                                      </Button>
+                                      <Button variant="destructive" size="icon" onClick={() => handleDelete(receipt.id)} title="Hapus">
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+
+                      <DataPagination
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        totalItems={totalItems}
+                        pageSize={pageSize}
+                        onPageChange={setCurrentPage}
+                        onPageSizeChange={setPageSize}
+                      />
+                    </>
                   ) : (
                     <div className="text-center py-8 text-muted-foreground">
                       {searchQuery ? "Tidak ada kwitansi yang cocok dengan pencarian" : "Belum ada kwitansi"}
@@ -1795,7 +1442,7 @@ export default function PaymentReceipts() {
                       Pengaturan Tarif Perjalanan Dinas
                     </CardTitle>
                     <CardDescription>
-                      Atur tarif pembayaran berdasarkan jenis jabatan. Klik kolom untuk mengedit.
+                      Atur tarif pembayaran berdasarkan jenis jabatan.
                     </CardDescription>
                   </div>
                   <Dialog open={isAddPositionOpen} onOpenChange={setIsAddPositionOpen}>
@@ -1808,9 +1455,7 @@ export default function PaymentReceipts() {
                     <DialogContent>
                       <DialogHeader>
                         <DialogTitle>Tambah Jenis Jabatan Baru</DialogTitle>
-                        <DialogDescription>
-                          Isi form di bawah untuk menambahkan jenis jabatan dan tarif baru
-                        </DialogDescription>
+                        <DialogDescription>Isi form di bawah untuk menambahkan jenis jabatan dan tarif baru</DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4">
                         <div className="space-y-2">
@@ -1855,9 +1500,7 @@ export default function PaymentReceipts() {
                           </div>
                         </div>
                         <div className="flex justify-end gap-2">
-                          <Button type="button" variant="outline" onClick={() => setIsAddPositionOpen(false)}>
-                            Batal
-                          </Button>
+                          <Button type="button" variant="outline" onClick={() => setIsAddPositionOpen(false)}>Batal</Button>
                           <Button
                             onClick={() => createPositionMutation.mutate(newPosition)}
                             disabled={createPositionMutation.isPending || !newPosition.position_type.trim()}
@@ -1920,11 +1563,7 @@ export default function PaymentReceipts() {
                                 <TableCell className="text-center">
                                   <div className="flex justify-center gap-2">
                                     {isEditing && (
-                                      <Button
-                                        size="sm"
-                                        onClick={() => saveRate(rate.id)}
-                                        disabled={updateRateMutation.isPending}
-                                      >
+                                      <Button size="sm" onClick={() => saveRate(rate.id)} disabled={updateRateMutation.isPending}>
                                         <Save className="h-4 w-4 mr-1" />
                                         Simpan
                                       </Button>
@@ -1963,7 +1602,6 @@ export default function PaymentReceipts() {
                       <li><strong>Transportasi:</strong> Tarif untuk biaya transportasi</li>
                       <li><strong>Akomodasi:</strong> Tarif untuk penginapan</li>
                     </ul>
-                    <p className="mt-2">Tarif akan otomatis terisi saat memilih jabatan pada form kwitansi.</p>
                   </div>
                 </CardContent>
               </Card>
