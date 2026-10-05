@@ -23,7 +23,7 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
 import {
-  Plus, Trash2, CalendarIcon, Settings, FileDown, Pencil, Copy, CopyPlus,
+  Plus, Trash2, CalendarIcon, Settings, FileDown, Pencil, CopyPlus,
   Users, Wallet, Receipt, Percent, ClipboardList, Eye, CalendarDays
 } from "lucide-react";
 import jsPDF from "jspdf";
@@ -34,6 +34,9 @@ import { WeekendShiftReceiptPreview } from "@/components/weekend-shift/WeekendSh
 import { WeekendShiftAttendancePreview } from "@/components/weekend-shift/WeekendShiftAttendancePreview";
 import type { WeekendShiftRate, WeekendShiftBatch, SchoolSettings, TaxType } from "@/types/weekendShift";
 import { TAX_TYPE_LABELS } from "@/types/weekendShift";
+
+// ⭐ MODUL PENGGajian — role yang diizinkan full CRUD
+const FINANCE_ROLES = ["tata_usaha", "bendahara", "admin", "super_admin"] as const;
 
 interface TempWorker {
   id?: string;
@@ -353,7 +356,6 @@ const WeekendShiftPayments = () => {
       const originalWorkers = copyDialogBatch.weekend_shift_payments || [];
       if (originalWorkers.length === 0) throw new Error("Kwitansi asal tidak memiliki petugas");
 
-      // Tanggal baru berdasarkan bulan & tahun yang dipilih
       const targetDate = new Date(copyTargetYear, copyTargetMonth - 1, 1);
       const monthNames = [
         "Januari", "Februari", "Maret", "April", "Mei", "Juni",
@@ -361,21 +363,16 @@ const WeekendShiftPayments = () => {
       ];
       const monthName = monthNames[copyTargetMonth - 1];
 
-      // Generate new batch_number
       const batch_number = `KPSM-${format(new Date(), "yyyyMMdd")}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 
-      // Judul baru: replace bulan & tahun dalam judul asal
-      // Contoh: "Piket Sabtu Minggu Bulan Agustus 2026" -> "Piket Sabtu Minggu Bulan Januari 2026"
       let newTitle = copyDialogBatch.job_title;
       const monthRegex = /(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+\d{4}/i;
       if (monthRegex.test(newTitle)) {
         newTitle = newTitle.replace(monthRegex, `${monthName} ${copyTargetYear}`);
       } else {
-        // Kalau tidak ada bulan/tahun di judul, append
         newTitle = `${newTitle} - ${monthName} ${copyTargetYear}`;
       }
 
-      // Insert batch baru
       const { data: newBatch, error: batchError } = await supabase
         .from("weekend_shift_batches")
         .insert({
@@ -396,7 +393,6 @@ const WeekendShiftPayments = () => {
 
       if (batchError) throw batchError;
 
-      // Insert semua worker
       const today = format(new Date(), "yyyy-MM-dd");
       const workersToInsert = originalWorkers.map((w) => ({
         batch_id: newBatch.id,
@@ -430,7 +426,6 @@ const WeekendShiftPayments = () => {
     },
     onError: (error: Error) => toast.error(error.message),
   });
-
 
   // ============================================
   // HELPERS
@@ -797,7 +792,8 @@ const WeekendShiftPayments = () => {
   // RENDER
   // ============================================
   return (
-    <ProtectedRoute allowedRoles={["bendahara", "admin"]}>
+    // ⭐ PERUBAHAN KUNCI: tambah tata_usaha & super_admin
+    <ProtectedRoute allowedRoles={[...FINANCE_ROLES]}>
       <DashboardLayout>
         <div className="space-y-6 p-4 md:p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -1438,9 +1434,7 @@ const WeekendShiftPayments = () => {
             }}
           />
 
-          {/* ============================================ */}
-          {/* COPY DIALOG                                   */}
-          {/* ============================================ */}
+          {/* COPY DIALOG */}
           <Dialog open={!!copyDialogBatch} onOpenChange={(open) => !open && setCopyDialogBatch(null)}>
             <DialogContent className="max-w-md">
               <DialogHeader>
