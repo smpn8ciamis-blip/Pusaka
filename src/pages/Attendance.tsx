@@ -67,6 +67,7 @@ interface ClassRow {
   Izin: number;
   Sakit: number;
   Alpa: number;
+  jumlahSiswa?: number;
 }
 
 const STATUS_RGB: Record<StatusKey, [number, number, number]> = {
@@ -232,64 +233,91 @@ const drawCompactLetterhead = async (doc: any, settings: any): Promise<number> =
 };
 
 /**
- * Grafik batang bertumpuk per kelas, digambar langsung di jsPDF.
- * Return: posisi Y berikutnya.
+ * Grafik kehadiran per kelas + rekap angka (jumlah siswa, izin, sakit, alpa, total)
+ * dalam satu blok, digambar langsung di jsPDF. Return: posisi Y berikutnya.
  */
 const drawClassChart = (doc: any, data: ClassRow[], startY: number): number => {
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const left = 14;
   const right = pageW - 14;
-  const labelW = 28;
-  const pctW = 14;
-  const barX = left + labelW;
-  const barW = right - barX - pctW - 2;
-  const barH = 5.5;
-  const rowGap = 3.5;
+  const hasSiswa = data.some((r) => r.jumlahSiswa !== undefined);
+  const wLabel = 15;
+  const wSiswa = hasSiswa ? 15 : 0;
+  const wPct = 12;
+  const wNum = 11;
+  const wTot = 14;
+  // tepi kanan tiap kolom angka
+  const eTot = right;
+  const eAlpa = right - wTot;
+  const eSakit = eAlpa - wNum;
+  const eIzin = eSakit - wNum;
+  const ePct = eIzin - wNum;
+  const eSiswa = left + wLabel + wSiswa;
+  const barX = eSiswa + 2;
+  const barW = ePct - wPct - 1 - barX;
+  const barH = 4.6;
+  const rowH = barH + 2.4;
   const keys = Object.keys(STATUS_RGB) as StatusKey[];
+  const pad = 1.5;
   let y = startY;
 
-  const ensure = (h: number) => {
-    if (y + h > pageH - 18) { doc.addPage(); y = 20; }
+  const drawHeader = () => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(90, 90, 90);
+    doc.text('Kelas', left, y);
+    if (hasSiswa) doc.text('Siswa', eSiswa - pad, y, { align: 'right' });
+    doc.text('% Hadir', ePct - pad, y, { align: 'right' });
+    doc.setTextColor(...STATUS_RGB.Izin);
+    doc.text('Izin', eIzin - pad, y, { align: 'right' });
+    doc.setTextColor(...STATUS_RGB.Sakit);
+    doc.text('Sakit', eSakit - pad, y, { align: 'right' });
+    doc.setTextColor(...STATUS_RGB.Alpa);
+    doc.text('Alpa', eAlpa - pad, y, { align: 'right' });
+    doc.setTextColor(90, 90, 90);
+    doc.text('Total', eTot, y, { align: 'right' });
+    doc.setDrawColor(209, 213, 219);
+    doc.setLineWidth(0.2);
+    doc.line(left, y + 1.5, right, y + 1.5);
+    y += 5;
   };
 
-  ensure(24);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.setTextColor(0, 0, 0);
-  doc.text('GRAFIK KEHADIRAN PER KELAS', left, y);
-  y += 5;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
-  doc.setTextColor(100, 100, 100);
-  doc.text('Persentase di kanan = kehadiran (Hadir + Terlambat) dari seluruh data absensi pada periode ini.', left, y);
-  y += 6;
+  const ensure = (h: number) => {
+    if (y + h > pageH - 18) {
+      doc.addPage();
+      y = 20;
+      drawHeader();
+    }
+  };
 
-  // legenda
-  let lx = left;
-  doc.setFontSize(8);
-  doc.setTextColor(0, 0, 0);
-  keys.forEach((k) => {
-    doc.setFillColor(...STATUS_RGB[k]);
-    doc.rect(lx, y - 3, 3, 3, 'F');
-    doc.text(k, lx + 5, y - 0.4);
-    lx += doc.getTextWidth(k) + 13;
-  });
-  y += 6;
+  const drawNum = (v: number, edge: number, rgb: [number, number, number], bold = false) => {
+    doc.setFont('helvetica', bold ? 'bold' : 'normal');
+    doc.setFontSize(8);
+    if (v === 0) {
+      doc.setTextColor(170, 170, 170);
+      doc.text('-', edge - pad, y + barH - 1.2, { align: 'right' });
+    } else {
+      doc.setTextColor(...rgb);
+      doc.text(String(v), edge - pad, y + barH - 1.2, { align: 'right' });
+    }
+  };
 
-  data.forEach((row) => {
-    ensure(barH + rowGap);
-    const total = keys.reduce((s, k) => s + row[k], 0);
-    const hadirPct = total ? Math.round(((row.Hadir + row.Terlambat) / total) * 100) : 0;
+  const drawRow = (row: ClassRow, label: string, bold: boolean) => {
+    const total = keys.reduce((sum, k) => sum + row[k], 0);
+    const hadirPct = total ? Math.round(((row.Hadir + row.Terlambat) / total) * 100) : null;
+    const absent = row.Izin + row.Sakit + row.Alpa;
 
-    doc.setFont('helvetica', 'normal');
+    doc.setFont('helvetica', bold ? 'bold' : 'normal');
     doc.setFontSize(8);
     doc.setTextColor(0, 0, 0);
-    doc.text(row.kelas, left, y + barH - 1.4, { maxWidth: labelW - 2 });
+    doc.text(label, left, y + barH - 1.2, { maxWidth: wLabel + wSiswa - 2 });
+    if (hasSiswa) {
+      doc.text(row.jumlahSiswa !== undefined ? String(row.jumlahSiswa) : '-', eSiswa - pad, y + barH - 1.2, { align: 'right' });
+    }
 
     doc.setFillColor(243, 244, 246);
     doc.rect(barX, y, barW, barH, 'F');
-
     let x = barX;
     keys.forEach((k) => {
       const v = row[k];
@@ -297,21 +325,74 @@ const drawClassChart = (doc: any, data: ClassRow[], startY: number): number => {
       const w = (v / total) * barW;
       doc.setFillColor(...STATUS_RGB[k]);
       doc.rect(x, y, w, barH, 'F');
-      if (w > 6) {
-        doc.setFontSize(6);
+      if (w > 5) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(5.5);
         doc.setTextColor(255, 255, 255);
-        doc.text(String(v), x + w / 2, y + barH - 1.7, { align: 'center' });
+        doc.text(String(v), x + w / 2, y + barH - 1.3, { align: 'center' });
       }
       x += w;
     });
 
-    doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
     doc.setTextColor(0, 0, 0);
-    doc.text(`${hadirPct}%`, right, y + barH - 1.4, { align: 'right' });
+    doc.text(hadirPct === null ? '-' : `${hadirPct}%`, ePct - pad, y + barH - 1.2, { align: 'right' });
+    drawNum(row.Izin, eIzin, STATUS_RGB.Izin);
+    drawNum(row.Sakit, eSakit, STATUS_RGB.Sakit);
+    drawNum(row.Alpa, eAlpa, STATUS_RGB.Alpa);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(0, 0, 0);
+    doc.text(String(absent), eTot, y + barH - 1.2, { align: 'right' });
+  };
 
-    y += barH + rowGap;
+  ensure(30);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(0, 0, 0);
+  doc.text('GRAFIK KEHADIRAN PER KELAS', left, y);
+  y += 5;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(100, 100, 100);
+  doc.text('% Hadir = (Hadir + Terlambat) dari seluruh data absensi pada periode. Total = Izin + Sakit + Alpa.', left, y);
+  y += 5;
+
+  // legenda warna
+  let lx = left;
+  doc.setFontSize(7.5);
+  doc.setTextColor(0, 0, 0);
+  keys.forEach((k) => {
+    doc.setFillColor(...STATUS_RGB[k]);
+    doc.rect(lx, y - 2.8, 3, 3, 'F');
+    doc.text(k, lx + 4.5, y - 0.3);
+    lx += doc.getTextWidth(k) + 12;
   });
+  y += 6;
+
+  drawHeader();
+
+  data.forEach((row) => {
+    ensure(rowH);
+    drawRow(row, row.kelas, false);
+    y += rowH;
+  });
+
+  // baris total semua kelas
+  ensure(rowH + 3);
+  const all: ClassRow = {
+    kelas: 'Semua Kelas',
+    Hadir: 0, Terlambat: 0, Izin: 0, Sakit: 0, Alpa: 0,
+    jumlahSiswa: hasSiswa ? data.reduce((sum, r) => sum + (r.jumlahSiswa || 0), 0) : undefined,
+  };
+  data.forEach((r) => keys.forEach((k) => { all[k] += r[k]; }));
+  doc.setDrawColor(100, 100, 100);
+  doc.setLineWidth(0.3);
+  doc.line(left, y - 0.5, right, y - 0.5);
+  y += 1.5;
+  drawRow(all, 'Semua Kelas', true);
+  y += rowH;
 
   doc.setTextColor(0, 0, 0);
   return y + 4;
@@ -1207,34 +1288,27 @@ const Attendance = () => {
     let recapY = cardY + cardH + 10;
     if (recapY > pageHeight - 60) { doc.addPage(); recapY = 20; }
 
-    // ---- Rekap per kelas ----
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor(0, 0, 0);
-    doc.text('REKAP SISWA TIDAK HADIR PER KELAS', 14, recapY);
-    autoTable(doc, {
-      ...recapTableBase,
-      startY: recapY + 4,
-      head: [['Kelas', 'Jumlah Siswa', 'Izin', 'Sakit', 'Alpa', 'Total Tidak Hadir']],
-      body: classRows.map((r) => [r.kelas, siswaCell(r.jumlahSiswa), r.izin, r.sakit, r.alpa, r.totalTidakHadir]),
-      foot: [[
-        'Semua Kelas', siswaCell(classTotals.jumlahSiswa),
-        classTotals.izin, classTotals.sakit, classTotals.alpa, classTotals.totalTidakHadir,
-      ]],
-    });
-    recapY = (doc as any).lastAutoTable.finalY + 4;
-
-    if (filterStartDate !== filterEndDate) {
-      doc.setFont('helvetica', 'italic');
-      doc.setFontSize(7);
-      doc.setTextColor(120, 120, 120);
-      doc.text(
-        'Catatan: jumlah Izin/Sakit/Alpa dihitung per catatan absensi; siswa yang sama dapat tercatat pada beberapa hari.',
-        14, recapY,
-      );
-      recapY += 4;
-    }
-    recapY += 6;
+    // ---- Grafik + rekap per kelas (digabung dalam satu blok) ----
+    const classKeySet = new Set<string>([
+      ...classRows.map((r) => r.kelas),
+      ...classChartData.map((c) => (c.kelas === 'Tanpa Kelas' ? '-' : c.kelas)),
+    ]);
+    const chartRows: ClassRow[] = Array.from(classKeySet)
+      .sort((a, b) => a.localeCompare(b, 'id', { numeric: true }))
+      .map((kelas) => {
+        const cr = classRows.find((r) => r.kelas === kelas);
+        const cc = classChartData.find((c) => c.kelas === kelas || (kelas === '-' && c.kelas === 'Tanpa Kelas'));
+        return {
+          kelas: kelas === '-' ? 'Tanpa Kelas' : kelas,
+          Hadir: cc?.Hadir ?? 0,
+          Terlambat: cc?.Terlambat ?? 0,
+          Izin: cr?.izin ?? cc?.Izin ?? 0,
+          Sakit: cr?.sakit ?? cc?.Sakit ?? 0,
+          Alpa: cr?.alpa ?? cc?.Alpa ?? 0,
+          jumlahSiswa: studentsLoaded ? cr?.jumlahSiswa ?? 0 : undefined,
+        };
+      });
+    recapY = drawClassChart(doc, chartRows, recapY) + 4;
 
     // ---- Rekap berdasarkan jenis kelamin ----
     if (recapY > pageHeight - 55) { doc.addPage(); recapY = 20; }
@@ -1252,11 +1326,19 @@ const Attendance = () => {
         genderTotals.izin, genderTotals.sakit, genderTotals.alpa, genderTotals.totalTidakHadir,
       ]],
     });
-    const recapEndY = (doc as any).lastAutoTable.finalY + 10;
+    let afterChartY = (doc as any).lastAutoTable.finalY + 4;
+    if (filterStartDate !== filterEndDate) {
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(7);
+      doc.setTextColor(120, 120, 120);
+      doc.text(
+        'Catatan: jumlah Izin/Sakit/Alpa dihitung per catatan absensi; siswa yang sama dapat tercatat pada beberapa hari.',
+        14, afterChartY + 2,
+      );
+      afterChartY += 4;
+    }
+    afterChartY += 6;
     doc.setTextColor(0, 0, 0);
-
-    // ==== GRAFIK PER KELAS ====
-    const afterChartY = drawClassChart(doc, classChartData, recapEndY);
 
     // ==== DATA TABEL ====
     const cleanNotesForAbsent = (notes: string | null) => {
