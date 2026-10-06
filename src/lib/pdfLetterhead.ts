@@ -117,9 +117,10 @@ export const addLetterheadToPDF = async (
   const rightLogoWidth = settings?.right_logo_width || 20;
   const rightLogoHeight = settings?.right_logo_height || 20;
   // Auto-calculate right logo X position based on page width to prevent overlap
-  const rightLogoX = isLandscape 
-    ? (settings?.right_logo_position_x ? settings.right_logo_position_x + (pageWidth - 210) : pageWidth - margin - rightLogoWidth)
-    : (settings?.right_logo_position_x || (pageWidth - margin - rightLogoWidth));
+  // Posisi tersimpan dirancang untuk lebar 210mm; geser sesuai lebar kertas (A4 portrait: +0, F4: +5)
+  const rightLogoX = settings?.right_logo_position_x
+    ? settings.right_logo_position_x + (pageWidth - 210)
+    : pageWidth - margin - rightLogoWidth;
   const rightLogoY = settings?.right_logo_position_y || 15;
   
   const headerFontSize = settings?.header_font_size || 16;

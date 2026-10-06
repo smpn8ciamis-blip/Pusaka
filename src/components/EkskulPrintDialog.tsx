@@ -21,6 +21,7 @@ import {
   type EkskulSigner,
 } from '@/lib/ekskulJournalPdf';
 import { generateEkskulAttendancePdf, type AttendancePerson } from '@/lib/ekskulAttendancePdf';
+import { PAPER_LABEL, type PdfOrientation, type PdfPaper } from '@/lib/pdfPaper';
 
 export type EkskulDocKind = 'journal' | 'attendance';
 
@@ -70,6 +71,8 @@ export function EkskulPrintDialog({ open, onOpenChange, types, defaultTypeId, de
   const [instructorId, setInstructorId] = useState('');
   const [place, setPlace] = useState('');
   const [includePhotos, setIncludePhotos] = useState(true);
+  const [paper, setPaper] = useState<PdfPaper>('a4');
+  const [orientation, setOrientation] = useState<PdfOrientation>('landscape');
   const [busy, setBusy] = useState<null | 'preview' | 'print'>(null);
 
   const [preview, setPreview] = useState<{ url: string; built: BuiltDoc } | null>(null);
@@ -84,6 +87,8 @@ export function EkskulPrintDialog({ open, onOpenChange, types, defaultTypeId, de
     setTypeId(defaultTypeId && defaultTypeId !== 'all' ? defaultTypeId : types.length === 1 ? types[0].id : '');
     setInstructorId('');
     setIncludePhotos(true);
+    setPaper('a4');
+    setOrientation('landscape');
   }, [open, defaultMonth, defaultTypeId, defaultKind, types]);
 
   // Bersihkan object URL pratinjau
@@ -207,6 +212,7 @@ export function EkskulPrintDialog({ open, onOpenChange, types, defaultTypeId, de
       wakasek: wakasekSigner(),
       place,
       printDate: new Date(),
+      paper,
     });
     const safe = (info?.ekskul_name ?? 'Ekskul').replace(/[^\w-]+/g, '_');
     return { doc, filename: `Jurnal_Ekskul_${safe}_${from}_${to}.pdf`, notes };
@@ -245,6 +251,8 @@ export function EkskulPrintDialog({ open, onOpenChange, types, defaultTypeId, de
       wakasek: wakasekSigner(),
       place,
       printDate: new Date(),
+      orientation,
+      paper,
     });
     const safe = (info?.ekskul_name ?? 'Ekskul').replace(/[^\w-]+/g, '_');
     return { doc, filename: `Daftar_Hadir_Ekskul_${safe}_${from}_${to}.pdf`, notes };
@@ -298,6 +306,32 @@ export function EkskulPrintDialog({ open, onOpenChange, types, defaultTypeId, de
                   <SelectItem value="attendance">Daftar hadir (TTD Wakasek Kesiswaan)</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className={kind === 'attendance' ? 'grid grid-cols-2 gap-3' : ''}>
+              <div className="space-y-1.5">
+                <Label>Ukuran kertas</Label>
+                <Select value={paper} onValueChange={(v) => setPaper(v as PdfPaper)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(PAPER_LABEL) as PdfPaper[]).map((k) => (
+                      <SelectItem key={k} value={k}>{PAPER_LABEL[k]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {kind === 'attendance' && (
+                <div className="space-y-1.5">
+                  <Label>Orientasi</Label>
+                  <Select value={orientation} onValueChange={(v) => setOrientation(v as PdfOrientation)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="landscape">Lanskap (mendatar)</SelectItem>
+                      <SelectItem value="portrait">Potret (tegak)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
 
             <div className="space-y-1.5">
