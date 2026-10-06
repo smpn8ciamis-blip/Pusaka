@@ -92,6 +92,15 @@ const shortClass = (name?: string | null): string => {
   return name.split('_')[0].trim() || name;
 };
 
+/** Normalisasi jenis kelamin dari berbagai kemungkinan nama kolom/nilai */
+type GenderKey = 'L' | 'P' | '?';
+const normGender = (s: any): GenderKey => {
+  const v = String(s?.gender ?? s?.jenis_kelamin ?? s?.sex ?? '').trim().toLowerCase();
+  if (['l', 'laki-laki', 'laki laki', 'lk', 'male', 'm', 'pria'].includes(v)) return 'L';
+  if (['p', 'perempuan', 'pr', 'female', 'f', 'wanita'].includes(v)) return 'P';
+  return '?';
+};
+
 /* ============================================================
    HELPER: Load gambar dari URL → PNG base64
    ============================================================ */
@@ -1070,8 +1079,184 @@ const Attendance = () => {
     });
     doc.setTextColor(0, 0, 0);
 
+    // ==== DATA SISWA: jumlah per kelas & jenis kelamin ====
+    const classIdsForTotal: string[] =
+      filterClass !== 'all' ? [filterClass] : (classes || []).map((c: any) => c.id);
+    let allStudents: any[] = [];
+    let studentsLoaded = false;
+    if (classIdsForTotal.length > 0) {
+      try {
+        for (let from = 0; ; from += 1000) {
+          const { data, error } = await supabase
+            .from('students')
+            .select('*, classes(name)')
+            .in('class_id', classIdsForTotal)
+            .eq('status', 'aktif')
+            .eq('is_alumni', false)
+            .order('id')
+            .range(from, from + 999);
+          if (error) throw error;
+          allStudents = allStudents.concat(data || []);
+          if (!data || data.length < 1000) break;
+        }
+        studentsLoaded = true;
+      } catch (e) {
+        console.error('Gagal memuat jumlah siswa:', e);
+        toast.warning('Jumlah siswa per kelas gagal dimuat, rekap ditampilkan tanpa total siswa');
+      }
+    }
+
+    type Agg = { total: number; izin: number; sakit: number; alpa: number };
+    const emptyAgg = (): Agg => ({ total: 0, izin: 0, sakit: 0, alpa: 0 });
+    const classAgg = new Map<string, Agg>();
+    const getClassAgg = (k: string) => {
+      if (!classAgg.has(k)) classAgg.set(k, emptyAgg());
+      return classAgg.get(k)!;
+    };
+    const genderAgg: Record<GenderKey, Agg> = { L: emptyAgg(), P: emptyAgg(), '?': emptyAgg() };
+    const genderOf = new Map<string, GenderKey>();
+
+    allStudents.forEach((st) => {
+      const g = normGender(st);
+      genderOf.set(st.id, g);
+      getClassAgg(shortClass(st.classes?.name)).total++;
+      genderAgg[g].total++;
+    });
+
+    [
+      ...absentByReason.izin.map((r) => ({ r, key: 'izin' as const })),
+      ...absentByReason.sakit.map((r) => ({ r, key: 'sakit' as const })),
+      ...absentByReason.alpa.map((r) => ({ r, key: 'alpa' as const })),
+    ].forEach(({ r, key }) => {
+      getClassAgg(shortClass(r.students?.classes?.name))[key]++;
+      genderAgg[genderOf.get(r.student_id) ?? '?'][key]++;
+    });
+
+    const sumAbs = (a: Agg) => a.izin + a.sakit + a.alpa;
+    const classRows = Array.from(classAgg.entries())
+      .sort((a, b) => a[0].localeCompare(b[0], 'id', { numeric: true }))
+      .map(([kelas, a]) => ({ kelas, jumlahSiswa: a.total, izin: a.izin, sakit: a.sakit, alpa: a.alpa, totalTidakHadir: sumAbs(a) }));
+    const classTotals = classRows.reduce(
+      (t, r) => ({
+        jumlahSiswa: t.jumlahSiswa + r.jumlahSiswa,
+        izin: t.izin + r.izin,
+        sakit: t.sakit + r.sakit,
+        alpa: t.alpa + r.alpa,
+        totalTidakHadir: t.totalTidakHadir + r.totalTidakHadir,
+      }),
+      { jumlahSiswa: 0, izin: 0, sakit: 0, alpa: 0, totalTidakHadir: 0 },
+    );
+    const genderLabels: Record<GenderKey, string> = { L: 'Laki-laki', P: 'Perempuan', '?': 'Tidak diketahui' };
+    const genderRows = (['L', 'P', '?'] as GenderKey[])
+      .filter((g) => g !== '?' || genderAgg['?'].total > 0 || sumAbs(genderAgg['?']) > 0)
+      .map((g) => ({
+        jenisKelamin: genderLabels[g],
+        jumlahSiswa: genderAgg[g].total,
+        izin: genderAgg[g].izin,
+        sakit: genderAgg[g].sakit,
+        alpa: genderAgg[g].alpa,
+        totalTidakHadir: sumAbs(genderAgg[g]),
+      }));
+    const genderTotals = genderRows.reduce(
+      (t, r) => ({
+        jumlahSiswa: t.jumlahSiswa + r.jumlahSiswa,
+        izin: t.izin + r.izin,
+        sakit: t.sakit + r.sakit,
+        alpa: t.alpa + r.alpa,
+        totalTidakHadir: t.totalTidakHadir + r.totalTidakHadir,
+      }),
+      { jumlahSiswa: 0, izin: 0, sakit: 0, alpa: 0, totalTidakHadir: 0 },
+    );
+    const siswaCell = (n: number) => (studentsLoaded ? n : '-');
+
+    const recapTableBase = {
+      theme: 'grid' as const,
+      margin: { left: 14, right: 14, bottom: 18 },
+      styles: {
+        font: 'helvetica',
+        fontSize: 8,
+        cellPadding: { top: 2, bottom: 2, left: 2.5, right: 2.5 },
+        lineColor: [209, 213, 219] as [number, number, number],
+        lineWidth: 0.1,
+        textColor: [17, 24, 39] as [number, number, number],
+        valign: 'middle' as const,
+        halign: 'center' as const,
+      },
+      headStyles: {
+        fillColor: [31, 41, 55] as [number, number, number],
+        textColor: [255, 255, 255] as [number, number, number],
+        fontStyle: 'bold' as const,
+        halign: 'center' as const,
+      },
+      footStyles: {
+        fillColor: [229, 231, 235] as [number, number, number],
+        textColor: [17, 24, 39] as [number, number, number],
+        fontStyle: 'bold' as const,
+        halign: 'center' as const,
+      },
+      alternateRowStyles: { fillColor: [249, 250, 251] as [number, number, number] },
+      columnStyles: { 0: { halign: 'left' as const, cellWidth: 40 } },
+      didParseCell: (data: any) => {
+        if (data.section === 'head' && data.column.index >= 2 && data.column.index <= 4) {
+          const k = ['Izin', 'Sakit', 'Alpa'][data.column.index - 2] as StatusKey;
+          data.cell.styles.fillColor = STATUS_RGB[k];
+        }
+      },
+    };
+
+    let recapY = cardY + cardH + 10;
+    if (recapY > pageHeight - 60) { doc.addPage(); recapY = 20; }
+
+    // ---- Rekap per kelas ----
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(0, 0, 0);
+    doc.text('REKAP SISWA TIDAK HADIR PER KELAS', 14, recapY);
+    autoTable(doc, {
+      ...recapTableBase,
+      startY: recapY + 4,
+      head: [['Kelas', 'Jumlah Siswa', 'Izin', 'Sakit', 'Alpa', 'Total Tidak Hadir']],
+      body: classRows.map((r) => [r.kelas, siswaCell(r.jumlahSiswa), r.izin, r.sakit, r.alpa, r.totalTidakHadir]),
+      foot: [[
+        'Semua Kelas', siswaCell(classTotals.jumlahSiswa),
+        classTotals.izin, classTotals.sakit, classTotals.alpa, classTotals.totalTidakHadir,
+      ]],
+    });
+    recapY = (doc as any).lastAutoTable.finalY + 4;
+
+    if (filterStartDate !== filterEndDate) {
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(7);
+      doc.setTextColor(120, 120, 120);
+      doc.text(
+        'Catatan: jumlah Izin/Sakit/Alpa dihitung per catatan absensi; siswa yang sama dapat tercatat pada beberapa hari.',
+        14, recapY,
+      );
+      recapY += 4;
+    }
+    recapY += 6;
+
+    // ---- Rekap berdasarkan jenis kelamin ----
+    if (recapY > pageHeight - 55) { doc.addPage(); recapY = 20; }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(0, 0, 0);
+    doc.text('REKAP SISWA TIDAK HADIR BERDASARKAN JENIS KELAMIN', 14, recapY);
+    autoTable(doc, {
+      ...recapTableBase,
+      startY: recapY + 4,
+      head: [['Jenis Kelamin', 'Jumlah Siswa', 'Izin', 'Sakit', 'Alpa', 'Total Tidak Hadir']],
+      body: genderRows.map((r) => [r.jenisKelamin, siswaCell(r.jumlahSiswa), r.izin, r.sakit, r.alpa, r.totalTidakHadir]),
+      foot: [[
+        'Jumlah', siswaCell(genderTotals.jumlahSiswa),
+        genderTotals.izin, genderTotals.sakit, genderTotals.alpa, genderTotals.totalTidakHadir,
+      ]],
+    });
+    const recapEndY = (doc as any).lastAutoTable.finalY + 10;
+    doc.setTextColor(0, 0, 0);
+
     // ==== GRAFIK PER KELAS ====
-    const afterChartY = drawClassChart(doc, classChartData, cardY + cardH + 10);
+    const afterChartY = drawClassChart(doc, classChartData, recapEndY);
 
     // ==== DATA TABEL ====
     const cleanNotesForAbsent = (notes: string | null) => {
@@ -1173,6 +1358,8 @@ const Attendance = () => {
         alpa: absentByReason.alpa.length,
       },
       classSummary: classChartData,
+    classRecap: { rows: classRows, totals: classTotals },
+    genderRecap: { rows: genderRows, totals: genderTotals },
       students: allAbsent.map((r) => ({
         nis: r.students?.nis,
         nama: toTitleCase(r.students?.full_name || ''),
