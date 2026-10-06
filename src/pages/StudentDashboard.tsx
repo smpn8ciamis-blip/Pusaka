@@ -30,6 +30,8 @@ import { AcademicYearSelector } from "@/components/AcademicYearSelector";
 import { getMessagingInstance, getToken, onMessage } from "@/integrations/firebase";
 
 import StudentUploadTab from "@/components/dashboard/StudentUploadTab";
+import AttendanceTrendChart from "@/components/dashboard/AttendanceTrendChart";
+import AttendanceLogList from "@/components/dashboard/AttendanceLogList";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -354,7 +356,7 @@ const StudentDashboardPage = () => {
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_student_attendance_logs', {
         p_student_id: studentId!,
-        p_limit: 100,
+        p_limit: 250,
       });
       if (error) throw error;
       return (data || []) as AttendanceLog[];
@@ -718,6 +720,16 @@ const StudentDashboardPage = () => {
       </div>
 
       <div className="bg-white dark:bg-gray-900 rounded-2xl p-4 shadow-lg border border-gray-100 dark:border-gray-800">
+        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100 mb-1">Riwayat Absensi Terbaru</h3>
+        <AttendanceLogList
+          logs={attendanceLogs}
+          loading={logsLoading}
+          limit={5}
+          onSeeAll={() => handleTabChange('attendance')}
+        />
+      </div>
+
+      <div className="bg-white dark:bg-gray-900 rounded-2xl p-4 shadow-lg border border-gray-100 dark:border-gray-800">
         <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100 mb-3">Jadwal Hari Ini</h3>
         {schedulesLoading ? <LoadingState /> : todaySchedules && todaySchedules.length > 0 ? (
           <div className="space-y-2">
@@ -895,64 +907,11 @@ const StudentDashboardPage = () => {
         <AttendanceBar summary={attendanceSummary || null} />
       </div>
 
+      <AttendanceTrendChart logs={attendanceLogs} loading={logsLoading} />
+
       <div className="bg-white dark:bg-gray-900 rounded-2xl p-4 shadow-lg border border-gray-100 dark:border-gray-800">
-        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100 mb-4">Log Absensi</h3>
-        {logsLoading ? <LoadingState label="Memuat log absensi..." /> :
-          attendanceLogs && attendanceLogs.length > 0 ? (
-            <div className="overflow-x-auto -mx-4 px-4">
-              <table className="w-full text-sm min-w-[600px]">
-                <thead>
-                  <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <th className="text-left py-2 px-2 font-semibold text-gray-500 dark:text-gray-400">No</th>
-                    <th className="text-left py-2 px-2 font-semibold text-gray-500 dark:text-gray-400">Hari/Tanggal</th>
-                    <th className="text-center py-2 px-2 font-semibold text-gray-500 dark:text-gray-400">Masuk</th>
-                    <th className="text-center py-2 px-2 font-semibold text-gray-500 dark:text-gray-400">Pulang</th>
-                    <th className="text-center py-2 px-2 font-semibold text-gray-500 dark:text-gray-400">Sumber</th>
-                    <th className="text-center py-2 px-2 font-semibold text-gray-500 dark:text-gray-400">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {attendanceLogs.map((log, idx) => {
-                    const dateObj = new Date(log.date);
-                    const isLate = log.status?.toLowerCase() === 'terlambat';
-                    const isManual = log.source === 'manual';
-                    return (
-                      <tr key={log.id} className="border-b border-gray-50 dark:border-gray-800 last:border-b-0">
-                        <td className="py-3 px-2">{idx + 1}</td>
-                        <td className="py-3 px-2">
-                          <p className="font-medium text-gray-800 dark:text-gray-100">{DAY_NAMES[dateObj.getDay()]}</p>
-                          <p className="text-xs text-gray-500">{safeFormatDate(log.date, 'dd MMM yyyy')}</p>
-                        </td>
-                        <td className="py-3 px-2 text-center font-mono text-gray-700 dark:text-gray-300">
-                          {log.check_in_at ? safeFormatTime(log.check_in_at) : '-'}
-                        </td>
-                        <td className="py-3 px-2 text-center font-mono text-gray-700 dark:text-gray-300">
-                          {log.check_out_at ? safeFormatTime(log.check_out_at) : '-'}
-                        </td>
-                        <td className="py-3 px-2 text-center">
-                          <Badge variant={isManual ? 'secondary' : 'outline'} className="text-[10px] gap-1">
-                            {isManual ? <User className="w-3 h-3" /> : <Wifi className="w-3 h-3" />}
-                            {isManual ? 'Manual' : 'RFID'}
-                          </Badge>
-                        </td>
-                        <td className="py-3 px-2 text-center">
-                          {log.status === 'hadir' && <Badge className="bg-emerald-100 text-emerald-700 text-[10px]">Hadir</Badge>}
-                          {log.status === 'terlambat' && <Badge className="bg-orange-100 text-orange-700 text-[10px]">Terlambat</Badge>}
-                          {log.status === 'sakit' && <Badge className="bg-amber-100 text-amber-700 text-[10px]">Sakit</Badge>}
-                          {log.status === 'izin' && <Badge className="bg-blue-100 text-blue-700 text-[10px]">Izin</Badge>}
-                          {log.status === 'alpa' && <Badge className="bg-red-100 text-red-700 text-[10px]">Alpa</Badge>}
-                          {!['hadir', 'terlambat', 'sakit', 'izin', 'alpa'].includes(log.status) && (
-                            <Badge variant="outline" className="text-[10px] capitalize">{log.status}</Badge>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : <EmptyState icon={CalendarCheck} title="Belum ada data absensi" subtitle="Data RFID & manual akan muncul di sini" />
-        }
+        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100 mb-2">Log Absensi</h3>
+        <AttendanceLogList logs={attendanceLogs} loading={logsLoading} />
       </div>
     </div>
   );
