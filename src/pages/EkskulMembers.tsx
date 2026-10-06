@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { Loader2, Pencil, Plus, Search, Trash2, UserPlus, Users } from 'lucide-react';
+import { Loader2, Pencil, Plus, Printer, Search, Trash2, UserPlus, Users } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { canEditEkskul, ekskulDb, useAccessibleEkskulTypes } from '@/hooks/useEkskul';
+import { EkskulPrintDialog } from '@/components/EkskulPrintDialog';
 
 interface Member {
   id: string;
@@ -81,6 +82,7 @@ export default function EkskulMembers() {
   const [editJoined, setEditJoined] = useState('');
 
   const [removeTarget, setRemoveTarget] = useState<Member | null>(null);
+  const [printOpen, setPrintOpen] = useState(false);
 
   // ---------------------------------------------------------------------------
   // Data
@@ -216,10 +218,17 @@ export default function EkskulMembers() {
               {canEdit ? 'Kelola daftar siswa yang mengikuti ekskul yang Anda bina.' : 'Daftar siswa anggota setiap ekstrakurikuler.'}
             </p>
           </div>
-          {canEdit && !noAssignment && (
-            <Button onClick={() => { setPicked(new Set()); setPickSearch(''); setPickClass('all'); setAddOpen(true); }} disabled={!activeType || activeType === 'all'}>
-              <UserPlus className="mr-2 h-4 w-4" /> Tambah Anggota
-            </Button>
+          {!noAssignment && (
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setPrintOpen(true)}>
+                <Printer className="mr-2 h-4 w-4" /> Daftar Hadir
+              </Button>
+              {canEdit && (
+                <Button onClick={() => { setPicked(new Set()); setPickSearch(''); setPickClass('all'); setAddOpen(true); }} disabled={!activeType || activeType === 'all'}>
+                  <UserPlus className="mr-2 h-4 w-4" /> Tambah Anggota
+                </Button>
+              )}
+            </div>
           )}
         </div>
 
@@ -320,6 +329,14 @@ export default function EkskulMembers() {
           </>
         )}
       </div>
+
+      <EkskulPrintDialog
+        open={printOpen}
+        onOpenChange={setPrintOpen}
+        types={types}
+        defaultTypeId={activeType}
+        defaultKind="attendance"
+      />
 
       {/* ----------------------------- Tambah anggota ----------------------------- */}
       <Dialog open={addOpen} onOpenChange={(o) => !addMembers.isPending && setAddOpen(o)}>

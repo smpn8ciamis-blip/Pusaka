@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { compressImage } from '@/lib/imageCompress';
-import { EkskulJournalPrintDialog } from '@/components/EkskulJournalPrintDialog';
+import { EkskulPrintDialog } from '@/components/EkskulPrintDialog';
 import { supabase } from '@/integrations/supabase/client';
 import {
   EKSKUL_PHOTO_BUCKET, canEditEkskul, ekskulDb, useAccessibleEkskulTypes,
@@ -404,7 +404,7 @@ export default function EkskulJournal() {
           {!noAssignment && (
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setPrintOpen(true)}>
-                <Printer className="mr-2 h-4 w-4" /> Cetak Jurnal
+                <Printer className="mr-2 h-4 w-4" /> Cetak / Pratinjau
               </Button>
               {canEdit && (
                 <Button onClick={openCreate}>
@@ -517,7 +517,7 @@ export default function EkskulJournal() {
         )}
       </div>
 
-      <EkskulJournalPrintDialog
+      <EkskulPrintDialog
         open={printOpen}
         onOpenChange={setPrintOpen}
         types={types}
