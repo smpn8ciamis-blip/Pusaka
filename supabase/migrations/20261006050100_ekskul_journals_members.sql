@@ -14,53 +14,6 @@
 -- ============================================================
 
 -- ------------------------------------------------------------
--- Helper functions
--- ------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.is_ekskul_coach(_type_id uuid)
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT EXISTS (
-    SELECT 1
-    FROM public.extracurricular_coaches c
-    WHERE c.user_id = auth.uid()
-      AND c.extracurricular_type_id = _type_id
-  )
-$$;
-
-CREATE OR REPLACE FUNCTION public.student_in_my_school(_student_id uuid)
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM public.students s
-    WHERE s.id = _student_id
-      AND s.school_id = public.get_user_school_id()
-  )
-$$;
-
--- Path storage: {school_id}/{extracurricular_type_id}/{journal_id}/{file}
-CREATE OR REPLACE FUNCTION public.is_ekskul_coach_for_path(_name text)
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT CASE
-    WHEN split_part(_name, '/', 2) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-      THEN public.is_ekskul_coach(split_part(_name, '/', 2)::uuid)
-    ELSE false
-  END
-$$;
-
--- ------------------------------------------------------------
 -- Tabel
 -- ------------------------------------------------------------
 CREATE TABLE public.extracurricular_coaches (
@@ -125,6 +78,53 @@ CREATE INDEX idx_ekskul_members_student ON public.extracurricular_members(studen
 CREATE INDEX idx_ekskul_journals_type_date ON public.extracurricular_journals(extracurricular_type_id, meeting_date DESC);
 CREATE INDEX idx_ekskul_journals_school ON public.extracurricular_journals(school_id);
 CREATE INDEX idx_ekskul_photos_journal ON public.extracurricular_journal_photos(journal_id);
+
+-- ------------------------------------------------------------
+-- Helper functions
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.is_ekskul_coach(_type_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.extracurricular_coaches c
+    WHERE c.user_id = auth.uid()
+      AND c.extracurricular_type_id = _type_id
+  )
+$$;
+
+CREATE OR REPLACE FUNCTION public.student_in_my_school(_student_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.students s
+    WHERE s.id = _student_id
+      AND s.school_id = public.get_user_school_id()
+  )
+$$;
+
+-- Path storage: {school_id}/{extracurricular_type_id}/{journal_id}/{file}
+CREATE OR REPLACE FUNCTION public.is_ekskul_coach_for_path(_name text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT CASE
+    WHEN split_part(_name, '/', 2) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      THEN public.is_ekskul_coach(split_part(_name, '/', 2)::uuid)
+    ELSE false
+  END
+$$;
 
 -- ------------------------------------------------------------
 -- Trigger: school_id otomatis, updated_at, nama penulis jurnal
