@@ -86,6 +86,12 @@ const formatTanggalID = (iso: string) =>
     day: '2-digit', month: 'short', year: 'numeric',
   });
 
+/** '8A_2026/2027' → '8A' (ambil bagian sebelum tanda '_') */
+const shortClass = (name?: string | null): string => {
+  if (!name) return '-';
+  return name.split('_')[0].trim() || name;
+};
+
 /* ============================================================
    HELPER: Load gambar dari URL → PNG base64
    ============================================================ */
@@ -661,7 +667,7 @@ const Attendance = () => {
   const classChartData = React.useMemo<ClassRow[]>(() => {
     const map = new Map<string, ClassRow>();
     deduplicatedRecords.forEach((r) => {
-      const kelas = r.students?.classes?.name || 'Tanpa Kelas';
+      const kelas = r.students?.classes?.name ? shortClass(r.students.classes.name) : 'Tanpa Kelas';
       if (!map.has(kelas)) {
         map.set(kelas, { kelas, Hadir: 0, Terlambat: 0, Izin: 0, Sakit: 0, Alpa: 0 });
       }
@@ -793,7 +799,7 @@ const Attendance = () => {
 
     const tableData = deduplicatedRecords.map((r, index) => [
       index + 1, r.date, r.students?.nis || '-', toTitleCase(r.students?.full_name || '-'),
-      r.students?.classes?.name || '-',
+      shortClass(r.students?.classes?.name),
       r.status === 'hadir' ? 'Hadir'
         : r.status === 'terlambat' ? 'Terlambat'
         : r.status === 'sakit' ? 'Sakit'
@@ -819,7 +825,7 @@ const Attendance = () => {
       stats: { hadir: stats.hadir, terlambat: stats.terlambat, sakit: stats.sakit, izin: stats.izin, alpa: stats.alpa },
       students: deduplicatedRecords.map((r) => ({
         nis: r.students?.nis, nama: toTitleCase(r.students?.full_name || ''),
-        kelas: r.students?.classes?.name, status: r.status, tanggal: r.date, catatan: cleanNotes(r.notes),
+        kelas: shortClass(r.students?.classes?.name), status: r.status, tanggal: r.date, catatan: cleanNotes(r.notes),
       })),
       printDate: new Date().toISOString(),
       totalRecords: deduplicatedRecords.length,
@@ -864,7 +870,7 @@ const Attendance = () => {
 
     const classInfo =
       filterClass !== 'all'
-        ? classes?.find((c: any) => c.id === filterClass)?.name || '-'
+        ? shortClass(classes?.find((c: any) => c.id === filterClass)?.name)
         : 'Semua Kelas';
     const subjectInfo = filterSubject !== 'all' ? filterSubject : 'Semua Mata Pelajaran';
 
@@ -973,7 +979,7 @@ const Attendance = () => {
       ...deduplicatedRecords.map((r) =>
         [
           r.date, r.students?.nis || '', toTitleCase(r.students?.full_name || ''),
-          r.students?.classes?.name || '', r.status, cleanNotesForExport(r.notes),
+          shortClass(r.students?.classes?.name), r.status, cleanNotesForExport(r.notes),
         ].map(esc).join(','),
       ),
     ].join('\n');
@@ -1020,7 +1026,7 @@ const Attendance = () => {
     const classLabel =
       filterClass === 'all'
         ? 'Semua Kelas'
-        : classes?.find((c: any) => c.id === filterClass)?.name || '-';
+        : shortClass(classes?.find((c: any) => c.id === filterClass)?.name);
     const subjectLabel = filterSubject === 'all' ? 'Semua Mapel' : filterSubject;
 
     doc.setFont('helvetica', 'normal');
@@ -1084,8 +1090,8 @@ const Attendance = () => {
       ...absentByReason.sakit.map((r) => ({ ...r, type: 'Sakit' })),
       ...absentByReason.alpa.map((r) => ({ ...r, type: 'Alpa' })),
     ].sort((a, b) => {
-      const c = (a.students?.classes?.name || '').localeCompare(
-        b.students?.classes?.name || '', 'id', { numeric: true },
+      const c = shortClass(a.students?.classes?.name).localeCompare(
+        shortClass(b.students?.classes?.name), 'id', { numeric: true },
       );
       if (c !== 0) return c;
       const n = (a.students?.full_name || '').localeCompare(b.students?.full_name || '', 'id');
@@ -1098,7 +1104,7 @@ const Attendance = () => {
       formatTanggalID(r.date),
       r.students?.nis || '-',
       toTitleCase(r.students?.full_name || '-'),
-      r.students?.classes?.name || '-',
+      shortClass(r.students?.classes?.name),
       r.type,
       cleanNotesForAbsent(r.notes),
     ]);
@@ -1170,7 +1176,7 @@ const Attendance = () => {
       students: allAbsent.map((r) => ({
         nis: r.students?.nis,
         nama: toTitleCase(r.students?.full_name || ''),
-        kelas: r.students?.classes?.name,
+        kelas: shortClass(r.students?.classes?.name),
         status: r.type,
         tanggal: r.date,
         catatan: cleanNotesForAbsent(r.notes),
@@ -2025,7 +2031,7 @@ const Attendance = () => {
                     <div key={record.id} className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
                       <div>
                         <p className="font-medium text-sm">{toTitleCase(record.students?.full_name || '')}</p>
-                        <p className="text-xs text-muted-foreground">{record.students?.classes?.name}</p>
+                        <p className="text-xs text-muted-foreground">{shortClass(record.students?.classes?.name)}</p>
                       </div>
                       <span className="badge-izin px-2 py-1 text-xs font-bold rounded">I</span>
                     </div>
@@ -2049,7 +2055,7 @@ const Attendance = () => {
                     <div key={record.id} className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg">
                       <div>
                         <p className="font-medium text-sm">{toTitleCase(record.students?.full_name || '')}</p>
-                        <p className="text-xs text-muted-foreground">{record.students?.classes?.name}</p>
+                        <p className="text-xs text-muted-foreground">{shortClass(record.students?.classes?.name)}</p>
                       </div>
                       <span className="badge-sakit px-2 py-1 text-xs font-bold rounded">S</span>
                     </div>
@@ -2073,7 +2079,7 @@ const Attendance = () => {
                     <div key={record.id} className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
                       <div>
                         <p className="font-medium text-sm">{toTitleCase(record.students?.full_name || '')}</p>
-                        <p className="text-xs text-muted-foreground">{record.students?.classes?.name}</p>
+                        <p className="text-xs text-muted-foreground">{shortClass(record.students?.classes?.name)}</p>
                       </div>
                       <span className="badge-alpa px-2 py-1 text-xs font-bold rounded">A</span>
                     </div>
@@ -2148,7 +2154,7 @@ const Attendance = () => {
                           <TableCell>{formatTanggalID(record.date)}</TableCell>
                           <TableCell>{record.students?.nis}</TableCell>
                           <TableCell className="font-medium">{toTitleCase(record.students?.full_name || '')}</TableCell>
-                          <TableCell>{record.students?.classes?.name}</TableCell>
+                          <TableCell>{shortClass(record.students?.classes?.name)}</TableCell>
                           <TableCell className="text-sm text-muted-foreground">{record.schedules?.subject || '-'}</TableCell>
                           <TableCell>
                             <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${getStatusBadgeClass(record.status)}`}>
