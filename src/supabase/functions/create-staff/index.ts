@@ -71,10 +71,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    const validRoles = ['bendahara', 'tata_usaha', 'kesiswaan', 'polling', 'billing', 'guru_piket'];
+    const validRoles = ['bendahara', 'tata_usaha', 'kesiswaan', 'polling', 'billing', 'guru_piket', 'pembina_ekskul'];
     if (!validRoles.includes(role)) {
       return new Response(
-        JSON.stringify({ error: 'Invalid role. Must be bendahara, tata_usaha, kesiswaan, polling, or billing' }),
+        JSON.stringify({ error: 'Invalid role. Must be bendahara, tata_usaha, kesiswaan, polling, billing, guru_piket, or pembina_ekskul' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }

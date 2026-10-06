@@ -9,7 +9,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Loader2, UserPlus, Shield, FileText, Users, Vote } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 
-type StaffRole = 'bendahara' | 'tata_usaha' | 'kesiswaan' | 'polling' | 'billing' | 'guru_piket';
+type StaffRole = 'bendahara' | 'tata_usaha' | 'kesiswaan' | 'polling' | 'billing' | 'guru_piket' | 'pembina_ekskul';
 
 const roleLabels: Record<StaffRole, { label: string; description: string; icon: React.ReactNode }> = {
   bendahara: {
@@ -30,6 +30,11 @@ const roleLabels: Record<StaffRole, { label: string; description: string; icon: 
   guru_piket: {
     label: 'Guru Piket',
     description: 'Full akses Absensi semua kelas, Dispensasi Siswa, dan Cetak Surat',
+    icon: <Users className="h-4 w-4" />,
+  },
+  pembina_ekskul: {
+    label: 'Pembina Ekstrakurikuler',
+    description: 'Mengisi jurnal ekskul (CRUD + foto kegiatan) dan mengelola anggota ekskul yang dibina',
     icon: <Users className="h-4 w-4" />,
   },
   polling: {

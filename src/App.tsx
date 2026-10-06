@@ -90,6 +90,9 @@ const SystemInfo = lazy(() => import("./pages/SystemInfo"));
 const BulkPhotoUpload = lazy(() => import("./pages/BulkPhotoUpload"));
 const StudentMutations = lazy(() => import("./pages/StudentMutations"));
 const GuruPiketDashboard = lazy(() => import("./pages/GuruPiketDashboard"));
+const EkskulJournal = lazy(() => import("./pages/EkskulJournal"));
+const EkskulMembers = lazy(() => import("./pages/EkskulMembers"));
+const EkskulCoaches = lazy(() => import("./pages/EkskulCoaches"));
 const DispensasiSiswa = lazy(() => import("./pages/DispensasiSiswa"));
 const BukuTamu = lazy(() => import("./pages/BukuTamu"));
 const SeedDatabase = lazy(() => import("./pages/SeedDatabase"));
@@ -311,6 +314,9 @@ const App = () => (
               <Route path="/guru-piket-dashboard" element={<ProtectedRoute allowedRoles={['guru_piket', 'admin']}><GuruPiketDashboard /></ProtectedRoute>} />
               <Route path="/dispensasi-siswa" element={<ProtectedRoute allowedRoles={['guru_piket', 'admin', 'kesiswaan']}><DispensasiSiswa /></ProtectedRoute>} />
               <Route path="/buku-tamu" element={<ProtectedRoute allowedRoles={['guru_piket', 'admin']}><BukuTamu /></ProtectedRoute>} />
+              <Route path="/ekskul-journal" element={<ProtectedRoute allowedRoles={['pembina_ekskul', 'admin', 'kesiswaan']}><EkskulJournal /></ProtectedRoute>} />
+              <Route path="/ekskul-members" element={<ProtectedRoute allowedRoles={['pembina_ekskul', 'admin', 'kesiswaan']}><EkskulMembers /></ProtectedRoute>} />
+              <Route path="/ekskul-coaches" element={<ProtectedRoute requireRole="admin"><EkskulCoaches /></ProtectedRoute>} />
               <Route path="/cbt-management" element={<ProtectedRoute allowedRoles={['teacher', 'admin']}><CbtExamManagement /></ProtectedRoute>} />
               <Route path="/cbt-student" element={<ProtectedRoute allowedRoles={['siswa']}><CbtStudentExam /></ProtectedRoute>} />
               <Route path="/nedelcis-hub" element={<NedelcisHub />} />
