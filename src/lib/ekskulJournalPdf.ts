@@ -3,6 +3,7 @@ import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
 import { id as idLocale } from 'date-fns/locale';
 import { addLetterheadToPDF, type LetterheadSettings } from '@/lib/pdfLetterhead';
+import { paperFormat, type PdfPaper } from '@/lib/pdfPaper';
 
 export interface EkskulPdfJournal {
   id: string;
@@ -44,6 +45,8 @@ export interface EkskulJournalPdfInput {
   /** Tempat penandatanganan, mis. "Ciamis" */
   place: string;
   printDate: Date;
+  /** Ukuran kertas, default A4 */
+  paper?: PdfPaper;
 }
 
 const trimTime = (t: string | null) => (t ? t.slice(0, 5) : '');
@@ -93,7 +96,7 @@ const loadPhoto = (url: string, maxSide = 900, quality = 0.72): Promise<LoadedIm
  * tanda tangan Wakasek Kesiswaan & Pembina, lampiran foto opsional).
  */
 export async function generateEkskulJournalPdf(input: EkskulJournalPdfInput): Promise<jsPDF> {
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: paperFormat(input.paper ?? 'a4') });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 14;
@@ -200,76 +203,115 @@ export async function generateEkskulJournalPdf(input: EkskulJournalPdfInput): Pr
   drawSigner(input.instructor, rightX);
 
   // ---- Lampiran foto -------------------------------------------------------
+  // Foto dijaga proporsinya (contain), tiap baris dipusatkan di tengah kertas,
+  // dan blok foto per halaman dipusatkan secara vertikal.
   const photosByJournal = new Map<string, string[]>();
   (input.photos ?? []).forEach((p) => {
     photosByJournal.set(p.journal_id, [...(photosByJournal.get(p.journal_id) ?? []), p.url]);
   });
 
   if (input.includePhotos && photosByJournal.size > 0) {
+    // Muat semua foto lebih dulu (paralel terbatas) agar rasio tiap foto diketahui
+    const allUrls = Array.from(photosByJournal.values()).flat();
+    const loaded = new Map<string, LoadedImage | null>();
+    for (let i = 0; i < allUrls.length; i += 6) {
+      await Promise.all(
+        allUrls.slice(i, i + 6).map(async (u) => {
+          loaded.set(u, await loadPhoto(u));
+        }),
+      );
+    }
+
     const cols = 3;
-    const gap = 4;
+    const gap = 5;
     const cellW = (pageW - margin * 2 - gap * (cols - 1)) / cols;
     const cellH = cellW * 0.75;
-    const headingH = 9;
+    const headingH = 11;
+    const rowStep = cellH + gap;
+    const areaTop = 31;
+    const areaBottom = pageH - 14;
+    const avail = areaBottom - areaTop;
 
-    let py = 0;
-    const newPhotoPage = () => {
-      doc.addPage();
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(12);
-      doc.text('LAMPIRAN DOKUMENTASI KEGIATAN', pageW / 2, 18, { align: 'center' });
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-      doc.text(`${input.ekskulName} · ${input.periodLabel}`, pageW / 2, 23.5, { align: 'center' });
-      py = 30;
+    type PhotoItem =
+      | { kind: 'heading'; text: string; cont: boolean }
+      | { kind: 'row'; urls: string[] };
+    const pages: PhotoItem[][] = [[]];
+    let used = 0;
+    const newPage = () => {
+      pages.push([]);
+      used = 0;
     };
-    newPhotoPage();
 
-    for (let idx = 0; idx < input.journals.length; idx++) {
-      const j = input.journals[idx];
+    input.journals.forEach((j, idx) => {
       const urls = photosByJournal.get(j.id);
-      if (!urls || urls.length === 0) continue;
+      if (!urls || urls.length === 0) return;
+      const title = `${idx + 1}. ${format(new Date(`${j.meeting_date}T00:00:00`), 'EEEE, d MMMM yyyy', { locale: idLocale })} — ${j.title}`;
 
-      // Pastikan judul pertemuan + satu baris foto muat dalam halaman
-      if (py + headingH + cellH > pageH - 14) newPhotoPage();
+      // Judul pertemuan harus ikut bersama minimal satu baris foto
+      if (used + headingH + cellH > avail && pages[pages.length - 1].length) newPage();
+      pages[pages.length - 1].push({ kind: 'heading', text: title, cont: false });
+      used += headingH;
 
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9.5);
-      const heading = `${idx + 1}. ${format(new Date(`${j.meeting_date}T00:00:00`), 'EEEE, d MMMM yyyy', { locale: idLocale })} — ${j.title}`;
-      doc.text(doc.splitTextToSize(heading, pageW - margin * 2)[0], margin, py + 4);
-      py += headingH;
-
-      for (let i = 0; i < urls.length; i++) {
-        const col = i % cols;
-        if (i > 0 && col === 0) {
-          py += cellH + gap;
-          if (py + cellH > pageH - 14) {
-            newPhotoPage();
-            doc.setFont('helvetica', 'italic');
-            doc.setFontSize(8.5);
-            doc.text(`(lanjutan) ${j.title}`, margin, py + 4);
-            py += headingH;
-          }
+      for (let i = 0; i < urls.length; i += cols) {
+        if (used + cellH > avail) {
+          newPage();
+          pages[pages.length - 1].push({ kind: 'heading', text: j.title, cont: true });
+          used += headingH;
         }
-        const x = margin + col * (cellW + gap);
-        const loaded = await loadPhoto(urls[i]);
-
-        doc.setDrawColor(190);
-        doc.setLineWidth(0.2);
-        doc.rect(x, py, cellW, cellH);
-        if (loaded) {
-          const scale = Math.min(cellW / loaded.width, cellH / loaded.height);
-          const w = loaded.width * scale;
-          const h = loaded.height * scale;
-          doc.addImage(loaded.dataUrl, 'JPEG', x + (cellW - w) / 2, py + (cellH - h) / 2, w, h);
-        } else {
-          doc.setFont('helvetica', 'italic');
-          doc.setFontSize(8);
-          doc.text('Foto tidak dapat dimuat', x + cellW / 2, py + cellH / 2, { align: 'center' });
-        }
+        pages[pages.length - 1].push({ kind: 'row', urls: urls.slice(i, i + cols) });
+        used += rowStep;
       }
-      py += cellH + gap + 4;
-    }
+    });
+
+    pages
+      .filter((items) => items.length > 0)
+      .forEach((items) => {
+        doc.addPage();
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(12);
+        doc.setTextColor(0);
+        doc.text('LAMPIRAN DOKUMENTASI KEGIATAN', pageW / 2, 18, { align: 'center' });
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.text(`${input.ekskulName} · ${input.periodLabel}`, pageW / 2, 23.5, { align: 'center' });
+
+        const contentH = items.reduce((sum, it) => sum + (it.kind === 'heading' ? headingH : rowStep), 0) - gap;
+        let py = areaTop + Math.max(0, (avail - contentH) / 2);
+
+        items.forEach((it) => {
+          if (it.kind === 'heading') {
+            doc.setFont('helvetica', it.cont ? 'italic' : 'bold');
+            doc.setFontSize(it.cont ? 8.5 : 9.5);
+            const label = it.cont ? `(lanjutan) ${it.text}` : it.text;
+            doc.text(doc.splitTextToSize(label, pageW - margin * 2)[0], pageW / 2, py + 4, { align: 'center' });
+            py += headingH;
+            return;
+          }
+
+          // Baris dipusatkan di tengah kertas (baris terakhir yang tidak penuh tetap di tengah)
+          const rowW = it.urls.length * cellW + (it.urls.length - 1) * gap;
+          const startX = (pageW - rowW) / 2;
+          it.urls.forEach((url, i) => {
+            const x = startX + i * (cellW + gap);
+            doc.setDrawColor(190);
+            doc.setLineWidth(0.2);
+            doc.rect(x, py, cellW, cellH);
+            const img = loaded.get(url);
+            if (img) {
+              const pad = 1;
+              const scale = Math.min((cellW - pad * 2) / img.width, (cellH - pad * 2) / img.height);
+              const w = img.width * scale;
+              const h = img.height * scale;
+              doc.addImage(img.dataUrl, 'JPEG', x + (cellW - w) / 2, py + (cellH - h) / 2, w, h);
+            } else {
+              doc.setFont('helvetica', 'italic');
+              doc.setFontSize(8);
+              doc.text('Foto tidak dapat dimuat', x + cellW / 2, py + cellH / 2, { align: 'center' });
+            }
+          });
+          py += rowStep;
+        });
+      });
   }
 
   // ---- Nomor halaman -------------------------------------------------------

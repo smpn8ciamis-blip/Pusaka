@@ -4,6 +4,7 @@ import { format } from 'date-fns';
 import { id as idLocale } from 'date-fns/locale';
 import { addLetterheadToPDF, type LetterheadSettings } from '@/lib/pdfLetterhead';
 import type { EkskulSigner } from '@/lib/ekskulJournalPdf';
+import { paperFormat, type PdfOrientation, type PdfPaper } from '@/lib/pdfPaper';
 
 export interface AttendanceMeeting {
   id: string;
@@ -27,11 +28,15 @@ export interface EkskulAttendancePdfInput {
   wakasek: EkskulSigner | null;
   place: string;
   printDate: Date;
+  /** Default landscape */
+  orientation?: PdfOrientation;
+  /** Default A4 */
+  paper?: PdfPaper;
 }
 
-/** Jumlah kolom pertemuan per tabel pada A4 landscape. */
-const MEETINGS_PER_TABLE = 12;
-const MEETING_COL_W = 14;
+const NO_COL_W = 9;
+const ROLE_COL_W = 32;
+const MIN_NAME_COL_W = 50;
 
 /**
  * Daftar hadir ekskul: No | Nama | Jabatan/Kelas | Pertemuan 1..n (tanggal dari jurnal).
@@ -39,10 +44,22 @@ const MEETING_COL_W = 14;
  * Ditandatangani Wakasek Kesiswaan.
  */
 export async function generateEkskulAttendancePdf(input: EkskulAttendancePdfInput): Promise<jsPDF> {
-  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const doc = new jsPDF({
+    orientation: input.orientation ?? 'landscape',
+    unit: 'mm',
+    format: paperFormat(input.paper ?? 'a4'),
+  });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 14;
+
+  // Lebar kolom pertemuan & jumlah kolom per tabel menyesuaikan lebar kertas
+  const isLandscape = pageW > pageH;
+  const meetingColW = isLandscape ? 14 : 13;
+  const meetingsPerTable = Math.max(
+    1,
+    Math.floor((pageW - margin * 2 - NO_COL_W - ROLE_COL_W - MIN_NAME_COL_W) / meetingColW),
+  );
 
   let y = await addLetterheadToPDF(doc, input.schoolSettings);
 
@@ -69,14 +86,14 @@ export async function generateEkskulAttendancePdf(input: EkskulAttendancePdfInpu
 
   // ---- Tabel (dipecah per 12 pertemuan) -----------------------------------
   const chunks: AttendanceMeeting[][] = [];
-  for (let i = 0; i < input.meetings.length; i += MEETINGS_PER_TABLE) {
-    chunks.push(input.meetings.slice(i, i + MEETINGS_PER_TABLE));
+  for (let i = 0; i < input.meetings.length; i += meetingsPerTable) {
+    chunks.push(input.meetings.slice(i, i + meetingsPerTable));
   }
   if (chunks.length === 0) chunks.push([]);
 
   let finalY = y;
   chunks.forEach((chunk, ci) => {
-    const offset = ci * MEETINGS_PER_TABLE;
+    const offset = ci * meetingsPerTable;
     let startY = y;
 
     if (ci > 0) {
@@ -102,7 +119,7 @@ export async function generateEkskulAttendancePdf(input: EkskulAttendancePdfInpu
       ],
       chunk.map((m, i) => ({
         content: `${offset + i + 1}\n${format(new Date(`${m.meeting_date}T00:00:00`), 'dd/MM/yy', { locale: idLocale })}`,
-        styles: { halign: 'center' as const, fontSize: 7 },
+        styles: { halign: 'center' as const, fontSize: 7, cellPadding: 0.8 },
       })),
     ];
 
@@ -114,12 +131,12 @@ export async function generateEkskulAttendancePdf(input: EkskulAttendancePdfInpu
     ]);
 
     const columnStyles: Record<number, Record<string, unknown>> = {
-      0: { cellWidth: 9, halign: 'center' },
+      0: { cellWidth: NO_COL_W, halign: 'center' },
       1: { cellWidth: 'auto' },
-      2: { cellWidth: 32 },
+      2: { cellWidth: ROLE_COL_W },
     };
     chunk.forEach((_, i) => {
-      columnStyles[3 + i] = { cellWidth: MEETING_COL_W };
+      columnStyles[3 + i] = { cellWidth: meetingColW };
     });
 
     autoTable(doc, {
