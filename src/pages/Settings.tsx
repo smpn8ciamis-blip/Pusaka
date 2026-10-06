@@ -93,6 +93,7 @@ const Settings = () => {
     complaint_status_check_color: 'outline',
     enable_captcha: true,
     wakasek_sarpras_teacher_id: '' as string | null,
+    wakasek_kesiswaan_teacher_id: '' as string | null,
   });
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [rightLogoFile, setRightLogoFile] = useState<File | null>(null);
@@ -263,6 +264,7 @@ const Settings = () => {
         complaint_status_check_color: (settings as any).complaint_status_check_color || 'outline',
         enable_captcha: (settings as any).enable_captcha !== false,
         wakasek_sarpras_teacher_id: (settings as any).wakasek_sarpras_teacher_id || null,
+        wakasek_kesiswaan_teacher_id: (settings as any).wakasek_kesiswaan_teacher_id || null,
       });
     }
   }, [settings]);
@@ -1279,6 +1281,29 @@ const Settings = () => {
                 </Select>
                 <p className="text-xs text-muted-foreground">
                   Wakasek Sarpras akan tampil di daftar hadir tukang
+                </p>
+              </div>
+
+              <div className="space-y-2 pt-4 border-t">
+                <Label htmlFor="wakasek_kesiswaan">Wakasek Kesiswaan</Label>
+                <Select
+                  value={formData.wakasek_kesiswaan_teacher_id || "none"}
+                  onValueChange={(value) => setFormData({ ...formData, wakasek_kesiswaan_teacher_id: value === "none" ? null : value })}
+                >
+                  <SelectTrigger id="wakasek_kesiswaan">
+                    <SelectValue placeholder="Pilih guru sebagai Wakasek Kesiswaan" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">-- Tidak Dipilih --</SelectItem>
+                    {teachers.map((teacher) => (
+                      <SelectItem key={teacher.id} value={teacher.id}>
+                        {teacher.profiles?.full_name || "Guru"} {teacher.nip ? `- NIP. ${teacher.nip}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Wakasek Kesiswaan akan tampil sebagai "Mengetahui" pada cetak jurnal ekstrakurikuler
                 </p>
               </div>
 
