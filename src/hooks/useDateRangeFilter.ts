@@ -3,8 +3,9 @@ import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfDay, endOfDay,
 import { id as localeId } from 'date-fns/locale';
 
 export const useDateRangeFilter = () => {
-  const [startDate, setStartDate] = useState<Date>(new Date());
-  const [endDate, setEndDate] = useState<Date>(new Date());
+  // Awal & akhir hari, sama seperti preset "Hari Ini", supaya label "Hari Ini" cocok di keadaan awal.
+  const [startDate, setStartDate] = useState<Date>(() => startOfDay(new Date()));
+  const [endDate, setEndDate] = useState<Date>(() => endOfDay(new Date()));
 
   const setPeriod = (period: 'today' | 'week' | 'month') => {
     const now = new Date();

@@ -24,7 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Calendar as CalendarIcon,
@@ -57,6 +57,7 @@ import { useStudentGenderStats } from "@/hooks/useStudentGenderStats";
 import { StudentGenderStatsCard } from "@/components/dashboard/StudentGenderStatsCard";
 import { useAcademicYear } from "@/contexts/AcademicYearContext";
 import { useDateRangeFilter } from "@/hooks/useDateRangeFilter";
+import { fetchAllPages, percentOf } from "@/lib/attendanceUtils";
 import { useDashboardExport } from "@/hooks/useDashboardExport";
 import {
   useAttendanceRecap,
@@ -228,14 +229,15 @@ function useKesiswaanStats(startDate?: Date, endDate?: Date) {
 
       const [studentRes, violationsData, achievementsData, recentV, recentA] =
         await Promise.all([
-          // PERBAIKAN 1: Hanya hitung siswa dengan status 'aktif'
+          // Hanya hitung siswa dengan status 'aktif'
           supabase
             .from("students")
             .select("*", { count: "exact", head: true })
             .eq("is_alumni", false)
-            .eq("status", "aktif"), 
+            .eq("status", "aktif"),
 
-          (async () => {
+          // Diambil lewat paginasi supaya tidak terpotong batas baris server
+          fetchAllPages<any>((from, to) => {
             let q = supabase
               .from("student_violations")
               .select(
@@ -243,21 +245,17 @@ function useKesiswaanStats(startDate?: Date, endDate?: Date) {
               );
             if (startStr) q = q.gte("violation_date", startStr);
             if (endStr) q = q.lte("violation_date", endStr);
-            const { data, error } = await q;
-            if (error) throw error;
-            return data ?? [];
-          })(),
+            return q.order("id").range(from, to);
+          }),
 
-          (async () => {
+          fetchAllPages<any>((from, to) => {
             let q = supabase
               .from("student_achievements")
               .select("id, achievement_date, achievement_type, level");
             if (startStr) q = q.gte("achievement_date", startStr);
             if (endStr) q = q.lte("achievement_date", endStr);
-            const { data, error } = await q;
-            if (error) throw error;
-            return data ?? [];
-          })(),
+            return q.order("id").range(from, to);
+          }),
 
           supabase
             .from("student_violations")
@@ -267,8 +265,7 @@ function useKesiswaanStats(startDate?: Date, endDate?: Date) {
                violation_types:violation_type_id (name, category)`
             )
             .order("violation_date", { ascending: false })
-            .limit(10)
-            .then((r) => r.data ?? []),
+            .limit(10),
 
           supabase
             .from("student_achievements")
@@ -277,9 +274,13 @@ function useKesiswaanStats(startDate?: Date, endDate?: Date) {
                students:student_id (full_name, nis)`
             )
             .order("achievement_date", { ascending: false })
-            .limit(10)
-            .then((r) => r.data ?? []),
+            .limit(10),
         ]);
+
+      // Error tidak lagi diabaikan (sebelumnya jadi angka 0 / daftar kosong tanpa petunjuk)
+      if (studentRes.error) throw studentRes.error;
+      if (recentV.error) throw recentV.error;
+      if (recentA.error) throw recentA.error;
 
       const vByCat: Record<string, number> = {};
       violationsData.forEach((v: any) => {
@@ -317,8 +318,8 @@ function useKesiswaanStats(startDate?: Date, endDate?: Date) {
           name,
           value,
         })),
-        recentViolations: recentV,
-        recentAchievements: recentA,
+        recentViolations: recentV.data ?? [],
+        recentAchievements: recentA.data ?? [],
       };
     },
     staleTime: 60_000,
@@ -476,7 +477,7 @@ const KesiswaanStatsCards = memo(function KesiswaanStatsCards({
       title: "Tingkat Kehadiran",
       value: aAttendance,
       suffix: "%",
-      desc: `${attendancePresent} hadir dari ${attendanceTotal}`,
+      desc: `${attendancePresent} hadir dari ${attendanceTotal} absensi tercatat`,
       icon: ClipboardList,
       gradient: "from-emerald-500 to-green-600",
       glow: "shadow-emerald-500/20",
@@ -713,7 +714,7 @@ const ClassAttendanceChart = memo(function ClassAttendanceChart({
     if (!attendanceByClass) return [];
 
     const filled = attendanceByClass.filledClasses || [];
-    const empty = attendanceByClass.emptyClasses || [];
+    const empty = attendanceByClass.unfilledClasses || [];
 
     const allClasses = [
       ...filled.map((c: any) => ({
@@ -1080,29 +1081,6 @@ const UnfilledClassesCard = memo(function UnfilledClassesCard({
 
   const total = (allClasses || []).length;
   const filled = total - unfilled.length;
-
-  // ============ DEBUG ============
-  useEffect(() => {
-    // eslint-disable-next-line no-console
-    // Log SEMUA field kelas untuk cek wali
-      if (allClasses[0]) {
-        // eslint-disable-next-line no-console
-        console.log("[UnfilledClassesCard DEBUG] Sample raw class:", allClasses[0]);
-        // eslint-disable-next-line no-console
-        console.log("[UnfilledClassesCard DEBUG] Available fields:", Object.keys(allClasses[0]));
-        const waliFields = Object.keys(allClasses[0]).filter(k => /wali|teacher|guru|homeroom/i.test(k));
-        // eslint-disable-next-line no-console
-        console.log("[UnfilledClassesCard DEBUG] Wali-related fields:", waliFields);
-      }
-      console.log("[UnfilledClassesCard v8]", {
-      totalAll: total,
-      filled: filled,
-      unfilled: unfilled.length,
-      filledNormalized: [...filledSet].slice(0, 20),
-      sampleAllClasses: (allClasses || []).slice(0, 3),
-      sampleUnfilled: unfilled.slice(0, 3),
-    });
-  }, [total, filled, unfilled, filledSet, allClasses]);
 
   // ============ LOADING ============
   if (total === 0) {
@@ -1783,13 +1761,26 @@ export default function KesiswaanDashboard() {
   const { handleExportPDF, handleExportExcel } = useDashboardExport(startDate, endDate, attendanceRecap);
   const { data: genderStats } = useStudentGenderStats(selectedYear, "kesiswaan");
 
-  useAutoRefresh(autoRefresh, refetch, 60_000);
+  // Auto-refresh menyegarkan semua data dashboard (kehadiran, per kelas, tren, siswa terlambat, statistik).
+  const queryClient = useQueryClient();
+  const refreshAll = useCallback(() => {
+    refetch();
+    const keys = new Set([
+      "attendance-recap",
+      "attendance-by-class",
+      "daily-attendance-trend",
+      "late-students",
+      "late-violations-trend",
+      "student-gender-stats",
+    ]);
+    queryClient.invalidateQueries({
+      predicate: (q) => typeof q.queryKey[0] === "string" && keys.has(q.queryKey[0] as string),
+    });
+  }, [refetch, queryClient]);
+  useAutoRefresh(autoRefresh, refreshAll, 60_000);
 
   const attendancePercent = useMemo(
-    () =>
-      attendanceRecap?.total
-        ? Math.round((attendanceRecap.hadir / attendanceRecap.total) * 100)
-        : 0,
+    () => percentOf(attendanceRecap?.hadir || 0, attendanceRecap?.total || 0),
     [attendanceRecap]
   );
 
