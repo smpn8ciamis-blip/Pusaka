@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 import { id as idLocale } from 'date-fns/locale';
 import { toast } from 'sonner';
 import {
-  BookOpen, CalendarDays, Camera, ImagePlus, Loader2, MapPin, Pencil, Plus, Search, Trash2, Users, X,
+  BookOpen, CalendarDays, Camera, ImagePlus, Loader2, MapPin, Pencil, Plus, Printer, Search, Trash2, Users, X,
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { compressImage } from '@/lib/imageCompress';
+import { EkskulJournalPrintDialog } from '@/components/EkskulJournalPrintDialog';
 import { supabase } from '@/integrations/supabase/client';
 import {
   EKSKUL_PHOTO_BUCKET, canEditEkskul, ekskulDb, useAccessibleEkskulTypes,
@@ -109,6 +110,7 @@ export default function EkskulJournal() {
   const [zoomUrl, setZoomUrl] = useState<string | null>(null);
 
   const [deleteTarget, setDeleteTarget] = useState<Journal | null>(null);
+  const [printOpen, setPrintOpen] = useState(false);
 
   // ---------------------------------------------------------------------------
   // Data
@@ -399,10 +401,17 @@ export default function EkskulJournal() {
                 : 'Pantau jurnal kegiatan dan dokumentasi foto seluruh ekstrakurikuler.'}
             </p>
           </div>
-          {canEdit && !noAssignment && (
-            <Button onClick={openCreate}>
-              <Plus className="mr-2 h-4 w-4" /> Tambah Jurnal
-            </Button>
+          {!noAssignment && (
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setPrintOpen(true)}>
+                <Printer className="mr-2 h-4 w-4" /> Cetak Jurnal
+              </Button>
+              {canEdit && (
+                <Button onClick={openCreate}>
+                  <Plus className="mr-2 h-4 w-4" /> Tambah Jurnal
+                </Button>
+              )}
+            </div>
           )}
         </div>
 
@@ -507,6 +516,14 @@ export default function EkskulJournal() {
           </>
         )}
       </div>
+
+      <EkskulJournalPrintDialog
+        open={printOpen}
+        onOpenChange={setPrintOpen}
+        types={types}
+        defaultTypeId={selectedType}
+        defaultMonth={month || undefined}
+      />
 
       {/* ----------------------------- Form tambah/ubah ----------------------------- */}
       <Dialog open={formOpen} onOpenChange={(o) => { if (!saving) { setFormOpen(o); if (!o) resetPickedFiles(); } }}>
