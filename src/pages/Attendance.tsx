@@ -27,13 +27,13 @@ import {
 import React, { useState, useMemo } from 'react';
 import { toast } from 'sonner';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell,
 } from 'recharts';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { addLetterheadToPDF, addSignatureToPDF } from '@/lib/pdfLetterhead';
-import { startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
+import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
 import {
   generateSecureToken,
   sha256Hex,
@@ -59,10 +59,35 @@ const STATUS_PALETTE: Record<
   Alpa:  { bg: [255, 241, 242], fg: [159,  18,  57] },
 };
 
+type StatusKey = 'Hadir' | 'Terlambat' | 'Izin' | 'Sakit' | 'Alpa';
+interface ClassRow {
+  kelas: string;
+  Hadir: number;
+  Terlambat: number;
+  Izin: number;
+  Sakit: number;
+  Alpa: number;
+}
+
+const STATUS_RGB: Record<StatusKey, [number, number, number]> = {
+  Hadir: [16, 185, 129],
+  Terlambat: [249, 115, 22],
+  Izin: [59, 130, 246],
+  Sakit: [245, 158, 11],
+  Alpa: [239, 68, 68],
+};
+
+/** Tanggal lokal → 'yyyy-MM-dd' (aman untuk zona WIB, tidak mundur sehari seperti toISOString) */
+const toISODate = (d: Date) => format(d, 'yyyy-MM-dd');
+
+/** '2026-10-06' → '06 Okt 2026' */
+const formatTanggalID = (iso: string) =>
+  new Date(`${iso}T00:00:00`).toLocaleDateString('id-ID', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  });
+
 /* ============================================================
    HELPER: Load gambar dari URL → PNG base64
-   - Handle CORS
-   - Handle format WebP/JPEG/PNG → semua jadi PNG
    ============================================================ */
 const loadImageAsBase64 = (url: string): Promise<string | null> => {
   if (!url) return Promise.resolve(null);
@@ -90,16 +115,12 @@ const loadImageAsBase64 = (url: string): Promise<string | null> => {
 };
 
 /**
- * Gambar kop surat rapat (ala kwitansi) + logo kiri-kanan.
- * Return: posisi Y setelah kop (untuk konten berikutnya).
+ * Kop surat rapat + logo kiri-kanan.
+ * Return: posisi Y setelah kop.
  */
-const drawCompactLetterhead = async (
-  doc: any,
-  settings: any,
-): Promise<number> => {
+const drawCompactLetterhead = async (doc: any, settings: any): Promise<number> => {
   const pageWidth = doc.internal.pageSize.getWidth();
 
-  // ==== Fix: cek duplikasi "PEMERINTAH" ====
   const districtRaw = settings?.district_name || settings?.header_line1 || '';
   const headerText = districtRaw
     ? (/^\s*pemerintah\b/i.test(districtRaw)
@@ -113,45 +134,34 @@ const drawCompactLetterhead = async (
     schoolName: (settings?.school_name || '').toUpperCase(),
     address: settings?.school_address || '',
     phone: settings?.school_phone ? `Telp: ${settings.school_phone}` : '',
-    // Spacing rapat
     padTop: 10,
     lineGap: 7,
     gapAddress: 6,
     gapPhone: 4,
-    gapLine: 7.5,        // ✅ Diperbesar agar garis turun di bawah logo (y≈38.5)
+    gapLine: 7.5,
     lineGapAfter: 5,
-    // Font sizes
     fsHeader: 12,
     fsSchool: 16,
     fsAddress: 9,
     fsPhone: 9,
-    // Logo — sedikit diperkecil & digeser
-    logoSize: 22,        // ✅ dari 24 → 22
+    logoSize: 22,
     logoX: 16,
-    logoY: 9,            // ✅ dari 10 → 9
+    logoY: 9,
   };
 
-  // ==== LOAD LOGO KIRI & KANAN (async → base64) ====
   const [logoLeft, logoRight] = await Promise.all([
     loadImageAsBase64(settings?.logo_url || ''),
     loadImageAsBase64(settings?.right_logo_url || ''),
   ]);
 
-  // ==== LOGO KIRI ====
   if (logoLeft) {
     try {
-      doc.addImage(
-        logoLeft, 'PNG',
-        cfg.logoX, cfg.logoY,
-        cfg.logoSize, cfg.logoSize,
-        undefined, 'FAST',
-      );
+      doc.addImage(logoLeft, 'PNG', cfg.logoX, cfg.logoY, cfg.logoSize, cfg.logoSize, undefined, 'FAST');
     } catch (e) {
       console.warn('Gagal render logo kiri:', e);
     }
   }
 
-  // ==== LOGO KANAN ====
   if (logoRight) {
     try {
       doc.addImage(
@@ -165,7 +175,6 @@ const drawCompactLetterhead = async (
     }
   }
 
-  // ==== TEKS TENGAH ====
   const centerX = pageWidth / 2;
   let y = cfg.padTop + 4;
 
@@ -198,7 +207,6 @@ const drawCompactLetterhead = async (
     y += cfg.gapLine;
   }
 
-  // ==== GARIS PEMISAH (double line) ====
   doc.setDrawColor(0, 0, 0);
   doc.setLineWidth(0.6);
   doc.line(14, y, pageWidth - 14, y);
@@ -206,6 +214,92 @@ const drawCompactLetterhead = async (
   doc.line(14, y + 0.8, pageWidth - 14, y + 0.8);
 
   return y + cfg.lineGapAfter;
+};
+
+/**
+ * Grafik batang bertumpuk per kelas, digambar langsung di jsPDF.
+ * Return: posisi Y berikutnya.
+ */
+const drawClassChart = (doc: any, data: ClassRow[], startY: number): number => {
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const left = 14;
+  const right = pageW - 14;
+  const labelW = 28;
+  const pctW = 14;
+  const barX = left + labelW;
+  const barW = right - barX - pctW - 2;
+  const barH = 5.5;
+  const rowGap = 3.5;
+  const keys = Object.keys(STATUS_RGB) as StatusKey[];
+  let y = startY;
+
+  const ensure = (h: number) => {
+    if (y + h > pageH - 18) { doc.addPage(); y = 20; }
+  };
+
+  ensure(24);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(0, 0, 0);
+  doc.text('GRAFIK KEHADIRAN PER KELAS', left, y);
+  y += 5;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(100, 100, 100);
+  doc.text('Persentase di kanan = kehadiran (Hadir + Terlambat) dari seluruh data absensi pada periode ini.', left, y);
+  y += 6;
+
+  // legenda
+  let lx = left;
+  doc.setFontSize(8);
+  doc.setTextColor(0, 0, 0);
+  keys.forEach((k) => {
+    doc.setFillColor(...STATUS_RGB[k]);
+    doc.rect(lx, y - 3, 3, 3, 'F');
+    doc.text(k, lx + 5, y - 0.4);
+    lx += doc.getTextWidth(k) + 13;
+  });
+  y += 6;
+
+  data.forEach((row) => {
+    ensure(barH + rowGap);
+    const total = keys.reduce((s, k) => s + row[k], 0);
+    const hadirPct = total ? Math.round(((row.Hadir + row.Terlambat) / total) * 100) : 0;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(0, 0, 0);
+    doc.text(row.kelas, left, y + barH - 1.4, { maxWidth: labelW - 2 });
+
+    doc.setFillColor(243, 244, 246);
+    doc.rect(barX, y, barW, barH, 'F');
+
+    let x = barX;
+    keys.forEach((k) => {
+      const v = row[k];
+      if (!v || !total) return;
+      const w = (v / total) * barW;
+      doc.setFillColor(...STATUS_RGB[k]);
+      doc.rect(x, y, w, barH, 'F');
+      if (w > 6) {
+        doc.setFontSize(6);
+        doc.setTextColor(255, 255, 255);
+        doc.text(String(v), x + w / 2, y + barH - 1.7, { align: 'center' });
+      }
+      x += w;
+    });
+
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(0, 0, 0);
+    doc.text(`${hadirPct}%`, right, y + barH - 1.4, { align: 'right' });
+
+    y += barH + rowGap;
+  });
+
+  doc.setTextColor(0, 0, 0);
+  return y + 4;
 };
 
 const Attendance = () => {
@@ -225,9 +319,9 @@ const Attendance = () => {
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedSchedule, setSelectedSchedule] = useState('');
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [filterStartDate, setFilterStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [filterEndDate, setFilterEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(toISODate(new Date()));
+  const [filterStartDate, setFilterStartDate] = useState(toISODate(new Date()));
+  const [filterEndDate, setFilterEndDate] = useState(toISODate(new Date()));
   const [filterClass, setFilterClass] = useState('all');
   const [filterSubject, setFilterSubject] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -525,30 +619,28 @@ const Attendance = () => {
 
   const handleThisWeek = () => {
     const today = new Date();
-    const start = startOfWeek(today, { weekStartsOn: 1 });
-    const end = endOfWeek(today, { weekStartsOn: 1 });
-    setFilterStartDate(start.toISOString().split('T')[0]);
-    setFilterEndDate(end.toISOString().split('T')[0]);
+    setFilterStartDate(toISODate(startOfWeek(today, { weekStartsOn: 1 })));
+    setFilterEndDate(toISODate(endOfWeek(today, { weekStartsOn: 1 })));
     setSelectedMonth('');
+    setCurrentPage(1);
   };
 
   const handleThisMonth = () => {
     const today = new Date();
-    const start = startOfMonth(today);
-    const end = endOfMonth(today);
-    setFilterStartDate(start.toISOString().split('T')[0]);
-    setFilterEndDate(end.toISOString().split('T')[0]);
+    setFilterStartDate(toISODate(startOfMonth(today)));
+    setFilterEndDate(toISODate(endOfMonth(today)));
     setSelectedMonth('');
+    setCurrentPage(1);
   };
 
   const handleMonthSelect = (month: string) => {
     if (!month) { setSelectedMonth(''); return; }
     const [year, monthNum] = month.split('-');
     const start = new Date(parseInt(year), parseInt(monthNum) - 1, 1);
-    const end = endOfMonth(start);
-    setFilterStartDate(start.toISOString().split('T')[0]);
-    setFilterEndDate(end.toISOString().split('T')[0]);
+    setFilterStartDate(toISODate(startOfMonth(start)));
+    setFilterEndDate(toISODate(endOfMonth(start)));
     setSelectedMonth(month);
+    setCurrentPage(1);
   };
 
   const stats = React.useMemo(() => ({
@@ -564,6 +656,26 @@ const Attendance = () => {
     sakit: deduplicatedRecords.filter((r) => r.status === 'sakit'),
     alpa: deduplicatedRecords.filter((r) => r.status === 'alpa'),
   }), [deduplicatedRecords]);
+
+  /** Data kehadiran per kelas (dipakai grafik di halaman & di PDF) */
+  const classChartData = React.useMemo<ClassRow[]>(() => {
+    const map = new Map<string, ClassRow>();
+    deduplicatedRecords.forEach((r) => {
+      const kelas = r.students?.classes?.name || 'Tanpa Kelas';
+      if (!map.has(kelas)) {
+        map.set(kelas, { kelas, Hadir: 0, Terlambat: 0, Izin: 0, Sakit: 0, Alpa: 0 });
+      }
+      const row = map.get(kelas)!;
+      if (r.status === 'hadir') row.Hadir++;
+      else if (r.status === 'terlambat') row.Terlambat++;
+      else if (r.status === 'izin') row.Izin++;
+      else if (r.status === 'sakit') row.Sakit++;
+      else if (r.status === 'alpa') row.Alpa++;
+    });
+    return Array.from(map.values()).sort((a, b) =>
+      a.kelas.localeCompare(b.kelas, 'id', { numeric: true }),
+    );
+  }, [deduplicatedRecords]);
 
   const chartData = [
     { name: 'Hadir', value: stats.hadir - stats.terlambat, color: COLORS.Hadir },
@@ -730,6 +842,8 @@ const Attendance = () => {
 
   /* ============================================================
      EXPORT REKAP — per mata pelajaran
+     (fix: filterSubject berisi NAMA mapel, bukan schedule.id;
+      fix: tanggal tidak lagi memakai toISOString → aman WIB)
      ============================================================ */
   const handleExportRekapPDF = async () => {
     if (!deduplicatedRecords) return;
@@ -748,11 +862,12 @@ const Attendance = () => {
     doc.setFont('helvetica', 'bold');
     doc.text('REKAP KEHADIRAN SISWA PER MATA PELAJARAN', doc.internal.pageSize.getWidth() / 2, startY, { align: 'center' });
 
-    const selectedSchedule = filterSubject !== 'all' ? schedules?.find((s) => s.id === filterSubject) : null;
-    const classInfo = filterClass !== 'all'
-      ? classes?.find((c) => c.id === filterClass)?.name
-      : selectedSchedule ? classes?.find((c) => c.id === selectedSchedule.class_id)?.name : 'Semua Kelas';
-    const subjectInfo = selectedSchedule?.subject || 'Semua Mata Pelajaran';
+    const classInfo =
+      filterClass !== 'all'
+        ? classes?.find((c: any) => c.id === filterClass)?.name || '-'
+        : 'Semua Kelas';
+    const subjectInfo = filterSubject !== 'all' ? filterSubject : 'Semua Mata Pelajaran';
+
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
     doc.text(`Kelas: ${classInfo}`, 14, startY + 8);
@@ -761,13 +876,16 @@ const Attendance = () => {
     doc.text(`Periode: ${filterStartDate} s/d ${filterEndDate}`, 14, startY + 20);
     doc.text(`Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}`, 14, startY + 26);
 
-    const startDate = new Date(filterStartDate);
-    const endDate = new Date(filterEndDate);
+    // Daftar tanggal (lokal, tanpa geser zona waktu)
+    const [sy, sm, sd] = filterStartDate.split('-').map(Number);
+    const [ey, em, ed] = filterEndDate.split('-').map(Number);
+    const startDate = new Date(sy, sm - 1, sd);
+    const endDate = new Date(ey, em - 1, ed);
     const dates: string[] = [];
     for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-      dates.push(new Date(d).toISOString().split('T')[0]);
+      dates.push(toISODate(d));
     }
-    const dayNumbers = dates.map((date) => new Date(date).getDate());
+    const dayNumbers = dates.map((date) => parseInt(date.slice(8, 10), 10));
     const headers = ['No', 'NISN', 'Nama Siswa', ...dayNumbers.map((d) => d.toString()), 'H', 'T', 'S', 'I', 'A'];
 
     const attendanceMap = new Map<string, Map<string, string>>();
@@ -848,176 +966,189 @@ const Attendance = () => {
         .replace(/\[Override dari.*?\]/gi, '')
         .trim();
     };
+    // Escape CSV agar koma/kutip/newline di catatan tidak merusak kolom
+    const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`;
     const csvContent = [
-      ['Tanggal', 'NIS', 'Nama', 'Kelas', 'Status', 'Catatan'].join(','),
+      ['Tanggal', 'NIS', 'Nama', 'Kelas', 'Status', 'Catatan'].map(esc).join(','),
       ...deduplicatedRecords.map((r) =>
         [
           r.date, r.students?.nis || '', toTitleCase(r.students?.full_name || ''),
           r.students?.classes?.name || '', r.status, cleanNotesForExport(r.notes),
-        ].join(','),
+        ].map(esc).join(','),
       ),
     ].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `absensi-${filterStartDate}-${filterEndDate}.csv`;
     a.click();
+    window.URL.revokeObjectURL(url);
   };
 
   /* ============================================================
-     ⭐ PRINT ABSENT — Kop rapat + logo + QR box (tanpa teks header)
+     ⭐ PRINT ABSENT — laporan siswa tidak hadir (dirapikan)
+     - Kop + judul + info periode/kelas/mapel
+     - 4 kartu ringkasan
+     - Grafik kehadiran per kelas
+     - Tabel garis tipis + tanggal format Indonesia
+     - QR verifikasi + nomor halaman
      ============================================================ */
   const handlePrintAbsent = async () => {
     if (!absentByReason) return;
+
+    const totalAbsent =
+      absentByReason.izin.length + absentByReason.sakit.length + absentByReason.alpa.length;
+    if (totalAbsent === 0) {
+      toast.info('Tidak ada siswa tidak hadir pada periode ini');
+      return;
+    }
+
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
 
-    // ==== LETTERHEAD RAPAT (dengan logo kiri-kanan) ====
+    // ==== KOP ====
     const startY = await drawCompactLetterhead(doc, schoolSettings);
 
     // ==== JUDUL ====
-    doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
     doc.setTextColor(0, 0, 0);
-    doc.text('REKAP SISWA TIDAK HADIR', pageWidth / 2, startY + 2, { align: 'center' });
+    doc.text('REKAP SISWA TIDAK HADIR', pageWidth / 2, startY + 3, { align: 'center' });
 
-    // ==== INFO PERIODE ====
-    doc.setFontSize(10);
+    const classLabel =
+      filterClass === 'all'
+        ? 'Semua Kelas'
+        : classes?.find((c: any) => c.id === filterClass)?.name || '-';
+    const subjectLabel = filterSubject === 'all' ? 'Semua Mapel' : filterSubject;
+
     doc.setFont('helvetica', 'normal');
-    const infoY = startY + 12;
-    doc.text(`Periode: ${filterStartDate} s/d ${filterEndDate}`, 14, infoY);
+    doc.setFontSize(9);
+    doc.setTextColor(90, 90, 90);
     doc.text(
-      `Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}`,
-      pageWidth - 14, infoY, { align: 'right' },
+      `Periode ${formatTanggalID(filterStartDate)} s/d ${formatTanggalID(filterEndDate)}  •  ${classLabel}  •  ${subjectLabel}`,
+      pageWidth / 2, startY + 9, { align: 'center' },
+    );
+    doc.text(
+      `Tanggal Cetak: ${new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })}`,
+      pageWidth / 2, startY + 14, { align: 'center' },
     );
 
-    // ==== SUMMARY BOX ====
-    const summaryY = infoY + 8;
-    doc.setDrawColor(0, 0, 0);
-    doc.setLineWidth(0.3);
-    doc.setFillColor(250, 250, 252);
-    doc.roundedRect(14, summaryY, pageWidth - 28, 12, 2, 2, 'FD');
-    doc.setLineWidth(0.1);
-
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    const totalAbsent =
-      absentByReason.izin.length + absentByReason.sakit.length + absentByReason.alpa.length;
-    const boxCenterY = summaryY + 7;
-    let summaryX = 20;
-
-    doc.setTextColor(0, 0, 0);
-    const totalText = `Total Tidak Hadir: ${totalAbsent}`;
-    doc.text(totalText, summaryX, boxCenterY);
-    summaryX += doc.getTextWidth(totalText) + 14;
-
-    doc.setTextColor(159, 18, 57);
-    const izinText = `Izin: ${absentByReason.izin.length}`;
-    doc.text(izinText, summaryX, boxCenterY);
-    summaryX += doc.getTextWidth(izinText) + 14;
-
-    doc.setTextColor(146, 64, 14);
-    const sakitText = `Sakit: ${absentByReason.sakit.length}`;
-    doc.text(sakitText, summaryX, boxCenterY);
-    summaryX += doc.getTextWidth(sakitText) + 14;
-
-    doc.setTextColor(30, 64, 175);
-    doc.text(`Alpa: ${absentByReason.alpa.length}`, summaryX, boxCenterY);
+    // ==== KARTU RINGKASAN (4 kotak sejajar) ====
+    const cardY = startY + 20;
+    const gap = 4;
+    const cardW = (pageWidth - 28 - gap * 3) / 4;
+    const cardH = 16;
+    const cards: {
+      label: string;
+      value: number;
+      fg: [number, number, number];
+      bg: [number, number, number];
+    }[] = [
+      { label: 'TOTAL TIDAK HADIR', value: totalAbsent, fg: [31, 41, 55], bg: [243, 244, 246] },
+      { label: 'IZIN', value: absentByReason.izin.length, ...STATUS_PALETTE.Izin },
+      { label: 'SAKIT', value: absentByReason.sakit.length, ...STATUS_PALETTE.Sakit },
+      { label: 'ALPA', value: absentByReason.alpa.length, ...STATUS_PALETTE.Alpa },
+    ];
+    cards.forEach((c, i) => {
+      const x = 14 + i * (cardW + gap);
+      doc.setFillColor(...c.bg);
+      doc.roundedRect(x, cardY, cardW, cardH, 2, 2, 'F');
+      doc.setTextColor(...c.fg);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.5);
+      doc.text(c.label, x + cardW / 2, cardY + 5, { align: 'center' });
+      doc.setFontSize(14);
+      doc.text(String(c.value), x + cardW / 2, cardY + 13, { align: 'center' });
+    });
     doc.setTextColor(0, 0, 0);
 
-    // ==== DATA ====
+    // ==== GRAFIK PER KELAS ====
+    const afterChartY = drawClassChart(doc, classChartData, cardY + cardH + 10);
+
+    // ==== DATA TABEL ====
+    const cleanNotesForAbsent = (notes: string | null) => {
+      if (!notes) return '-';
+      return (
+        notes
+          .replace(/\[Absensi Pertama\]/gi, '')
+          .replace(/\[Default Wali Kelas.*?\]/gi, '')
+          .replace(/\[Override dari.*?\]/gi, '')
+          .trim() || '-'
+      );
+    };
+
     const allAbsent = [
       ...absentByReason.izin.map((r) => ({ ...r, type: 'Izin' })),
       ...absentByReason.sakit.map((r) => ({ ...r, type: 'Sakit' })),
       ...absentByReason.alpa.map((r) => ({ ...r, type: 'Alpa' })),
     ].sort((a, b) => {
-      const classCompare = (a.students?.classes?.name || '').localeCompare(
-        b.students?.classes?.name || '', 'id',
+      const c = (a.students?.classes?.name || '').localeCompare(
+        b.students?.classes?.name || '', 'id', { numeric: true },
       );
-      if (classCompare !== 0) return classCompare;
-      return (a.students?.full_name || '').localeCompare(b.students?.full_name || '', 'id');
+      if (c !== 0) return c;
+      const n = (a.students?.full_name || '').localeCompare(b.students?.full_name || '', 'id');
+      if (n !== 0) return n;
+      return a.date.localeCompare(b.date);
     });
 
-    const cleanNotesForAbsent = (notes: string | null) => {
-      if (!notes) return '-';
-      return notes
-        .replace(/\[Absensi Pertama\]/gi, '')
-        .replace(/\[Default Wali Kelas.*?\]/gi, '')
-        .replace(/\[Override dari.*?\]/gi, '')
-        .trim() || '-';
-    };
-
-    const tableData = allAbsent.map((r, index) => [
-      index + 1, r.date, r.students?.nis || '-',
+    const tableData = allAbsent.map((r, i) => [
+      i + 1,
+      formatTanggalID(r.date),
+      r.students?.nis || '-',
       toTitleCase(r.students?.full_name || '-'),
       r.students?.classes?.name || '-',
-      r.type, cleanNotesForAbsent(r.notes),
+      r.type,
+      cleanNotesForAbsent(r.notes),
     ]);
 
-    // ==== TABEL ====
+    let tableTitleY = afterChartY;
+    if (tableTitleY > pageHeight - 50) { doc.addPage(); tableTitleY = 20; }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(0, 0, 0);
+    doc.text('DAFTAR SISWA TIDAK HADIR', 14, tableTitleY);
+
     autoTable(doc, {
-      startY: summaryY + 18,
+      startY: tableTitleY + 4,
       head: [['No', 'Tanggal', 'NIS', 'Nama Siswa', 'Kelas', 'Status', 'Catatan']],
       body: tableData,
       theme: 'grid',
+      margin: { left: 14, right: 14, bottom: 18 },
+      styles: {
+        font: 'helvetica',
+        fontSize: 8,
+        cellPadding: { top: 2.2, bottom: 2.2, left: 2.5, right: 2.5 },
+        lineColor: [209, 213, 219],
+        lineWidth: 0.1,
+        textColor: [17, 24, 39],
+        valign: 'middle',
+      },
       headStyles: {
-        fillColor: [220, 38, 38],
+        fillColor: [31, 41, 55],
         textColor: [255, 255, 255],
         fontStyle: 'bold',
         halign: 'center',
-        fontSize: 9,
-        lineColor: [0, 0, 0],
-        lineWidth: 0.3,
+        fontSize: 8.5,
       },
-      bodyStyles: {
-        lineColor: [0, 0, 0],
-        lineWidth: 0.15,
-        fontSize: 8,
-        cellPadding: { top: 2.5, bottom: 2.5, left: 3, right: 3 },
-        valign: 'middle',
-        textColor: [17, 24, 39],
-      },
+      alternateRowStyles: { fillColor: [249, 250, 251] },
       columnStyles: {
-        0: { halign: 'center', cellWidth: 10 },
-        1: { halign: 'center', cellWidth: 24 },
+        0: { halign: 'center', cellWidth: 9 },
+        1: { halign: 'center', cellWidth: 25 },
         2: { halign: 'center', cellWidth: 22 },
-        3: { cellWidth: 40 },
-        4: { halign: 'center', cellWidth: 30 },
-        5: { halign: 'center', cellWidth: 24, fontStyle: 'bold' },
-        6: { cellWidth: 28 },
+        3: { cellWidth: 44 },
+        4: { halign: 'center', cellWidth: 20 },
+        5: { halign: 'center', cellWidth: 18 },
+        6: { cellWidth: 'auto' },
       },
-      alternateRowStyles: { fillColor: [255, 255, 255] },
       didParseCell: (data) => {
-        const isLastRow = data.section === 'body' && data.row.index === tableData.length - 1;
-        const isFirstHeadRow = data.section === 'head';
-
-        if (isFirstHeadRow) {
-          data.cell.styles.lineWidth = {
-            top: 0.4, bottom: 0.4,
-            left: data.column.index === 0 ? 0.4 : 0.3,
-            right: data.column.index === 6 ? 0.4 : 0.3,
-          };
-        } else if (data.section === 'body') {
-          data.cell.styles.lineWidth = {
-            top: 0.15,
-            bottom: isLastRow ? 0.4 : 0.15,
-            left: data.column.index === 0 ? 0.4 : 0.15,
-            right: data.column.index === 6 ? 0.4 : 0.15,
-          };
-        }
-
         if (data.section !== 'body' || data.column.index !== 5) return;
-        const status = String(data.cell.raw || '');
-        const p = STATUS_PALETTE[status];
+        const p = STATUS_PALETTE[String(data.cell.raw || '')];
         if (!p) return;
-
         data.cell.styles.fillColor = p.bg;
         data.cell.styles.textColor = p.fg;
         data.cell.styles.fontStyle = 'bold';
-        data.cell.styles.halign = 'center';
-        data.cell.styles.lineColor = [0, 0, 0];
       },
     });
 
@@ -1035,6 +1166,7 @@ const Attendance = () => {
         sakit: absentByReason.sakit.length,
         alpa: absentByReason.alpa.length,
       },
+      classSummary: classChartData,
       students: allAbsent.map((r) => ({
         nis: r.students?.nis,
         nama: toTitleCase(r.students?.full_name || ''),
@@ -1067,62 +1199,59 @@ const Attendance = () => {
       revoked_at: null,
       access_count: 0,
     });
-
     if (insertError) {
       console.error('Error saving report:', insertError);
       toast.error('Gagal menyimpan data laporan untuk verifikasi');
       return;
     }
 
-    // ==== QR VERIFIKASI dengan BORDER BOX (tanpa header teks) ====
-    const qrSize = 32;
-    const qrPad = 5;
-    const qrTextSpace = 6;
-    const boxWidth = qrSize + qrPad * 2;
-    const boxHeight = qrSize + qrPad * 2 + qrTextSpace;
-
-    const qrX = pageWidth - boxWidth - 14;
+    // ==== QR VERIFIKASI ====
+    const qrSize = 30;
+    const qrPad = 4;
+    const boxSize = qrSize + qrPad * 2;
+    const qrX = pageWidth - boxSize - 14;
     let qrY = finalY + 10;
 
-    // Cek overflow → pindah halaman baru jika tidak cukup
-    if (qrY + boxHeight + 6 > pageHeight - 10) {
+    if (qrY + boxSize + 6 > pageHeight - 15) {
       doc.addPage();
       qrY = 20;
     }
 
-    // Box utama — hanya berisi QR code (tanpa teks di dalam)
-    doc.setDrawColor(0, 0, 0);
+    doc.setDrawColor(209, 213, 219);
     doc.setLineWidth(0.3);
     doc.setFillColor(255, 255, 255);
-    doc.roundedRect(qrX, qrY, boxWidth, boxHeight, 2, 2, 'FD');
-    doc.setLineWidth(0.1);
+    doc.roundedRect(qrX, qrY, boxSize, boxSize, 2, 2, 'FD');
 
-    // QR code di tengah box
-    const verifyUrl = buildVerificationUrl(rawToken);
-    await addVerificationQR(
-      doc, verifyUrl,
-      qrX + qrPad,
-      qrY + qrPad,
-      qrSize,
-    );
+    await addVerificationQR(doc, buildVerificationUrl(rawToken), qrX + qrPad, qrY + qrPad, qrSize);
 
-    // ==== KETERANGAN DI KIRI QR (di luar box) ====
-    doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
     doc.setTextColor(22, 101, 52);
-    doc.text('DOKUMEN TERVERIFIKASI', 14, qrY + 4);
+    doc.text('DOKUMEN TERVERIFIKASI', 14, qrY + 5);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
     doc.setTextColor(80, 80, 80);
-    doc.text('Scan QR Code di samping untuk memverifikasi', 14, qrY + 9);
-    doc.text('keaslian dokumen dan melihat data siswa', 14, qrY + 13);
-    doc.text('yang tidak hadir secara real-time.', 14, qrY + 17);
-
+    doc.text('Scan QR Code di samping untuk memverifikasi keaslian', 14, qrY + 11);
+    doc.text('dokumen dan melihat data siswa tidak hadir secara real-time.', 14, qrY + 15);
     doc.setFontSize(7);
     doc.setTextColor(120, 120, 120);
-    doc.text('Dokumen berlaku selama arsip sekolah aktif.', 14, qrY + 23);
-    doc.text(`No. Seri: ${serialData}`, 14, qrY + 28);
+    doc.text('Dokumen berlaku selama arsip sekolah aktif.', 14, qrY + 21);
+    doc.text(`No. Seri: ${serialData}`, 14, qrY + 26);
+
+    // ==== FOOTER: nomor halaman di semua halaman ====
+    const totalPagesPdf = doc.getNumberOfPages();
+    for (let i = 1; i <= totalPagesPdf; i++) {
+      doc.setPage(i);
+      doc.setDrawColor(209, 213, 219);
+      doc.setLineWidth(0.2);
+      doc.line(14, pageHeight - 12, pageWidth - 14, pageHeight - 12);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(120, 120, 120);
+      doc.text('Rekap Siswa Tidak Hadir', 14, pageHeight - 7);
+      doc.text(`Halaman ${i} dari ${totalPagesPdf}`, pageWidth - 14, pageHeight - 7, { align: 'right' });
+    }
     doc.setTextColor(0, 0, 0);
 
     doc.save(`siswa-tidak-hadir-${filterStartDate}-${filterEndDate}.pdf`);
@@ -1150,6 +1279,9 @@ const Attendance = () => {
       default: return status;
     }
   };
+
+  const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+  const currentYearNum = new Date().getFullYear();
 
   return (
     <DashboardLayout>
@@ -1674,8 +1806,10 @@ const Attendance = () => {
                     <SelectValue placeholder="Pilih Bulan" />
                   </SelectTrigger>
                   <SelectContent>
-                    {['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'].map((month, idx) => (
-                      <SelectItem key={month} value={`2026-${String(idx + 1).padStart(2, '0')}`}>{month} 2026</SelectItem>
+                    {monthNames.map((month, idx) => (
+                      <SelectItem key={month} value={`${currentYearNum}-${String(idx + 1).padStart(2, '0')}`}>
+                        {month} {currentYearNum}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1687,7 +1821,7 @@ const Attendance = () => {
                     <input
                       type="date"
                       value={filterStartDate}
-                      onChange={(e) => { setFilterStartDate(e.target.value); setSelectedMonth(''); }}
+                      onChange={(e) => { setFilterStartDate(e.target.value); setSelectedMonth(''); setCurrentPage(1); }}
                       className="flex h-9 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs md:text-sm"
                     />
                   </div>
@@ -1696,7 +1830,7 @@ const Attendance = () => {
                     <input
                       type="date"
                       value={filterEndDate}
-                      onChange={(e) => { setFilterEndDate(e.target.value); setSelectedMonth(''); }}
+                      onChange={(e) => { setFilterEndDate(e.target.value); setSelectedMonth(''); setCurrentPage(1); }}
                       className="flex h-9 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs md:text-sm"
                     />
                   </div>
@@ -1704,7 +1838,7 @@ const Attendance = () => {
                 <div className="grid grid-cols-2 gap-2 md:contents">
                   <div className="space-y-1">
                     <Label className="text-[11px] md:text-sm">Kelas</Label>
-                    <Select value={filterClass} onValueChange={setFilterClass}>
+                    <Select value={filterClass} onValueChange={(v) => { setFilterClass(v); setCurrentPage(1); }}>
                       <SelectTrigger className="h-9 text-xs md:text-sm">
                         <SelectValue placeholder="Semua Kelas" />
                       </SelectTrigger>
@@ -1718,7 +1852,7 @@ const Attendance = () => {
                   </div>
                   <div className="space-y-1">
                     <Label className="text-[11px] md:text-sm">Mata Pelajaran</Label>
-                    <Select value={filterSubject} onValueChange={setFilterSubject}>
+                    <Select value={filterSubject} onValueChange={(v) => { setFilterSubject(v); setCurrentPage(1); }}>
                       <SelectTrigger className="h-9 text-xs md:text-sm">
                         <SelectValue placeholder="Semua Mapel" />
                       </SelectTrigger>
@@ -1846,6 +1980,35 @@ const Attendance = () => {
             </CardContent>
           </Card>
         </div>
+
+        {/* Grafik Kehadiran per Kelas */}
+        <Card className="card-hover border-none shadow-md">
+          <CardHeader className="pb-2 md:pb-6">
+            <CardTitle className="flex items-center gap-2 text-sm md:text-base">
+              <BarChart3 className="h-4 w-4 md:h-5 md:w-5 text-primary" /> Kehadiran per Kelas
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-2 md:p-6">
+            {classChartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={Math.max(220, classChartData.length * 36 + 60)}>
+                <BarChart data={classChartData} layout="vertical" margin={{ left: 8, right: 16 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
+                  <YAxis type="category" dataKey="kelas" width={70} tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="Hadir" stackId="a" fill={COLORS.Hadir} />
+                  <Bar dataKey="Terlambat" stackId="a" fill={COLORS.Terlambat} />
+                  <Bar dataKey="Izin" stackId="a" fill={COLORS.Izin} />
+                  <Bar dataKey="Sakit" stackId="a" fill={COLORS.Sakit} />
+                  <Bar dataKey="Alpa" stackId="a" fill={COLORS.Alpa} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-8">Tidak ada data</p>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Absent Students List */}
         <div className="grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-3">
@@ -1982,7 +2145,7 @@ const Attendance = () => {
                       }
                       return (
                         <TableRow key={`${record.student_id}-${record.students?.class_id}-${record.date}`}>
-                          <TableCell>{new Date(record.date).toLocaleDateString('id-ID')}</TableCell>
+                          <TableCell>{formatTanggalID(record.date)}</TableCell>
                           <TableCell>{record.students?.nis}</TableCell>
                           <TableCell className="font-medium">{toTitleCase(record.students?.full_name || '')}</TableCell>
                           <TableCell>{record.students?.classes?.name}</TableCell>
