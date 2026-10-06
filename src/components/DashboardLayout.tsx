@@ -49,6 +49,7 @@ const roleLabels: Record<string, string> = {
   kesiswaan: 'Kesiswaan',
   osis: 'OSIS',                    // ⭐ TAMBAHKAN
   guru_piket: 'Guru Piket',
+  pembina_ekskul: 'Pembina Ekskul',
   siswa: 'Siswa',
   polling: 'Polling',
   billing: 'Billing',
@@ -291,6 +292,14 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
       ],
     },
     {
+      label: 'Ekstrakurikuler',
+      items: [
+        { icon: BookOpen, label: 'Jurnal Ekskul', href: '/ekskul-journal' },
+        { icon: Users, label: 'Anggota Ekskul', href: '/ekskul-members' },
+        { icon: UserCheck, label: 'Pembina Ekskul', href: '/ekskul-coaches' },
+      ],
+    },
+    {
       label: 'Guru Piket',
       items: [
         { icon: Shield, label: 'Dashboard Guru Piket', href: '/guru-piket-dashboard' },
@@ -489,6 +498,8 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: CreditCard, label: 'Absensi RFID', href: '/rfid-attendance' },
     { icon: AlertTriangle, label: 'Poin Pelanggaran', href: '/violations' },
     { icon: Award, label: 'Penghargaan & Prestasi', href: '/achievements' },
+    { icon: BookOpen, label: 'Jurnal Ekskul', href: '/ekskul-journal' },
+    { icon: Users, label: 'Anggota Ekskul', href: '/ekskul-members' },
     { icon: Settings, label: 'Pengaturan', href: '/settings' },
   ];
 
@@ -504,6 +515,12 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: FileText, label: 'Dispensasi Siswa', href: '/dispensasi-siswa' },
     { icon: CreditCard, label: 'Absensi RFID', href: '/rfid-attendance' },
     { icon: BookOpen, label: 'Buku Tamu', href: '/buku-tamu' },
+    { icon: Settings, label: 'Pengaturan', href: '/settings' },
+  ];
+
+  const pembinaEkskulMenuItems: MenuItem[] = [
+    { icon: BookOpen, label: 'Jurnal Ekskul', href: '/ekskul-journal' },
+    { icon: Users, label: 'Anggota Ekskul', href: '/ekskul-members' },
     { icon: Settings, label: 'Pengaturan', href: '/settings' },
   ];
 
@@ -537,7 +554,9 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
               ? osisMenuItems
               : userRole === 'guru_piket'
                 ? guruPiketMenuItems
-                : userRole === 'polling'
+                : userRole === 'pembina_ekskul'
+                  ? pembinaEkskulMenuItems
+                  : userRole === 'polling'
                   ? pollingMenuItems
                   : userRole === 'billing'
                     ? billingMenuItems

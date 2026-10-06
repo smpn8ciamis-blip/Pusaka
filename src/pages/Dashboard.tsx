@@ -42,6 +42,7 @@ const ROLE_REDIRECTS: Record<string, string> = {
   siswa: '/student-dashboard',
   guru_piket: '/guru-piket-dashboard',
   admin_web: '/web-admin',
+  pembina_ekskul: '/ekskul-journal',
 };
 
 const LOW_ATTENDANCE_THRESHOLD = 80;

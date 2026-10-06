@@ -40,6 +40,7 @@ const ROLE_LABELS: Record<string, string> = {
   polling: 'Polling',
   billing: 'Billing',
   siswa: 'Siswa',
+  pembina_ekskul: 'Pembina Ekskul',
 };
 
 const ROLE_COLORS: Record<string, string> = {
@@ -52,9 +53,10 @@ const ROLE_COLORS: Record<string, string> = {
   polling: 'bg-cyan-500',
   billing: 'bg-orange-500',
   siswa: 'bg-teal-500',
+  pembina_ekskul: 'bg-lime-600',
 };
 
-const ALL_ROLES = ['super_admin', 'admin', 'teacher', 'bendahara', 'tata_usaha', 'kesiswaan', 'polling', 'billing', 'siswa'];
+const ALL_ROLES = ['super_admin', 'admin', 'teacher', 'bendahara', 'tata_usaha', 'kesiswaan', 'polling', 'billing', 'siswa', 'pembina_ekskul'];
 
 async function callManageUsers(action: string, params: any) {
   const res = await supabase.functions.invoke('manage-users', {
