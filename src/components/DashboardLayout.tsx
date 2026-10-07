@@ -77,6 +77,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     'Akademik': false,
     'Laporan & Analytics': false,
     'Kesiswaan': false,
+    'Ekstrakurikuler': false,
     'Informasi': false,
     'Keuangan': false,
     'Surat & Perjalanan': false,
@@ -597,6 +598,17 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
 
   const isItemActive = (href: string) =>
     location.pathname === href || location.pathname + location.search === href;
+
+  // Buka otomatis grup yang berisi menu aktif, supaya halaman yang sedang dibuka tidak tersembunyi
+  // di dalam grup yang tertutup (semua grup admin tertutup secara default).
+  useEffect(() => {
+    if (userRole !== 'admin') return;
+    const active = adminMenuGroups.find((g) => g.items.some((i) => isItemActive(i.href)));
+    if (active) {
+      setOpenGroups((prev) => (prev[active.label] ? prev : { ...prev, [active.label]: true }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, location.search, userRole]);
 
   // ============================
   // RENDER MENU ITEM
