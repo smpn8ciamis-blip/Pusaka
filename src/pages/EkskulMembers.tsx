@@ -2,9 +2,12 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+import {
+  Bar, BarChart, Cell, LabelList, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from 'recharts';
 import { Check, Loader2, Pencil, Plus, Printer, Search, Trash2, UserPlus, Users } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -58,25 +61,46 @@ const statusVariant = (s: Member['status']) =>
 const PICKER_LIMIT = 100;
 const NO_CLASS = 'Tanpa kelas';
 
+const COLOR_JOINED = '#16a34a';
+const COLOR_NOT_JOINED = '#f59e0b';
+const BAR_COLORS = ['#2563eb', '#16a34a', '#f59e0b', '#9333ea', '#dc2626', '#0891b2', '#db2777', '#65a30d'];
+
+const pct = (part: number, total: number) => (total === 0 ? 0 : (part / total) * 100);
+const fmtPct = (n: number) => `${n.toFixed(1).replace('.', ',')}%`;
+
 // =============================================================================
-// Tab "Pemetaan Siswa": matriks siswa x ekskul
+// Tab "Pemetaan Siswa": seluruh siswa aktif x ekskul + grafik persentase
 // =============================================================================
 interface StudentRow {
   id: string;
   name: string;
   nis: string;
   className: string;
-  typeIds: Set<string>;
+  typeIds: Set<string>; // hanya keanggotaan berstatus "aktif"
 }
+
+type MapMode = 'all' | 'joined' | 'none' | 'multi';
 
 function EkskulMappingTab({ types }: { types: { id: string; name: string }[] }) {
   const [search, setSearch] = useState('');
   const [classFilter, setClassFilter] = useState('all');
-  const [viewMode, setViewMode] = useState<'aktif' | 'all' | 'multi'>('aktif');
+  const [mode, setMode] = useState<MapMode>('all');
 
-  // Ambil anggota SEMUA ekskul (_type_id = null). Key diawali 'ekskul-members'
-  // sehingga otomatis ter-invalidate saat anggota ditambah/diubah/dihapus.
-  const { data: allMembers = [], isLoading } = useQuery({
+  // Seluruh siswa (direktori). Dipanggil lewat salah satu ekskul yang dapat diakses
+  // pengguna agar lolos pengecekan izin RPC; hasilnya diasumsikan seluruh siswa aktif.
+  const { data: directory = [], isLoading: dirLoading } = useQuery({
+    queryKey: ['ekskul-student-directory', 'mapping-all', types[0]?.id],
+    enabled: types.length > 0,
+    queryFn: async (): Promise<DirectoryStudent[]> => {
+      const { data, error } = await ekskulDb.rpc('get_ekskul_student_directory', { _type_id: types[0].id });
+      if (error) throw error;
+      return (data ?? []) as DirectoryStudent[];
+    },
+  });
+
+  // Keanggotaan seluruh ekskul. Key diawali 'ekskul-members' sehingga ikut
+  // ter-invalidate saat anggota ditambah/diubah/dihapus.
+  const { data: allMembers = [], isLoading: memLoading } = useQuery({
     queryKey: ['ekskul-members', 'mapping-all'],
     enabled: types.length > 0,
     queryFn: async (): Promise<Member[]> => {
@@ -86,13 +110,19 @@ function EkskulMappingTab({ types }: { types: { id: string; name: string }[] }) 
     },
   });
 
-  // Kelompokkan per siswa: siswa -> kumpulan ekskul yang diikuti
+  const isLoading = dirLoading || memLoading;
+
+  // Semua siswa aktif, termasuk yang belum punya ekskul
   const students = useMemo(() => {
     const map = new Map<string, StudentRow>();
+    for (const s of directory) {
+      map.set(s.id, { id: s.id, name: s.full_name, nis: s.nis, className: s.class_name ?? NO_CLASS, typeIds: new Set() });
+    }
     for (const m of allMembers) {
-      if (viewMode !== 'all' && m.status !== 'aktif') continue;
+      if (m.status !== 'aktif') continue;
       let row = map.get(m.student_id);
       if (!row) {
+        // cadangan bila siswa belum ada di direktori
         row = { id: m.student_id, name: m.full_name, nis: m.nis, className: m.class_name ?? NO_CLASS, typeIds: new Set() };
         map.set(m.student_id, row);
       }
@@ -101,32 +131,141 @@ function EkskulMappingTab({ types }: { types: { id: string; name: string }[] }) 
     return Array.from(map.values()).sort(
       (a, b) => a.className.localeCompare(b.className, 'id', { numeric: true }) || a.name.localeCompare(b.name, 'id'),
     );
-  }, [allMembers, viewMode]);
+  }, [directory, allMembers]);
 
   const classOptions = useMemo(
     () => Array.from(new Set(students.map((s) => s.className))).sort((a, b) => a.localeCompare(b, 'id', { numeric: true })),
     [students],
   );
 
+  // Cakupan data (mengikuti filter kelas) -> dipakai kartu ringkasan & grafik
+  const scoped = useMemo(
+    () => students.filter((s) => classFilter === 'all' || s.className === classFilter),
+    [students, classFilter],
+  );
+
+  const total = scoped.length;
+  const joined = scoped.filter((s) => s.typeIds.size > 0).length;
+  const notJoined = total - joined;
+  const multiCount = scoped.filter((s) => s.typeIds.size > 1).length;
+
+  const participationData = [
+    { name: 'Ikut ekskul', value: joined, color: COLOR_JOINED },
+    { name: 'Belum ikut ekskul', value: notJoined, color: COLOR_NOT_JOINED },
+  ];
+
+  const perTypeData = useMemo(
+    () =>
+      types
+        .map((t) => {
+          const count = scoped.filter((s) => s.typeIds.has(t.id)).length;
+          const share = pct(count, total);
+          return { name: t.name, count, share, label: `${fmtPct(share)} (${count})` };
+        })
+        .sort((a, b) => b.count - a.count),
+    [types, scoped, total],
+  );
+
+  // Tabel (filter tambahan: pencarian & mode)
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return students.filter((s) => {
-      if (classFilter !== 'all' && s.className !== classFilter) return false;
-      if (viewMode === 'multi' && s.typeIds.size < 2) return false;
+    return scoped.filter((s) => {
+      if (mode === 'joined' && s.typeIds.size === 0) return false;
+      if (mode === 'none' && s.typeIds.size > 0) return false;
+      if (mode === 'multi' && s.typeIds.size < 2) return false;
       if (!term) return true;
       return [s.name, s.nis, s.className].some((v) => v.toLowerCase().includes(term));
     });
-  }, [students, search, classFilter, viewMode]);
+  }, [scoped, search, mode]);
 
   const totalPerType = useMemo(
     () => new Map(types.map((t) => [t.id, rows.filter((s) => s.typeIds.has(t.id)).length])),
     [rows, types],
   );
 
-  const multiCount = rows.filter((s) => s.typeIds.size > 1).length;
-
   return (
     <div className="space-y-4">
+      {/* Ringkasan */}
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Total siswa aktif</p>
+            <p className="text-2xl font-bold">{total}</p>
+            <p className="text-xs text-muted-foreground">{classFilter === 'all' ? 'Seluruh kelas' : classFilter}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Ikut ekskul</p>
+            <p className="text-2xl font-bold" style={{ color: COLOR_JOINED }}>{joined}</p>
+            <p className="text-xs text-muted-foreground">{fmtPct(pct(joined, total))} · {multiCount} siswa ikut &gt; 1 ekskul</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Belum ikut ekskul</p>
+            <p className="text-2xl font-bold" style={{ color: COLOR_NOT_JOINED }}>{notJoined}</p>
+            <p className="text-xs text-muted-foreground">{fmtPct(pct(notJoined, total))} dari siswa aktif</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Grafik */}
+      {!isLoading && total > 0 && (
+        <div className="grid gap-4 lg:grid-cols-5">
+          <Card className="lg:col-span-2">
+            <CardHeader className="pb-0">
+              <CardTitle className="text-base">Partisipasi siswa dalam ekskul</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={participationData}
+                      dataKey="value"
+                      nameKey="name"
+                      innerRadius={55}
+                      outerRadius={90}
+                      paddingAngle={2}
+                      labelLine={false}
+                      label={({ percent }) => (percent ? fmtPct(percent * 100) : '')}
+                    >
+                      {participationData.map((d) => <Cell key={d.name} fill={d.color} />)}
+                    </Pie>
+                    <Tooltip formatter={(v: number, n: string) => [`${v} siswa (${fmtPct(pct(v, total))})`, n]} />
+                    <Legend verticalAlign="bottom" iconType="circle" />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="lg:col-span-3">
+            <CardHeader className="pb-0">
+              <CardTitle className="text-base">Persentase anggota per jenis ekskul</CardTitle>
+              <p className="text-xs text-muted-foreground">Dihitung dari total siswa aktif. Satu siswa dapat ikut lebih dari satu ekskul.</p>
+            </CardHeader>
+            <CardContent>
+              <div style={{ height: Math.max(240, perTypeData.length * 38 + 40) }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={perTypeData} layout="vertical" margin={{ left: 8, right: 70, top: 8, bottom: 8 }}>
+                    <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                    <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 12 }} />
+                    <Tooltip formatter={(_v: number, _n: string, item) => [`${item.payload.count} siswa (${fmtPct(item.payload.share)})`, 'Anggota']} />
+                    <Bar dataKey="share" radius={[0, 4, 4, 0]}>
+                      {perTypeData.map((d, i) => <Cell key={d.name} fill={BAR_COLORS[i % BAR_COLORS.length]} />)}
+                      <LabelList dataKey="label" position="right" style={{ fontSize: 12 }} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Filter tabel */}
       <Card>
         <CardContent className="grid gap-3 pt-6 md:grid-cols-4">
           <div className="space-y-1.5 md:col-span-2">
@@ -148,11 +287,12 @@ function EkskulMappingTab({ types }: { types: { id: string; name: string }[] }) 
           </div>
           <div className="space-y-1.5">
             <Label>Tampilkan</Label>
-            <Select value={viewMode} onValueChange={(v) => setViewMode(v as 'aktif' | 'all' | 'multi')}>
+            <Select value={mode} onValueChange={(v) => setMode(v as MapMode)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="aktif">Anggota aktif</SelectItem>
-                <SelectItem value="all">Semua status</SelectItem>
+                <SelectItem value="all">Semua siswa aktif</SelectItem>
+                <SelectItem value="joined">Sudah ikut ekskul</SelectItem>
+                <SelectItem value="none">Belum ikut ekskul</SelectItem>
                 <SelectItem value="multi">Ikut lebih dari 1 ekskul</SelectItem>
               </SelectContent>
             </Select>
@@ -160,9 +300,7 @@ function EkskulMappingTab({ types }: { types: { id: string; name: string }[] }) 
         </CardContent>
       </Card>
 
-      <p className="text-sm text-muted-foreground">
-        {rows.length} siswa mengikuti ekskul · {multiCount} siswa mengikuti lebih dari satu
-      </p>
+      <p className="text-sm text-muted-foreground">Menampilkan {rows.length} dari {total} siswa</p>
 
       <Card>
         <CardContent className="p-0">
@@ -199,7 +337,11 @@ function EkskulMappingTab({ types }: { types: { id: string; name: string }[] }) 
                         </TableCell>
                       ))}
                       <TableCell className="text-center">
-                        <Badge variant={s.typeIds.size > 1 ? 'default' : 'secondary'}>{s.typeIds.size}</Badge>
+                        {s.typeIds.size === 0 ? (
+                          <Badge variant="outline" className="border-amber-500 text-amber-600">Belum ikut</Badge>
+                        ) : (
+                          <Badge variant={s.typeIds.size > 1 ? 'default' : 'secondary'}>{s.typeIds.size}</Badge>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
