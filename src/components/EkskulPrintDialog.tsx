@@ -288,15 +288,15 @@ export function EkskulPrintDialog({ open, onOpenChange, types, defaultTypeId, de
   return (
     <>
       <Dialog open={open && !preview} onOpenChange={(o) => !busy && onOpenChange(o)}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[90dvh] max-w-lg flex-col gap-0 p-0">
+          <DialogHeader className="shrink-0 px-6 pb-3 pr-12 pt-6">
             <DialogTitle>Cetak Jurnal &amp; Daftar Hadir Ekskul</DialogTitle>
             <DialogDescription>
               Dokumen memakai kop sekolah. Tanggal pertemuan mengikuti jurnal yang sudah diinput.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4">
+          <div className="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto px-6 py-3">
             <div className="space-y-1.5">
               <Label>Jenis dokumen</Label>
               <Select value={kind} onValueChange={(v) => setKind(v as EkskulDocKind)}>
@@ -420,7 +420,7 @@ export function EkskulPrintDialog({ open, onOpenChange, types, defaultTypeId, de
             )}
           </div>
 
-          <DialogFooter className="gap-2 sm:gap-0">
+          <DialogFooter className="shrink-0 gap-2 border-t px-6 py-4 sm:gap-0">
             <Button variant="outline" onClick={() => onOpenChange(false)} disabled={!!busy}>Batal</Button>
             <Button variant="secondary" onClick={() => build('preview')} disabled={!!busy || !canRun}>
               {busy === 'preview' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Eye className="mr-2 h-4 w-4" />}
@@ -436,7 +436,7 @@ export function EkskulPrintDialog({ open, onOpenChange, types, defaultTypeId, de
 
       {/* ----------------------------- Pratinjau ----------------------------- */}
       <Dialog open={!!preview} onOpenChange={(o) => !o && closePreview()}>
-        <DialogContent className="flex h-[92vh] max-w-5xl flex-col gap-3 p-4">
+        <DialogContent className="flex h-[92dvh] max-h-[92dvh] max-w-5xl flex-col gap-3 p-4">
           <DialogHeader>
             <DialogTitle>Pratinjau {kind === 'journal' ? 'Jurnal' : 'Daftar Hadir'} Ekskul</DialogTitle>
             <DialogDescription>Periksa dulu sebelum diunduh. Tutup untuk kembali mengubah pengaturan.</DialogDescription>
