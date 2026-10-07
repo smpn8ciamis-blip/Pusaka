@@ -180,7 +180,7 @@ function EkskulMappingTab({ types }: { types: { id: string; name: string }[] }) 
   const [classFilter, setClassFilter] = useState('all');
   const [mode, setMode] = useState<MapMode>('all');
 
-  // SEMUA siswa aktif langsung dari tabel students (status = 'aktif').
+  // SEMUA siswa aktif langsung dari tabel students (status = 'aktif', bukan alumni).
   // Diambil bertahap (1000 baris/halaman) agar aman bila siswa > 1000.
   const { data: activeStudents = [], isLoading: dirLoading } = useQuery({
     queryKey: ['ekskul-active-students'],
@@ -192,6 +192,7 @@ function EkskulMappingTab({ types }: { types: { id: string; name: string }[] }) 
           .from('students')
           .select('id, full_name, nis, nisn, gender, classes(name)')
           .eq('status', 'aktif')
+          .or('is_alumni.is.null,is_alumni.eq.false') // bukan alumni
           .order('full_name')
           .order('id')
           .range(from, from + DB_PAGE - 1);
