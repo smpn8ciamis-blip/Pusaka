@@ -70,6 +70,7 @@ export function EkskulPrintDialog({ open, onOpenChange, types, defaultTypeId, de
   const [to, setTo] = useState('');
   const [instructorId, setInstructorId] = useState('');
   const [place, setPlace] = useState('');
+  const [signDate, setSignDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [includePhotos, setIncludePhotos] = useState(true);
   const [paper, setPaper] = useState<PdfPaper>('a4');
   const [orientation, setOrientation] = useState<PdfOrientation>('landscape');
@@ -89,6 +90,7 @@ export function EkskulPrintDialog({ open, onOpenChange, types, defaultTypeId, de
     setIncludePhotos(true);
     setPaper('a4');
     setOrientation('landscape');
+    setSignDate(format(new Date(), 'yyyy-MM-dd'));
   }, [open, defaultMonth, defaultTypeId, defaultKind, types]);
 
   // Bersihkan object URL pratinjau
@@ -136,8 +138,9 @@ export function EkskulPrintDialog({ open, onOpenChange, types, defaultTypeId, de
   const noInstructors = !!typeId && !infoLoading && !!info && info.instructors.length === 0;
   const noWakasek = !!typeId && !infoLoading && !!info && !info.wakasek?.full_name;
   const rangeInvalid = !from || !to || to < from;
+  const signDateValue = signDate ? new Date(`${signDate}T00:00:00`) : new Date();
   const needsInstructor = kind === 'journal';
-  const canRun = !!typeId && !rangeInvalid && !infoLoading && (!needsInstructor || !!instructor);
+  const canRun = !!typeId && !rangeInvalid && !!signDate && !infoLoading && (!needsInstructor || !!instructor);
 
   const toSigner = (s: { name?: string | null; nip?: string | null; nuptk?: string | null } | null): EkskulSigner | null =>
     s?.name ? { name: s.name, nip: s.nip, nuptk: s.nuptk } : null;
@@ -211,7 +214,7 @@ export function EkskulPrintDialog({ open, onOpenChange, types, defaultTypeId, de
       instructor: toSigner({ name: instructor.name, nip: instructor.nip, nuptk: instructor.nuptk }),
       wakasek: wakasekSigner(),
       place,
-      printDate: new Date(),
+      printDate: signDateValue,
       paper,
     });
     const safe = (info?.ekskul_name ?? 'Ekskul').replace(/[^\w-]+/g, '_');
@@ -250,7 +253,7 @@ export function EkskulPrintDialog({ open, onOpenChange, types, defaultTypeId, de
       people,
       wakasek: wakasekSigner(),
       place,
-      printDate: new Date(),
+      printDate: signDateValue,
       orientation,
       paper,
     });
@@ -405,8 +408,15 @@ export function EkskulPrintDialog({ open, onOpenChange, types, defaultTypeId, de
             </div>
 
             <div className="space-y-1.5">
-              <Label>Tempat penandatanganan</Label>
-              <Input value={place} onChange={(e) => setPlace(e.target.value)} placeholder="Contoh: Ciamis" />
+              <Label>Titimangsa (tempat &amp; tanggal tanda tangan)</Label>
+              <div className="grid grid-cols-2 gap-3">
+                <Input value={place} onChange={(e) => setPlace(e.target.value)} placeholder="Tempat, mis. Ciamis" />
+                <Input type="date" value={signDate} onChange={(e) => setSignDate(e.target.value)} />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Tercetak: {place.trim() ? `${place.trim()}, ` : ''}
+                {signDate ? format(signDateValue, 'd MMMM yyyy', { locale: idLocale }) : '—'}
+              </p>
             </div>
 
             {kind === 'journal' && (

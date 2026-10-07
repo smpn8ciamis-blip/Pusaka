@@ -75,16 +75,14 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     'Master Data': false,
     'Akademik': false,
-    'Laporan & Analytics': false,
+    'Kehadiran & Laporan': false,
     'Kesiswaan': false,
+    'Ekstrakurikuler': false,
     'Informasi': false,
     'Keuangan': false,
     'Surat & Perjalanan': false,
     'Manajemen Akun': false,
     'Sistem': false,
-    'Guru Piket': false,
-    'Polling & Billing': false,
-    'CBT': false,
     'Akademik Siswa': true,
     'Kesiswaan Siswa': true,
     'Informasi Siswa': true,
@@ -263,23 +261,20 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
       items: [
         { icon: Calendar, label: 'Jadwal', href: '/schedules' },
         { icon: BarChart3, label: 'Beban Mengajar', href: '/teacher-workload' },
-        { icon: ClipboardList, label: 'Absensi', href: '/attendance' },
-        { icon: CreditCard, label: 'Absensi RFID', href: '/rfid-attendance' },
         { icon: FileText, label: 'Jurnal Mengajar', href: '/journals' },
         { icon: GraduationCap, label: 'Nilai', href: '/grades' },
         { icon: FileCheck, label: 'Administrasi Ujian', href: '/exam-administration' },
+        { icon: FileCheck, label: 'Ujian CBT', href: '/cbt-management' },
       ],
     },
     {
-      label: 'CBT',
-      items: [{ icon: FileCheck, label: 'Ujian CBT', href: '/cbt-management' }],
-    },
-    {
-      label: 'Laporan & Analytics',
+      label: 'Kehadiran & Laporan',
       items: [
+        { icon: ClipboardList, label: 'Absensi', href: '/attendance' },
+        { icon: CreditCard, label: 'Absensi RFID', href: '/rfid-attendance' },
+        { icon: FileText, label: 'Rekap Absensi Siswa', href: '/student-attendance-report' },
         { icon: TrendingUp, label: 'Analytics Kehadiran', href: '/analytics' },
         { icon: TrendingUp, label: 'Analytics Nilai', href: '/grade-analytics' },
-        { icon: FileText, label: 'Rekap Absensi Siswa', href: '/student-attendance-report' },
       ],
     },
     {
@@ -289,6 +284,8 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         { icon: AlertTriangle, label: 'Poin Pelanggaran', href: '/violations' },
         { icon: Award, label: 'Penghargaan & Prestasi', href: '/achievements' },
         { icon: FileText, label: 'Dispensasi Siswa', href: '/dispensasi-siswa' },
+        { icon: Shield, label: 'Dashboard Guru Piket', href: '/guru-piket-dashboard' },
+        { icon: BookOpen, label: 'Buku Tamu', href: '/buku-tamu' },
       ],
     },
     {
@@ -300,19 +297,13 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
       ],
     },
     {
-      label: 'Guru Piket',
-      items: [
-        { icon: Shield, label: 'Dashboard Guru Piket', href: '/guru-piket-dashboard' },
-        { icon: BookOpen, label: 'Buku Tamu', href: '/buku-tamu' },
-      ],
-    },
-    {
       label: 'Informasi',
       items: [
         { icon: Megaphone, label: 'Pengumuman', href: '/announcements' },
         { icon: FolderOpen, label: 'Repositori', href: '/repository' },
         { icon: FileText, label: 'Catatan Kejadian', href: '/important-event-notes' },
         { icon: MessageSquare, label: 'Pengaduan', href: '/manajemen-pengaduan' },
+        { icon: Vote, label: 'Manajemen Polling', href: '/polling' },
         { icon: Sparkles, label: 'Nedelcis Hub', href: '/nedelcis-hub' },
       ],
     },
@@ -344,13 +335,6 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
       ],
     },
     {
-      label: 'Polling & Billing',
-      items: [
-        { icon: Vote, label: 'Manajemen Polling', href: '/polling' },
-        { icon: Bell, label: 'Billing Dashboard', href: '/billing-dashboard' },
-      ],
-    },
-    {
       label: 'Manajemen Akun',
       items: [
         { icon: UserCheck, label: 'Registrasi Staff', href: '/staff-registration' },
@@ -366,6 +350,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         { icon: FileSpreadsheet, label: 'Edit Data Massal', href: '/bulk-data-editor' },
         { icon: Upload, label: 'Upload Foto Massal', href: '/bulk-photo-upload' },
         { icon: Upload, label: 'Manajemen Upload Berkas', href: '/file-upload-management' },
+        { icon: Bell, label: 'Billing Dashboard', href: '/billing-dashboard' },
         { icon: Server, label: 'Sistem Informasi', href: '/system-info' },
         { icon: Settings, label: 'Pengaturan', href: '/settings' },
       ],
@@ -597,6 +582,17 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
 
   const isItemActive = (href: string) =>
     location.pathname === href || location.pathname + location.search === href;
+
+  // Buka otomatis grup yang berisi menu aktif, supaya halaman yang sedang dibuka tidak tersembunyi
+  // di dalam grup yang tertutup (semua grup admin tertutup secara default).
+  useEffect(() => {
+    if (userRole !== 'admin') return;
+    const active = adminMenuGroups.find((g) => g.items.some((i) => isItemActive(i.href)));
+    if (active) {
+      setOpenGroups((prev) => (prev[active.label] ? prev : { ...prev, [active.label]: true }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, location.search, userRole]);
 
   // ============================
   // RENDER MENU ITEM
