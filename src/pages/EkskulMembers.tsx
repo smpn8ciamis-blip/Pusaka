@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { Loader2, Pencil, Plus, Printer, Search, Trash2, UserPlus, Users } from 'lucide-react';
+import { Check, Loader2, Pencil, Plus, Printer, Search, Trash2, UserPlus, Users } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,8 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -55,7 +56,175 @@ const statusVariant = (s: Member['status']) =>
   s === 'aktif' ? 'default' : s === 'nonaktif' ? 'secondary' : 'outline';
 
 const PICKER_LIMIT = 100;
+const NO_CLASS = 'Tanpa kelas';
 
+// =============================================================================
+// Tab "Pemetaan Siswa": matriks siswa x ekskul
+// =============================================================================
+interface StudentRow {
+  id: string;
+  name: string;
+  nis: string;
+  className: string;
+  typeIds: Set<string>;
+}
+
+function EkskulMappingTab({ types }: { types: { id: string; name: string }[] }) {
+  const [search, setSearch] = useState('');
+  const [classFilter, setClassFilter] = useState('all');
+  const [viewMode, setViewMode] = useState<'aktif' | 'all' | 'multi'>('aktif');
+
+  // Ambil anggota SEMUA ekskul (_type_id = null). Key diawali 'ekskul-members'
+  // sehingga otomatis ter-invalidate saat anggota ditambah/diubah/dihapus.
+  const { data: allMembers = [], isLoading } = useQuery({
+    queryKey: ['ekskul-members', 'mapping-all'],
+    enabled: types.length > 0,
+    queryFn: async (): Promise<Member[]> => {
+      const { data, error } = await ekskulDb.rpc('get_ekskul_members', { _type_id: null });
+      if (error) throw error;
+      return (data ?? []) as Member[];
+    },
+  });
+
+  // Kelompokkan per siswa: siswa -> kumpulan ekskul yang diikuti
+  const students = useMemo(() => {
+    const map = new Map<string, StudentRow>();
+    for (const m of allMembers) {
+      if (viewMode !== 'all' && m.status !== 'aktif') continue;
+      let row = map.get(m.student_id);
+      if (!row) {
+        row = { id: m.student_id, name: m.full_name, nis: m.nis, className: m.class_name ?? NO_CLASS, typeIds: new Set() };
+        map.set(m.student_id, row);
+      }
+      row.typeIds.add(m.extracurricular_type_id);
+    }
+    return Array.from(map.values()).sort(
+      (a, b) => a.className.localeCompare(b.className, 'id', { numeric: true }) || a.name.localeCompare(b.name, 'id'),
+    );
+  }, [allMembers, viewMode]);
+
+  const classOptions = useMemo(
+    () => Array.from(new Set(students.map((s) => s.className))).sort((a, b) => a.localeCompare(b, 'id', { numeric: true })),
+    [students],
+  );
+
+  const rows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return students.filter((s) => {
+      if (classFilter !== 'all' && s.className !== classFilter) return false;
+      if (viewMode === 'multi' && s.typeIds.size < 2) return false;
+      if (!term) return true;
+      return [s.name, s.nis, s.className].some((v) => v.toLowerCase().includes(term));
+    });
+  }, [students, search, classFilter, viewMode]);
+
+  const totalPerType = useMemo(
+    () => new Map(types.map((t) => [t.id, rows.filter((s) => s.typeIds.has(t.id)).length])),
+    [rows, types],
+  );
+
+  const multiCount = rows.filter((s) => s.typeIds.size > 1).length;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardContent className="grid gap-3 pt-6 md:grid-cols-4">
+          <div className="space-y-1.5 md:col-span-2">
+            <Label>Cari siswa</Label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input className="pl-9" placeholder="Nama, NIS, atau kelas..." value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Kelas</Label>
+            <Select value={classFilter} onValueChange={setClassFilter}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Semua kelas</SelectItem>
+                {classOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Tampilkan</Label>
+            <Select value={viewMode} onValueChange={(v) => setViewMode(v as 'aktif' | 'all' | 'multi')}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="aktif">Anggota aktif</SelectItem>
+                <SelectItem value="all">Semua status</SelectItem>
+                <SelectItem value="multi">Ikut lebih dari 1 ekskul</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      <p className="text-sm text-muted-foreground">
+        {rows.length} siswa mengikuti ekskul · {multiCount} siswa mengikuti lebih dari satu
+      </p>
+
+      <Card>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="space-y-2 p-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+          ) : rows.length === 0 ? (
+            <p className="py-10 text-center text-muted-foreground">Tidak ada data pemetaan.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-10">No</TableHead>
+                    <TableHead className="min-w-[180px]">Nama</TableHead>
+                    <TableHead>Kelas</TableHead>
+                    {types.map((t) => (
+                      <TableHead key={t.id} className="whitespace-nowrap text-center">{t.name}</TableHead>
+                    ))}
+                    <TableHead className="text-center">Jumlah</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((s, i) => (
+                    <TableRow key={s.id}>
+                      <TableCell>{i + 1}</TableCell>
+                      <TableCell className="font-medium">
+                        {s.name}
+                        <p className="text-xs font-normal text-muted-foreground">{s.nis}</p>
+                      </TableCell>
+                      <TableCell>{s.className}</TableCell>
+                      {types.map((t) => (
+                        <TableCell key={t.id} className="text-center">
+                          {s.typeIds.has(t.id) ? <Check className="mx-auto h-4 w-4 text-primary" aria-label="Ikut" /> : null}
+                        </TableCell>
+                      ))}
+                      <TableCell className="text-center">
+                        <Badge variant={s.typeIds.size > 1 ? 'default' : 'secondary'}>{s.typeIds.size}</Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+                <TableFooter>
+                  <TableRow>
+                    <TableCell colSpan={3} className="font-semibold">Total siswa per ekskul</TableCell>
+                    {types.map((t) => (
+                      <TableCell key={t.id} className="text-center font-semibold">{totalPerType.get(t.id) ?? 0}</TableCell>
+                    ))}
+                    <TableCell />
+                  </TableRow>
+                </TableFooter>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// =============================================================================
+// Halaman utama
+// =============================================================================
 export default function EkskulMembers() {
   const { userRole } = useAuth();
   const queryClient = useQueryClient();
@@ -241,92 +410,105 @@ export default function EkskulMembers() {
             </CardContent>
           </Card>
         ) : (
-          <>
-            <Card>
-              <CardContent className="grid gap-3 pt-6 md:grid-cols-4">
-                <div className="space-y-1.5">
-                  <Label>Ekstrakurikuler</Label>
-                  <Select value={activeType} onValueChange={setSelectedType}>
-                    <SelectTrigger><SelectValue placeholder="Pilih ekskul" /></SelectTrigger>
-                    <SelectContent>
-                      {!canEdit && <SelectItem value="all">Semua ekskul</SelectItem>}
-                      {types.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Status</Label>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Semua status</SelectItem>
-                      <SelectItem value="aktif">Aktif</SelectItem>
-                      <SelectItem value="nonaktif">Nonaktif</SelectItem>
-                      <SelectItem value="keluar">Keluar</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5 md:col-span-2">
-                  <Label>Cari siswa</Label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input className="pl-9" placeholder="Nama, NIS, atau kelas..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <Tabs defaultValue="list" className="space-y-4">
+            <TabsList>
+              <TabsTrigger value="list">Daftar Anggota</TabsTrigger>
+              <TabsTrigger value="map">Pemetaan Siswa</TabsTrigger>
+            </TabsList>
+
+            {/* ----------------------------- Tab daftar anggota ----------------------------- */}
+            <TabsContent value="list" className="space-y-6">
+              <Card>
+                <CardContent className="grid gap-3 pt-6 md:grid-cols-4">
+                  <div className="space-y-1.5">
+                    <Label>Ekstrakurikuler</Label>
+                    <Select value={activeType} onValueChange={setSelectedType}>
+                      <SelectTrigger><SelectValue placeholder="Pilih ekskul" /></SelectTrigger>
+                      <SelectContent>
+                        {!canEdit && <SelectItem value="all">Semua ekskul</SelectItem>}
+                        {types.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+                  <div className="space-y-1.5">
+                    <Label>Status</Label>
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Semua status</SelectItem>
+                        <SelectItem value="aktif">Aktif</SelectItem>
+                        <SelectItem value="nonaktif">Nonaktif</SelectItem>
+                        <SelectItem value="keluar">Keluar</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5 md:col-span-2">
+                    <Label>Cari siswa</Label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input className="pl-9" placeholder="Nama, NIS, atau kelas..." value={search} onChange={(e) => setSearch(e.target.value)} />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
-            <p className="text-sm text-muted-foreground">
-              {members.length} terdaftar · {activeCount} aktif
-            </p>
+              <p className="text-sm text-muted-foreground">
+                {members.length} terdaftar · {activeCount} aktif
+              </p>
 
-            <Card>
-              <CardContent className="p-0">
-                {isLoading ? (
-                  <div className="space-y-2 p-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
-                ) : visibleMembers.length === 0 ? (
-                  <p className="py-10 text-center text-muted-foreground">Belum ada anggota.</p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Nama</TableHead>
-                          <TableHead>NIS</TableHead>
-                          <TableHead>Kelas</TableHead>
-                          {activeType === 'all' && <TableHead>Ekskul</TableHead>}
-                          <TableHead>Bergabung</TableHead>
-                          <TableHead>Status</TableHead>
-                          {canEdit && <TableHead className="text-right">Aksi</TableHead>}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {visibleMembers.map((m) => (
-                          <TableRow key={m.id}>
-                            <TableCell className="font-medium">
-                              {m.full_name}
-                              {m.notes && <p className="text-xs font-normal text-muted-foreground">{m.notes}</p>}
-                            </TableCell>
-                            <TableCell>{m.nis}</TableCell>
-                            <TableCell>{m.class_name ?? '-'}</TableCell>
-                            {activeType === 'all' && <TableCell>{typeName.get(m.extracurricular_type_id) ?? '-'}</TableCell>}
-                            <TableCell>{format(new Date(`${m.joined_at}T00:00:00`), 'dd/MM/yyyy')}</TableCell>
-                            <TableCell><Badge variant={statusVariant(m.status)}>{STATUS_LABEL[m.status]}</Badge></TableCell>
-                            {canEdit && (
-                              <TableCell className="text-right">
-                                <Button size="icon" variant="ghost" onClick={() => openEdit(m)} aria-label="Ubah"><Pencil className="h-4 w-4" /></Button>
-                                <Button size="icon" variant="ghost" className="text-destructive" onClick={() => setRemoveTarget(m)} aria-label="Hapus"><Trash2 className="h-4 w-4" /></Button>
-                              </TableCell>
-                            )}
+              <Card>
+                <CardContent className="p-0">
+                  {isLoading ? (
+                    <div className="space-y-2 p-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+                  ) : visibleMembers.length === 0 ? (
+                    <p className="py-10 text-center text-muted-foreground">Belum ada anggota.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Nama</TableHead>
+                            <TableHead>NIS</TableHead>
+                            <TableHead>Kelas</TableHead>
+                            {activeType === 'all' && <TableHead>Ekskul</TableHead>}
+                            <TableHead>Bergabung</TableHead>
+                            <TableHead>Status</TableHead>
+                            {canEdit && <TableHead className="text-right">Aksi</TableHead>}
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </>
+                        </TableHeader>
+                        <TableBody>
+                          {visibleMembers.map((m) => (
+                            <TableRow key={m.id}>
+                              <TableCell className="font-medium">
+                                {m.full_name}
+                                {m.notes && <p className="text-xs font-normal text-muted-foreground">{m.notes}</p>}
+                              </TableCell>
+                              <TableCell>{m.nis}</TableCell>
+                              <TableCell>{m.class_name ?? '-'}</TableCell>
+                              {activeType === 'all' && <TableCell>{typeName.get(m.extracurricular_type_id) ?? '-'}</TableCell>}
+                              <TableCell>{format(new Date(`${m.joined_at}T00:00:00`), 'dd/MM/yyyy')}</TableCell>
+                              <TableCell><Badge variant={statusVariant(m.status)}>{STATUS_LABEL[m.status]}</Badge></TableCell>
+                              {canEdit && (
+                                <TableCell className="text-right">
+                                  <Button size="icon" variant="ghost" onClick={() => openEdit(m)} aria-label="Ubah"><Pencil className="h-4 w-4" /></Button>
+                                  <Button size="icon" variant="ghost" className="text-destructive" onClick={() => setRemoveTarget(m)} aria-label="Hapus"><Trash2 className="h-4 w-4" /></Button>
+                                </TableCell>
+                              )}
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* ----------------------------- Tab pemetaan siswa ----------------------------- */}
+            <TabsContent value="map">
+              <EkskulMappingTab types={types} />
+            </TabsContent>
+          </Tabs>
         )}
       </div>
 
@@ -370,7 +552,7 @@ export default function EkskulMembers() {
                     <Checkbox checked={picked.has(s.id)} onCheckedChange={() => togglePick(s.id)} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{s.full_name}</p>
-                      <p className="text-xs text-muted-foreground">{s.nis} · {s.class_name ?? 'Tanpa kelas'}</p>
+                      <p className="text-xs text-muted-foreground">{s.nis} · {s.class_name ?? NO_CLASS}</p>
                     </div>
                   </label>
                 ))}
@@ -400,7 +582,7 @@ export default function EkskulMembers() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Ubah Anggota</DialogTitle>
-            <DialogDescription>{editing?.full_name} · {editing?.class_name ?? 'Tanpa kelas'}</DialogDescription>
+            <DialogDescription>{editing?.full_name} · {editing?.class_name ?? NO_CLASS}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
