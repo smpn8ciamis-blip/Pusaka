@@ -865,16 +865,8 @@ export default function OfficialTravel() {
 
       let yPos = 15;
       if (settings) {
-        yPos = await addLetterheadToPDF(doc, {
-          school_name: settings.school_name,
-          district_name: settings.district_name,
-          school_address: settings.school_address,
-          school_phone: settings.school_phone,
-          logo_url: settings.logo_url,
-          right_logo_url: settings.right_logo_url,
-          show_address: settings.show_address,
-          show_phone: settings.show_phone,
-        });
+        // Teruskan seluruh pengaturan (ukuran/posisi logo, font, watermark, dll.)
+        yPos = await addLetterheadToPDF(doc, settings as any);
       }
 
       yPos += 5;
