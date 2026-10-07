@@ -1,11 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import {
   Bar, BarChart, Cell, LabelList, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { Check, Loader2, Pencil, Plus, Printer, Search, Trash2, UserPlus, Users } from 'lucide-react';
+import {
+  Check, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, Pencil, Plus, Printer, Search, Trash2,
+  UserPlus, Users,
+} from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -49,6 +52,16 @@ interface DirectoryStudent {
   class_name: string | null;
 }
 
+// Baris mentah dari tabel students (join ke classes)
+interface StudentDbRow {
+  id: string;
+  full_name: string;
+  nis: string;
+  nisn: string | null;
+  gender: string | null;
+  classes: { name: string } | { name: string }[] | null;
+}
+
 const STATUS_LABEL: Record<Member['status'], string> = {
   aktif: 'Aktif',
   nonaktif: 'Nonaktif',
@@ -60,6 +73,7 @@ const statusVariant = (s: Member['status']) =>
 
 const PICKER_LIMIT = 100;
 const NO_CLASS = 'Tanpa kelas';
+const DB_PAGE = 1000; // ukuran halaman saat mengambil data dari database
 
 const COLOR_JOINED = '#16a34a';
 const COLOR_NOT_JOINED = '#f59e0b';
@@ -67,6 +81,86 @@ const BAR_COLORS = ['#2563eb', '#16a34a', '#f59e0b', '#9333ea', '#dc2626', '#089
 
 const pct = (part: number, total: number) => (total === 0 ? 0 : (part / total) * 100);
 const fmtPct = (n: number) => `${n.toFixed(1).replace('.', ',')}%`;
+
+// =============================================================================
+// Pagination (client-side)
+// =============================================================================
+const PAGE_SIZES = [10, 25, 50, 100];
+
+interface PaginationState {
+  page: number;
+  setPage: (p: number) => void;
+  pageSize: number;
+  setPageSize: (n: number) => void;
+  totalPages: number;
+  start: number;
+  total: number;
+}
+
+function usePagination<T>(items: T[], resetKey: string, initialSize = 25) {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(initialSize);
+
+  // Kembali ke halaman 1 saat filter/ukuran halaman berubah
+  useEffect(() => { setPage(1); }, [resetKey, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  const current = Math.min(page, totalPages);
+  const start = (current - 1) * pageSize;
+  const pageItems = useMemo(() => items.slice(start, start + pageSize), [items, start, pageSize]);
+
+  const state: PaginationState = { page: current, setPage, pageSize, setPageSize, totalPages, start, total: items.length };
+  return { ...state, pageItems };
+}
+
+function PaginationBar({ pg }: { pg: PaginationState }) {
+  if (pg.total === 0) return null;
+  const from = pg.start + 1;
+  const to = Math.min(pg.start + pg.pageSize, pg.total);
+  const windowStart = Math.max(1, Math.min(pg.page - 2, pg.totalPages - 4));
+  const pages = Array.from({ length: Math.min(5, pg.totalPages) }, (_, i) => windowStart + i);
+
+  return (
+    <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-center gap-3 text-sm text-muted-foreground">
+        <span>Menampilkan {from}–{to} dari {pg.total}</span>
+        <Select value={String(pg.pageSize)} onValueChange={(v) => pg.setPageSize(Number(v))}>
+          <SelectTrigger className="h-8 w-[110px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {PAGE_SIZES.map((n) => <SelectItem key={n} value={String(n)}>{n} / halaman</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex items-center gap-1">
+        <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => pg.setPage(1)} disabled={pg.page === 1} aria-label="Halaman pertama">
+          <ChevronsLeft className="h-4 w-4" />
+        </Button>
+        <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => pg.setPage(pg.page - 1)} disabled={pg.page === 1} aria-label="Sebelumnya">
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        {pages.map((p) => (
+          <Button
+            key={p}
+            size="icon"
+            variant={p === pg.page ? 'default' : 'outline'}
+            className="h-8 w-8"
+            onClick={() => pg.setPage(p)}
+            aria-label={`Halaman ${p}`}
+            aria-current={p === pg.page ? 'page' : undefined}
+          >
+            {p}
+          </Button>
+        ))}
+        <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => pg.setPage(pg.page + 1)} disabled={pg.page === pg.totalPages} aria-label="Berikutnya">
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+        <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => pg.setPage(pg.totalPages)} disabled={pg.page === pg.totalPages} aria-label="Halaman terakhir">
+          <ChevronsRight className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 // =============================================================================
 // Tab "Pemetaan Siswa": seluruh siswa aktif x ekskul + grafik persentase
@@ -86,15 +180,30 @@ function EkskulMappingTab({ types }: { types: { id: string; name: string }[] }) 
   const [classFilter, setClassFilter] = useState('all');
   const [mode, setMode] = useState<MapMode>('all');
 
-  // Seluruh siswa (direktori). Dipanggil lewat salah satu ekskul yang dapat diakses
-  // pengguna agar lolos pengecekan izin RPC; hasilnya diasumsikan seluruh siswa aktif.
-  const { data: directory = [], isLoading: dirLoading } = useQuery({
-    queryKey: ['ekskul-student-directory', 'mapping-all', types[0]?.id],
+  // SEMUA siswa aktif langsung dari tabel students (status = 'aktif').
+  // Diambil bertahap (1000 baris/halaman) agar aman bila siswa > 1000.
+  const { data: activeStudents = [], isLoading: dirLoading } = useQuery({
+    queryKey: ['ekskul-active-students'],
     enabled: types.length > 0,
     queryFn: async (): Promise<DirectoryStudent[]> => {
-      const { data, error } = await ekskulDb.rpc('get_ekskul_student_directory', { _type_id: types[0].id });
-      if (error) throw error;
-      return (data ?? []) as DirectoryStudent[];
+      const out: DirectoryStudent[] = [];
+      for (let from = 0; ; from += DB_PAGE) {
+        const { data, error } = await ekskulDb
+          .from('students')
+          .select('id, full_name, nis, nisn, gender, classes(name)')
+          .eq('status', 'aktif')
+          .order('full_name')
+          .order('id')
+          .range(from, from + DB_PAGE - 1);
+        if (error) throw error;
+        const rows = (data ?? []) as unknown as StudentDbRow[];
+        for (const r of rows) {
+          const cls = Array.isArray(r.classes) ? r.classes[0] : r.classes;
+          out.push({ id: r.id, full_name: r.full_name, nis: r.nis, nisn: r.nisn, gender: r.gender, class_name: cls?.name ?? null });
+        }
+        if (rows.length < DB_PAGE) break;
+      }
+      return out;
     },
   });
 
@@ -115,30 +224,24 @@ function EkskulMappingTab({ types }: { types: { id: string; name: string }[] }) 
   // Semua siswa aktif, termasuk yang belum punya ekskul
   const students = useMemo(() => {
     const map = new Map<string, StudentRow>();
-    for (const s of directory) {
+    for (const s of activeStudents) {
       map.set(s.id, { id: s.id, name: s.full_name, nis: s.nis, className: s.class_name ?? NO_CLASS, typeIds: new Set() });
     }
     for (const m of allMembers) {
       if (m.status !== 'aktif') continue;
-      let row = map.get(m.student_id);
-      if (!row) {
-        // cadangan bila siswa belum ada di direktori
-        row = { id: m.student_id, name: m.full_name, nis: m.nis, className: m.class_name ?? NO_CLASS, typeIds: new Set() };
-        map.set(m.student_id, row);
-      }
-      row.typeIds.add(m.extracurricular_type_id);
+      map.get(m.student_id)?.typeIds.add(m.extracurricular_type_id); // abaikan siswa non-aktif
     }
     return Array.from(map.values()).sort(
       (a, b) => a.className.localeCompare(b.className, 'id', { numeric: true }) || a.name.localeCompare(b.name, 'id'),
     );
-  }, [directory, allMembers]);
+  }, [activeStudents, allMembers]);
 
   const classOptions = useMemo(
     () => Array.from(new Set(students.map((s) => s.className))).sort((a, b) => a.localeCompare(b, 'id', { numeric: true })),
     [students],
   );
 
-  // Cakupan data (mengikuti filter kelas) -> dipakai kartu ringkasan & grafik
+  // Cakupan data (mengikuti filter kelas) -> kartu ringkasan & grafik
   const scoped = useMemo(
     () => students.filter((s) => classFilter === 'all' || s.className === classFilter),
     [students, classFilter],
@@ -178,6 +281,9 @@ function EkskulMappingTab({ types }: { types: { id: string; name: string }[] }) 
     });
   }, [scoped, search, mode]);
 
+  const pg = usePagination(rows, `${classFilter}|${mode}|${search}`);
+
+  // Total di footer dihitung dari SELURUH hasil filter (bukan hanya halaman ini)
   const totalPerType = useMemo(
     () => new Map(types.map((t) => [t.id, rows.filter((s) => s.typeIds.has(t.id)).length])),
     [rows, types],
@@ -300,8 +406,6 @@ function EkskulMappingTab({ types }: { types: { id: string; name: string }[] }) 
         </CardContent>
       </Card>
 
-      <p className="text-sm text-muted-foreground">Menampilkan {rows.length} dari {total} siswa</p>
-
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
@@ -309,54 +413,57 @@ function EkskulMappingTab({ types }: { types: { id: string; name: string }[] }) 
           ) : rows.length === 0 ? (
             <p className="py-10 text-center text-muted-foreground">Tidak ada data pemetaan.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-10">No</TableHead>
-                    <TableHead className="min-w-[180px]">Nama</TableHead>
-                    <TableHead>Kelas</TableHead>
-                    {types.map((t) => (
-                      <TableHead key={t.id} className="whitespace-nowrap text-center">{t.name}</TableHead>
-                    ))}
-                    <TableHead className="text-center">Jumlah</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.map((s, i) => (
-                    <TableRow key={s.id}>
-                      <TableCell>{i + 1}</TableCell>
-                      <TableCell className="font-medium">
-                        {s.name}
-                        <p className="text-xs font-normal text-muted-foreground">{s.nis}</p>
-                      </TableCell>
-                      <TableCell>{s.className}</TableCell>
+            <>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12">No</TableHead>
+                      <TableHead className="min-w-[180px]">Nama</TableHead>
+                      <TableHead>Kelas</TableHead>
                       {types.map((t) => (
-                        <TableCell key={t.id} className="text-center">
-                          {s.typeIds.has(t.id) ? <Check className="mx-auto h-4 w-4 text-primary" aria-label="Ikut" /> : null}
-                        </TableCell>
+                        <TableHead key={t.id} className="whitespace-nowrap text-center">{t.name}</TableHead>
                       ))}
-                      <TableCell className="text-center">
-                        {s.typeIds.size === 0 ? (
-                          <Badge variant="outline" className="border-amber-500 text-amber-600">Belum ikut</Badge>
-                        ) : (
-                          <Badge variant={s.typeIds.size > 1 ? 'default' : 'secondary'}>{s.typeIds.size}</Badge>
-                        )}
-                      </TableCell>
+                      <TableHead className="text-center">Jumlah</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-                <TableFooter>
-                  <TableRow>
-                    <TableCell colSpan={3} className="font-semibold">Total siswa per ekskul</TableCell>
-                    {types.map((t) => (
-                      <TableCell key={t.id} className="text-center font-semibold">{totalPerType.get(t.id) ?? 0}</TableCell>
+                  </TableHeader>
+                  <TableBody>
+                    {pg.pageItems.map((s, i) => (
+                      <TableRow key={s.id}>
+                        <TableCell>{pg.start + i + 1}</TableCell>
+                        <TableCell className="font-medium">
+                          {s.name}
+                          <p className="text-xs font-normal text-muted-foreground">{s.nis}</p>
+                        </TableCell>
+                        <TableCell>{s.className}</TableCell>
+                        {types.map((t) => (
+                          <TableCell key={t.id} className="text-center">
+                            {s.typeIds.has(t.id) ? <Check className="mx-auto h-4 w-4 text-primary" aria-label="Ikut" /> : null}
+                          </TableCell>
+                        ))}
+                        <TableCell className="text-center">
+                          {s.typeIds.size === 0 ? (
+                            <Badge variant="outline" className="border-amber-500 text-amber-600">Belum ikut</Badge>
+                          ) : (
+                            <Badge variant={s.typeIds.size > 1 ? 'default' : 'secondary'}>{s.typeIds.size}</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
                     ))}
-                    <TableCell />
-                  </TableRow>
-                </TableFooter>
-              </Table>
-            </div>
+                  </TableBody>
+                  <TableFooter>
+                    <TableRow>
+                      <TableCell colSpan={3} className="font-semibold">Total siswa per ekskul (seluruh hasil filter)</TableCell>
+                      {types.map((t) => (
+                        <TableCell key={t.id} className="text-center font-semibold">{totalPerType.get(t.id) ?? 0}</TableCell>
+                      ))}
+                      <TableCell />
+                    </TableRow>
+                  </TableFooter>
+                </Table>
+              </div>
+              <PaginationBar pg={pg} />
+            </>
           )}
         </CardContent>
       </Card>
@@ -418,6 +525,8 @@ export default function EkskulMembers() {
       return [m.full_name, m.nis, m.class_name].some((v) => v?.toLowerCase().includes(term));
     });
   }, [members, search, statusFilter]);
+
+  const memberPg = usePagination(visibleMembers, `${activeType}|${statusFilter}|${search}`);
 
   const activeCount = members.filter((m) => m.status === 'aktif').length;
 
@@ -605,42 +714,47 @@ export default function EkskulMembers() {
                   ) : visibleMembers.length === 0 ? (
                     <p className="py-10 text-center text-muted-foreground">Belum ada anggota.</p>
                   ) : (
-                    <div className="overflow-x-auto">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Nama</TableHead>
-                            <TableHead>NIS</TableHead>
-                            <TableHead>Kelas</TableHead>
-                            {activeType === 'all' && <TableHead>Ekskul</TableHead>}
-                            <TableHead>Bergabung</TableHead>
-                            <TableHead>Status</TableHead>
-                            {canEdit && <TableHead className="text-right">Aksi</TableHead>}
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {visibleMembers.map((m) => (
-                            <TableRow key={m.id}>
-                              <TableCell className="font-medium">
-                                {m.full_name}
-                                {m.notes && <p className="text-xs font-normal text-muted-foreground">{m.notes}</p>}
-                              </TableCell>
-                              <TableCell>{m.nis}</TableCell>
-                              <TableCell>{m.class_name ?? '-'}</TableCell>
-                              {activeType === 'all' && <TableCell>{typeName.get(m.extracurricular_type_id) ?? '-'}</TableCell>}
-                              <TableCell>{format(new Date(`${m.joined_at}T00:00:00`), 'dd/MM/yyyy')}</TableCell>
-                              <TableCell><Badge variant={statusVariant(m.status)}>{STATUS_LABEL[m.status]}</Badge></TableCell>
-                              {canEdit && (
-                                <TableCell className="text-right">
-                                  <Button size="icon" variant="ghost" onClick={() => openEdit(m)} aria-label="Ubah"><Pencil className="h-4 w-4" /></Button>
-                                  <Button size="icon" variant="ghost" className="text-destructive" onClick={() => setRemoveTarget(m)} aria-label="Hapus"><Trash2 className="h-4 w-4" /></Button>
-                                </TableCell>
-                              )}
+                    <>
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-12">No</TableHead>
+                              <TableHead>Nama</TableHead>
+                              <TableHead>NIS</TableHead>
+                              <TableHead>Kelas</TableHead>
+                              {activeType === 'all' && <TableHead>Ekskul</TableHead>}
+                              <TableHead>Bergabung</TableHead>
+                              <TableHead>Status</TableHead>
+                              {canEdit && <TableHead className="text-right">Aksi</TableHead>}
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
+                          </TableHeader>
+                          <TableBody>
+                            {memberPg.pageItems.map((m, i) => (
+                              <TableRow key={m.id}>
+                                <TableCell>{memberPg.start + i + 1}</TableCell>
+                                <TableCell className="font-medium">
+                                  {m.full_name}
+                                  {m.notes && <p className="text-xs font-normal text-muted-foreground">{m.notes}</p>}
+                                </TableCell>
+                                <TableCell>{m.nis}</TableCell>
+                                <TableCell>{m.class_name ?? '-'}</TableCell>
+                                {activeType === 'all' && <TableCell>{typeName.get(m.extracurricular_type_id) ?? '-'}</TableCell>}
+                                <TableCell>{format(new Date(`${m.joined_at}T00:00:00`), 'dd/MM/yyyy')}</TableCell>
+                                <TableCell><Badge variant={statusVariant(m.status)}>{STATUS_LABEL[m.status]}</Badge></TableCell>
+                                {canEdit && (
+                                  <TableCell className="text-right">
+                                    <Button size="icon" variant="ghost" onClick={() => openEdit(m)} aria-label="Ubah"><Pencil className="h-4 w-4" /></Button>
+                                    <Button size="icon" variant="ghost" className="text-destructive" onClick={() => setRemoveTarget(m)} aria-label="Hapus"><Trash2 className="h-4 w-4" /></Button>
+                                  </TableCell>
+                                )}
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                      <PaginationBar pg={memberPg} />
+                    </>
                   )}
                 </CardContent>
               </Card>
