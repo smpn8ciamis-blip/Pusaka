@@ -75,6 +75,7 @@ const statusVariant = (s: Member['status']) =>
 const PICKER_LIMIT = 100;
 const NO_CLASS = 'Tanpa kelas';
 const DB_PAGE = 1000; // ukuran halaman saat mengambil data dari database
+const INSERT_CHUNK = 500; // jumlah baris per sekali insert saat menambah banyak anggota
 
 const COLOR_JOINED = '#16a34a';
 const COLOR_NOT_JOINED = '#f59e0b';
@@ -559,6 +560,14 @@ export default function EkskulMembers() {
     });
   }, [directory, memberStudentIds, pickSearch, pickClass]);
 
+  // Status "pilih semua": mengacu pada SELURUH kandidat hasil filter (bukan hanya 100 yang tampil)
+  const pickedInCandidates = useMemo(
+    () => candidates.reduce((n, s) => (picked.has(s.id) ? n + 1 : n), 0),
+    [candidates, picked],
+  );
+  const allCandidatesPicked = candidates.length > 0 && pickedInCandidates === candidates.length;
+  const someCandidatesPicked = pickedInCandidates > 0 && !allCandidatesPicked;
+
   // ---------------------------------------------------------------------------
   // Mutations
   // ---------------------------------------------------------------------------
@@ -569,8 +578,11 @@ export default function EkskulMembers() {
         student_id: studentId,
         joined_at: format(new Date(), 'yyyy-MM-dd'),
       }));
-      const { error } = await ekskulDb.from('extracurricular_members').insert(rows);
-      if (error) throw error;
+      // Insert bertahap agar aman saat memilih banyak siswa sekaligus
+      for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
+        const { error } = await ekskulDb.from('extracurricular_members').insert(rows.slice(i, i + INSERT_CHUNK));
+        if (error) throw error;
+      }
       return rows.length;
     },
     onSuccess: (count) => {
@@ -624,6 +636,18 @@ export default function EkskulMembers() {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+
+  // Pilih / batalkan pilihan seluruh siswa hasil filter saat ini
+  const toggleAllCandidates = () =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (allCandidatesPicked) {
+        for (const s of candidates) next.delete(s.id);
+      } else {
+        for (const s of candidates) next.add(s.id);
+      }
       return next;
     });
 
@@ -817,6 +841,24 @@ export default function EkskulMembers() {
               <p className="p-6 text-center text-sm text-muted-foreground">Tidak ada siswa yang cocok.</p>
             ) : (
               <>
+                {/* Pilih semua (mengikuti pencarian & filter kelas yang sedang aktif) */}
+                <label className="sticky top-0 z-10 flex cursor-pointer items-center gap-3 border-b bg-muted px-3 py-2 hover:bg-muted/80">
+                  <Checkbox
+                    checked={allCandidatesPicked ? true : someCandidatesPicked ? 'indeterminate' : false}
+                    onCheckedChange={toggleAllCandidates}
+                    aria-label="Pilih semua siswa"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold">
+                      {allCandidatesPicked ? 'Batalkan pilihan semua' : 'Pilih semua'} ({candidates.length} siswa)
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {pickSearch.trim() || pickClass !== 'all'
+                        ? 'Hanya siswa sesuai pencarian/filter kelas saat ini.'
+                        : 'Seluruh siswa yang belum terdaftar di ekskul ini.'}
+                    </p>
+                  </div>
+                </label>
                 {candidates.slice(0, PICKER_LIMIT).map((s) => (
                   <label key={s.id} className="flex cursor-pointer items-center gap-3 border-b px-3 py-2 last:border-0 hover:bg-muted/50">
                     <Checkbox checked={picked.has(s.id)} onCheckedChange={() => togglePick(s.id)} />
@@ -829,13 +871,26 @@ export default function EkskulMembers() {
                 {candidates.length > PICKER_LIMIT && (
                   <p className="p-2 text-center text-xs text-muted-foreground">
                     Menampilkan {PICKER_LIMIT} dari {candidates.length} siswa. Persempit dengan pencarian atau filter kelas.
+                    {' '}“Pilih semua” tetap mencakup seluruh {candidates.length} siswa.
                   </p>
                 )}
               </>
             )}
           </div>
           <DialogFooter className="items-center sm:justify-between">
-            <span className="text-sm text-muted-foreground">{picked.size} siswa dipilih</span>
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+              <span>{picked.size} siswa dipilih</span>
+              {picked.size > 0 && (
+                <button
+                  type="button"
+                  className="text-primary underline-offset-2 hover:underline"
+                  onClick={() => setPicked(new Set())}
+                  disabled={addMembers.isPending}
+                >
+                  Kosongkan
+                </button>
+              )}
+            </div>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setAddOpen(false)} disabled={addMembers.isPending}>Batal</Button>
               <Button onClick={() => addMembers.mutate()} disabled={picked.size === 0 || addMembers.isPending}>
