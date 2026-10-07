@@ -291,6 +291,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     {
       label: 'Ekstrakurikuler',
       items: [
+        { icon: ClipboardList, label: 'Jenis Ekskul', href: '/ekskul-types' },
         { icon: BookOpen, label: 'Jurnal Ekskul', href: '/ekskul-journal' },
         { icon: Users, label: 'Anggota Ekskul', href: '/ekskul-members' },
         { icon: UserCheck, label: 'Pembina Ekskul', href: '/ekskul-coaches' },
@@ -483,6 +484,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: CreditCard, label: 'Absensi RFID', href: '/rfid-attendance' },
     { icon: AlertTriangle, label: 'Poin Pelanggaran', href: '/violations' },
     { icon: Award, label: 'Penghargaan & Prestasi', href: '/achievements' },
+    { icon: ClipboardList, label: 'Jenis Ekskul', href: '/ekskul-types' },
     { icon: BookOpen, label: 'Jurnal Ekskul', href: '/ekskul-journal' },
     { icon: Users, label: 'Anggota Ekskul', href: '/ekskul-members' },
     { icon: Settings, label: 'Pengaturan', href: '/settings' },
