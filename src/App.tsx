@@ -2,7 +2,7 @@ import React, { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MutationCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -132,15 +132,25 @@ const AdminMessages = lazy(() => import("./pages/web-admin/AdminMessages"));
 const AdminSettings = lazy(() => import("./pages/web-admin/AdminSettings"));
 const AdminExtracurricular = lazy(() => import("./pages/web-admin/AdminExtracurricular"));
 
-// Optimized QueryClient with better caching strategy
-const queryClient = new QueryClient({
+// QueryClient: data dianggap basi cepat & otomatis disegarkan setelah ada perubahan.
+// Sebelumnya staleTime 5 menit + refetchOnMount:false membuat data hasil tambah/ubah/hapus
+// tidak muncul sampai halaman di-refresh.
+const queryClient: QueryClient = new QueryClient({
+  // Setiap mutasi yang sukses menandai SEMUA query basi; query yang sedang tampil
+  // langsung di-refetch, query lain di-refetch saat dibuka lagi. Ini menutup kasus
+  // queryKey invalidasi yang tidak cocok dengan queryKey daftar data.
+  mutationCache: new MutationCache({
+    onSuccess: () => {
+      queryClient.invalidateQueries();
+    },
+  }),
   defaultOptions: {
     queries: {
-      staleTime: 5 * 60 * 1000,
+      staleTime: 30 * 1000,
       gcTime: 15 * 60 * 1000,
-      refetchOnWindowFocus: false,
-      refetchOnMount: false,
-      refetchOnReconnect: false,
+      refetchOnWindowFocus: true,
+      refetchOnMount: true,
+      refetchOnReconnect: true,
       retry: 1,
       networkMode: 'offlineFirst',
     },
