@@ -8,6 +8,7 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { VersionNotification } from "./components/VersionNotification";
 import { WaterProgressLoader } from "./components/ui/water-progress-loader";
+import { EkskulAccessRoute } from "./components/EkskulAccessRoute";
 
 // Lazy load all page components for better performance
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -315,9 +316,9 @@ const App = () => (
               <Route path="/guru-piket-dashboard" element={<ProtectedRoute allowedRoles={['guru_piket', 'admin']}><GuruPiketDashboard /></ProtectedRoute>} />
               <Route path="/dispensasi-siswa" element={<ProtectedRoute allowedRoles={['guru_piket', 'admin', 'kesiswaan']}><DispensasiSiswa /></ProtectedRoute>} />
               <Route path="/buku-tamu" element={<ProtectedRoute allowedRoles={['guru_piket', 'admin']}><BukuTamu /></ProtectedRoute>} />
-              <Route path="/ekskul-journal" element={<ProtectedRoute allowedRoles={['pembina_ekskul', 'admin', 'kesiswaan']}><EkskulJournal /></ProtectedRoute>} />
-              <Route path="/ekskul-members" element={<ProtectedRoute allowedRoles={['pembina_ekskul', 'admin', 'kesiswaan']}><EkskulMembers /></ProtectedRoute>} />
-              <Route path="/ekskul-coaches" element={<ProtectedRoute requireRole="admin"><EkskulCoaches /></ProtectedRoute>} />
+              <Route path="/ekskul-journal" element={<EkskulAccessRoute><EkskulJournal /></EkskulAccessRoute>} />
+              <Route path="/ekskul-members" element={<EkskulAccessRoute><EkskulMembers /></EkskulAccessRoute>} />
+              <Route path="/ekskul-coaches" element={<ProtectedRoute allowedRoles={['kesiswaan', 'admin']}><EkskulCoaches /></ProtectedRoute>} />
               <Route path="/ekskul-types" element={<ProtectedRoute allowedRoles={['kesiswaan', 'admin']}><EkskulTypes /></ProtectedRoute>} />
               <Route path="/cbt-management" element={<ProtectedRoute allowedRoles={['teacher', 'admin']}><CbtExamManagement /></ProtectedRoute>} />
               <Route path="/cbt-student" element={<ProtectedRoute allowedRoles={['siswa']}><CbtStudentExam /></ProtectedRoute>} />

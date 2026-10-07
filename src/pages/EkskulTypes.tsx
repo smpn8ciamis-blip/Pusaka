@@ -68,9 +68,9 @@ export default function EkskulTypes() {
   });
 
   const { data: coaches = [] } = useQuery({
-    queryKey: ['ekskul-coaches'],
+    queryKey: ['ekskul-assignments'],
     queryFn: async (): Promise<CoachRow[]> => {
-      const { data, error } = await ekskulDb.rpc('get_ekskul_coaches');
+      const { data, error } = await ekskulDb.rpc('get_ekskul_assignments');
       if (error) throw error;
       return (data ?? []) as CoachRow[];
     },
