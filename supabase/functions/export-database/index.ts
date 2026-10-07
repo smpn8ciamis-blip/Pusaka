@@ -13,42 +13,74 @@ async function verifyAdminAuth(req: Request, supabaseClient: any): Promise<{ use
   const { data: { user }, error } = await supabaseClient.auth.getUser(jwt);
   if (error || !user) return { user: null, error: 'Invalid or expired token' };
 
-  const { data: roleData, error: roleError } = await supabaseClient
+  // Jangan pakai .single(): user bisa punya lebih dari satu baris role
+  const { data: roleRows, error: roleError } = await supabaseClient
     .from('user_roles')
     .select('role')
-    .eq('user_id', user.id)
-    .single();
+    .eq('user_id', user.id);
 
-  if (roleError || roleData?.role !== 'super_admin') return { user: null, error: 'Super admin access required' };
+  if (roleError || !(roleRows ?? []).some((r: any) => r.role === 'super_admin')) {
+    return { user: null, error: 'Super admin access required' };
+  }
   return { user, error: null };
 }
 
-function escapeValue(value: any): string {
+function escapeString(v: string): string {
+  return `'${v.replace(/\u0000/g, '').replace(/'/g, "''")}'`;
+}
+
+function escapeArrayElement(v: any): string {
+  if (v === null || v === undefined) return 'NULL';
+  if (Array.isArray(v)) return `{${v.map(escapeArrayElement).join(',')}}`;
+  if (typeof v === 'object') v = JSON.stringify(v);
+  return '"' + String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+}
+
+// udtName: tipe kolom dari information_schema (awalan "_" = array Postgres)
+function escapeValue(value: any, udtName?: string): string {
   if (value === null || value === undefined) return 'NULL';
   if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
-  if (typeof value === 'number') return value.toString();
-  if (typeof value === 'object') return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
-  return `'${value.toString().replace(/'/g, "''")}'`;
+  if (typeof value === 'number') return Number.isFinite(value) ? value.toString() : 'NULL';
+  if (Array.isArray(value) && udtName && udtName.startsWith('_')) {
+    return escapeString(`{${value.map(escapeArrayElement).join(',')}}`);
+  }
+  if (typeof value === 'object') return escapeString(JSON.stringify(value));
+  return escapeString(value.toString());
 }
 
-function generateUpsertStatement(tableName: string, record: any): string {
+function generateUpsertStatement(
+  tableName: string,
+  record: any,
+  udt: Record<string, string>,
+  pkCols: string[],
+): string {
   const columns = Object.keys(record);
-  const values = columns.map(col => escapeValue(record[col]));
-  const updateCols = columns.filter(c => c !== 'id').map(c => `"${c}" = EXCLUDED."${c}"`).join(', ');
+  const values = columns.map(col => escapeValue(record[col], udt[col]));
   const quotedCols = columns.map(c => `"${c}"`).join(', ');
-  if (updateCols) {
-    return `INSERT INTO public."${tableName}" (${quotedCols}) VALUES (${values.join(', ')}) ON CONFLICT (id) DO UPDATE SET ${updateCols};`;
+  const base = `INSERT INTO public."${tableName}" (${quotedCols}) VALUES (${values.join(', ')})`;
+  // Hanya pakai target konflik bila semua kolom PK ikut diekspor
+  if (pkCols.length > 0 && pkCols.every(c => columns.includes(c))) {
+    const updateCols = columns.filter(c => !pkCols.includes(c)).map(c => `"${c}" = EXCLUDED."${c}"`).join(', ');
+    const target = pkCols.map(c => `"${c}"`).join(', ');
+    return updateCols
+      ? `${base} ON CONFLICT (${target}) DO UPDATE SET ${updateCols};`
+      : `${base} ON CONFLICT (${target}) DO NOTHING;`;
   }
-  return `INSERT INTO public."${tableName}" (${quotedCols}) VALUES (${values.join(', ')}) ON CONFLICT (id) DO NOTHING;`;
+  return `${base} ON CONFLICT DO NOTHING;`;
 }
 
+// Query read-only via RPC. Dulu error ditelan (return []) sehingga backup bisa
+// tampak sukses padahal isinya bolong. Sekarang di-retry lalu dilempar.
 async function runSQL(supabaseClient: any, sql: string): Promise<any[]> {
-  const { data, error } = await supabaseClient.rpc('exec_sql_readonly', { sql_query: sql });
-  if (error) {
-    console.error('SQL error:', error.message, 'Query:', sql.substring(0, 100));
-    return [];
+  let lastErr = '';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data, error } = await supabaseClient.rpc('exec_sql_readonly', { sql_query: sql });
+    if (!error) return data || [];
+    lastErr = error.message;
+    console.error('SQL error (attempt ' + (attempt + 1) + '):', error.message, 'Query:', sql.substring(0, 120));
+    await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
   }
-  return data || [];
+  throw new Error(`Query gagal: ${lastErr} -- ${sql.substring(0, 120)}`);
 }
 
 Deno.serve(async (req) => {
@@ -72,7 +104,11 @@ Deno.serve(async (req) => {
 
     console.log('Full database export initiated by admin:', user.email);
 
-    const parts: string[] = [];
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+    const enc = new TextEncoder();
+    const parts = { push: (x: string) => controller.enqueue(enc.encode(x)) };
+    try {
 
     parts.push(`-- =============================================
 -- FULL DATABASE MIGRATION EXPORT (IDEMPOTENT)
@@ -108,14 +144,23 @@ SET search_path TO public, auth, storage, extensions;
 
     // ========== 2. ENUMS ==========
     parts.push(`-- =============================================\n-- SECTION 2: CUSTOM TYPES / ENUMS\n-- =============================================\n\n`);
-    const enums = await runSQL(supabaseClient, `SELECT t.typname, string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) as labels FROM pg_type t JOIN pg_enum e ON t.oid = e.enumtypid JOIN pg_namespace n ON t.typnamespace = n.oid WHERE n.nspname = 'public' GROUP BY t.typname`);
-    for (const en of enums) {
-      const labels = en.labels.split(',').map((l: string) => `'${l}'`).join(', ');
-      parts.push(`DO $$ BEGIN CREATE TYPE public.${en.typname} AS ENUM (${labels}); EXCEPTION WHEN duplicate_object THEN NULL; END $$;\n`);
-      // Also add any missing enum values
-      for (const label of en.labels.split(',')) {
-        parts.push(`DO $$ BEGIN ALTER TYPE public.${en.typname} ADD VALUE IF NOT EXISTS '${label}'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;\n`);
+    const enumRows = await runSQL(supabaseClient, `SELECT t.typname, e.enumlabel FROM pg_type t JOIN pg_enum e ON t.oid = e.enumtypid JOIN pg_namespace n ON t.typnamespace = n.oid WHERE n.nspname = 'public' ORDER BY t.typname, e.enumsortorder`);
+    const enumMap = new Map<string, string[]>();
+    for (const r of enumRows) enumMap.set(r.typname, [...(enumMap.get(r.typname) ?? []), r.enumlabel]);
+    for (const [typname, labelList] of enumMap) {
+      const labels = labelList.map((l: string) => escapeString(l)).join(', ');
+      parts.push(`DO $$ BEGIN CREATE TYPE public."${typname}" AS ENUM (${labels}); EXCEPTION WHEN duplicate_object THEN NULL; END $$;\n`);
+      // ADD VALUE tidak boleh dalam blok transaksi yang sama dengan pemakaiannya; IF NOT EXISTS aman diulang
+      for (const label of labelList) {
+        parts.push(`DO $$ BEGIN ALTER TYPE public."${typname}" ADD VALUE IF NOT EXISTS ${escapeString(label)}; EXCEPTION WHEN OTHERS THEN NULL; END $$;\n`);
       }
+    }
+    parts.push('\n');
+
+    // Sequence dibuat SEBELUM tabel (DEFAULT nextval(...) butuh sequence sudah ada)
+    const sequences = await runSQL(supabaseClient, `SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'public'`);
+    for (const seq of sequences) {
+      parts.push(`CREATE SEQUENCE IF NOT EXISTS public."${seq.sequence_name}";\n`);
     }
     parts.push('\n');
 
@@ -271,15 +316,6 @@ SET search_path TO public, auth, storage, extensions;
       parts.push(`CREATE TRIGGER "${tr.trigger_name}" ${tr.action_timing} ${tr.event_manipulation} ON public."${tr.event_object_table}" FOR EACH ${tr.action_orientation} ${tr.action_statement};\n\n`);
     }
 
-    // ========== 9. SEQUENCES (reset sequences after data import) ==========
-    parts.push(`-- =============================================\n-- SECTION 9: SEQUENCES\n-- =============================================\n\n`);
-
-    const sequences = await runSQL(supabaseClient, `SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'public'`);
-    for (const seq of sequences) {
-      parts.push(`DO $$ BEGIN CREATE SEQUENCE IF NOT EXISTS public."${seq.sequence_name}"; EXCEPTION WHEN duplicate_table THEN NULL; END $$;\n`);
-    }
-    parts.push('\n');
-
     // ========== 10. REALTIME ==========
     parts.push(`-- =============================================\n-- SECTION 10: REALTIME PUBLICATIONS\n-- =============================================\n\n`);
 
@@ -295,43 +331,42 @@ SET search_path TO public, auth, storage, extensions;
 
     console.log(`Exporting data for ${tableNames.length} tables...`);
 
-    async function fetchAllTableData(client: any, table: string, excludeCols: Set<string>): Promise<any[]> {
-      const colsResult = await runSQL(client, `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${table}' AND (is_generated IS NULL OR is_generated = 'NEVER') ORDER BY ordinal_position`);
-      const cols = colsResult.map((c: any) => c.column_name).filter((c: string) => !excludeCols.has(c));
-      if (cols.length === 0) return [];
-
-      const selectCols = cols.map((c: string) => `"${c}"`).join(', ');
-      let allRows: any[] = [];
-      let offset = 0;
-      const batchSize = 2000;
-
-      while (true) {
-        const rows = await runSQL(client, `SELECT ${selectCols} FROM public."${table}" ORDER BY 1 LIMIT ${batchSize} OFFSET ${offset}`);
-        if (!rows || rows.length === 0) break;
-        allRows = allRows.concat(rows);
-        if (rows.length < batchSize) break;
-        offset += batchSize;
-      }
-      return allRows;
-    }
-
+    // Data ditulis langsung ke stream per halaman (tidak ditampung di memori)
+    const BATCH = 1000;
     for (let i = 0; i < tableNames.length; i++) {
       const tableName = tableNames[i];
-      const generatedCols = await runSQL(supabaseClient, `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${tableName}' AND is_generated = 'ALWAYS'`);
-      const generatedColNames = new Set(generatedCols.map((c: any) => c.column_name));
-      const allData = await fetchAllTableData(supabaseClient, tableName, generatedColNames);
 
-      if (allData.length === 0) {
+      const colMeta = await runSQL(supabaseClient, `SELECT column_name, udt_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${tableName}' AND (is_generated IS NULL OR is_generated = 'NEVER') ORDER BY ordinal_position`);
+      if (colMeta.length === 0) continue;
+      const udt: Record<string, string> = {};
+      colMeta.forEach((c: any) => { udt[c.column_name] = c.udt_name; });
+      const selectCols = colMeta.map((c: any) => `"${c.column_name}"`).join(', ');
+
+      const pkRows = await runSQL(supabaseClient, `SELECT a.attname AS column_name FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = 'public."${tableName}"'::regclass AND i.indisprimary ORDER BY array_position(i.indkey::int2[], a.attnum)`);
+      const pkCols: string[] = pkRows.map((r: any) => r.column_name);
+      // Urutan stabil agar paging OFFSET tidak melewatkan / menggandakan baris
+      const orderBy = pkCols.length > 0 ? pkCols.map(c => `"${c}"`).join(', ') : 'ctid';
+
+      let offset = 0;
+      let total = 0;
+      while (true) {
+        const rows = await runSQL(supabaseClient, `SELECT ${selectCols} FROM public."${tableName}" ORDER BY ${orderBy} LIMIT ${BATCH} OFFSET ${offset}`);
+        if (!rows || rows.length === 0) break;
+        if (total === 0) parts.push(`-- Data: ${tableName}\n`);
+        for (const record of rows) {
+          parts.push(generateUpsertStatement(tableName, record, udt, pkCols) + '\n');
+        }
+        total += rows.length;
+        if (rows.length < BATCH) break;
+        offset += BATCH;
+      }
+
+      if (total === 0) {
         parts.push(`-- No data in ${tableName}\n\n`);
-        continue;
+      } else {
+        parts.push(`-- (${total} records)\n\n`);
+        console.log(`  ${tableName}: ${total} records exported`);
       }
-
-      parts.push(`-- Data: ${tableName} (${allData.length} records)\n`);
-      for (const record of allData) {
-        parts.push(generateUpsertStatement(tableName, record) + '\n');
-      }
-      parts.push('\n');
-      console.log(`  ${tableName}: ${allData.length} records exported`);
     }
 
     // ========== 12. AUTH USERS ==========
@@ -339,57 +374,46 @@ SET search_path TO public, auth, storage, extensions;
     parts.push(`-- Password di-export sebagai bcrypt hash. User tetap bisa login dengan password lama.\n\n`);
 
     try {
-      let allUsers: any[] = [];
-      let page = 1;
-      const perPage = 1000;
+      // Baca langsung dari auth.users supaya hash password ikut ter-export.
+      // (auth.admin.listUsers() TIDAK mengembalikan encrypted_password.)
+      const userCols = `id, aud, role, email, encrypted_password, email_confirmed_at, phone, phone_confirmed_at, raw_app_meta_data, raw_user_meta_data, is_super_admin, created_at, updated_at`;
+      const USER_BATCH = 500;
+      let userOffset = 0;
+      let userTotal = 0;
+      const allUserRows: any[] = [];
 
       while (true) {
-        const { data: { users }, error: usersError } = await supabaseClient.auth.admin.listUsers({ page, perPage });
-        if (usersError) {
-          parts.push(`-- Error fetching auth users: ${usersError.message}\n\n`);
-          break;
-        }
-        if (!users || users.length === 0) break;
-        allUsers = allUsers.concat(users);
-        if (users.length < perPage) break;
-        page++;
+        const rows = await runSQL(supabaseClient, `SELECT ${userCols} FROM auth.users ORDER BY id LIMIT ${USER_BATCH} OFFSET ${userOffset}`);
+        if (!rows || rows.length === 0) break;
+        allUserRows.push(...rows);
+        if (rows.length < USER_BATCH) break;
+        userOffset += USER_BATCH;
       }
 
-      if (allUsers.length > 0) {
-        parts.push(`-- Auth Users (${allUsers.length} accounts)\n`);
-        for (const u of allUsers) {
-          const id = escapeValue(u.id);
-          const email = escapeValue(u.email || null);
-          const phone = escapeValue(u.phone || null);
-          const encryptedPassword = escapeValue(u.encrypted_password || null);
-          const emailConfirmedAt = escapeValue(u.email_confirmed_at || null);
-          const phoneConfirmedAt = escapeValue(u.phone_confirmed_at || null);
-          const rawAppMeta = escapeValue(u.app_metadata || null);
-          const rawUserMeta = escapeValue(u.user_metadata || null);
-          const role = escapeValue(u.role || 'authenticated');
-          const createdAt = escapeValue(u.created_at || null);
-          const updatedAt = escapeValue(u.updated_at || null);
-
-          // Use DO UPDATE so re-running updates existing users
-          parts.push(`INSERT INTO auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, phone, phone_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, confirmation_token, email_change, email_change_token_new, recovery_token) VALUES ('00000000-0000-0000-0000-000000000000', ${id}, 'authenticated', ${role}, ${email}, ${encryptedPassword}, ${emailConfirmedAt}, ${phone}, ${phoneConfirmedAt}, ${rawAppMeta}, ${rawUserMeta}, ${createdAt}, ${updatedAt}, '', '', '', '') ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, encrypted_password = EXCLUDED.encrypted_password, email_confirmed_at = EXCLUDED.email_confirmed_at, raw_app_meta_data = EXCLUDED.raw_app_meta_data, raw_user_meta_data = EXCLUDED.raw_user_meta_data, updated_at = EXCLUDED.updated_at;\n`);
+      if (allUserRows.length > 0) {
+        parts.push(`-- Auth Users (${allUserRows.length} accounts)\n`);
+        for (const u of allUserRows) {
+          userTotal++;
+          parts.push(`INSERT INTO auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, phone, phone_confirmed_at, raw_app_meta_data, raw_user_meta_data, is_super_admin, created_at, updated_at, confirmation_token, email_change, email_change_token_new, recovery_token) VALUES ('00000000-0000-0000-0000-000000000000', ${escapeValue(u.id)}, ${escapeValue(u.aud || 'authenticated')}, ${escapeValue(u.role || 'authenticated')}, ${escapeValue(u.email)}, ${escapeValue(u.encrypted_password)}, ${escapeValue(u.email_confirmed_at)}, ${escapeValue(u.phone)}, ${escapeValue(u.phone_confirmed_at)}, ${escapeValue(u.raw_app_meta_data)}, ${escapeValue(u.raw_user_meta_data)}, ${escapeValue(u.is_super_admin)}, ${escapeValue(u.created_at)}, ${escapeValue(u.updated_at)}, '', '', '', '') ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, encrypted_password = COALESCE(EXCLUDED.encrypted_password, auth.users.encrypted_password), email_confirmed_at = EXCLUDED.email_confirmed_at, raw_app_meta_data = EXCLUDED.raw_app_meta_data, raw_user_meta_data = EXCLUDED.raw_user_meta_data, updated_at = EXCLUDED.updated_at;\n`);
         }
 
         parts.push(`\n-- Auth Identities\n`);
-        for (const u of allUsers) {
-          if (u.email) {
-            const id = escapeValue(u.id);
-            const email = escapeValue(u.email);
-            const createdAt = escapeValue(u.created_at || null);
-            const updatedAt = escapeValue(u.updated_at || null);
-            const identityData = escapeValue({ sub: u.id, email: u.email });
-            parts.push(`INSERT INTO auth.identities (id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at) VALUES (gen_random_uuid(), ${id}, ${identityData}, 'email', ${id}, ${createdAt}, ${createdAt}, ${updatedAt}) ON CONFLICT (provider, provider_id) DO NOTHING;\n`);
+        let identOffset = 0;
+        while (true) {
+          const idents = await runSQL(supabaseClient, `SELECT id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at FROM auth.identities ORDER BY id LIMIT ${USER_BATCH} OFFSET ${identOffset}`);
+          if (!idents || idents.length === 0) break;
+          for (const it of idents) {
+            parts.push(`INSERT INTO auth.identities (id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at) VALUES (${escapeValue(it.id)}, ${escapeValue(it.user_id)}, ${escapeValue(it.identity_data)}, ${escapeValue(it.provider)}, ${escapeValue(it.provider_id)}, ${escapeValue(it.last_sign_in_at)}, ${escapeValue(it.created_at)}, ${escapeValue(it.updated_at)}) ON CONFLICT (provider, provider_id) DO NOTHING;\n`);
           }
+          if (idents.length < USER_BATCH) break;
+          identOffset += USER_BATCH;
         }
       } else {
         parts.push(`-- No auth users found\n`);
       }
     } catch (authExportError) {
-      parts.push(`-- Error exporting auth users: ${(authExportError as Error).message}\n`);
+      // Auth gagal tidak boleh membuat backup tabel ikut gagal, tapi harus terlihat jelas
+      parts.push(`-- WARNING: gagal mengekspor auth users: ${String((authExportError as Error).message).replace(/\n/g, ' ')}\n`);
     }
     parts.push('\n');
 
@@ -432,15 +456,24 @@ SET search_path TO public, auth, storage, extensions;
     parts.push(`\n-- Re-enable foreign key checks\nSET session_replication_role = 'origin';\n\n`);
     parts.push(`-- =============================================\n-- MIGRATION COMPLETE\n-- File ini bisa dijalankan berulang kali tanpa error.\n-- =============================================\n`);
 
-    const sqlContent = parts.join('');
-    console.log(`Export completed. Total SQL size: ${sqlContent.length} characters`);
+    console.log('Export completed');
+    } catch (genError) {
+      // Tandai file TIDAK lengkap supaya tidak dikira backup valid
+      console.error('Export generation failed:', genError);
+      try { parts.push(`\n-- EXPORT ERROR: ${String((genError as Error).message).replace(/\n/g, ' ')}\n`); } catch (_) { /* ignore */ }
+    } finally {
+      try { controller.close(); } catch (_) { /* ignore */ }
+    }
+      },
+    });
 
     const filename = `full-migration-${new Date().toISOString().split('T')[0]}.sql`;
-    return new Response(sqlContent, {
+    return new Response(stream, {
       headers: {
         ...corsHeaders,
-        'Content-Type': 'application/sql',
+        'Content-Type': 'application/sql; charset=utf-8',
         'Content-Disposition': `attachment; filename="${filename}"`,
+        'Cache-Control': 'no-store',
       },
     });
 
