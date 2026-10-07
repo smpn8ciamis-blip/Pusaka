@@ -8,12 +8,15 @@ import { Download, Upload, Database, AlertCircle, CheckCircle, Code2, ExternalLi
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { DatabaseSync } from "./DatabaseSync";
+import { chunkStatements, splitSqlStatements } from "@/lib/sqlSplit";
 
 export const DatabaseBackup = () => {
   const [isExporting, setIsExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const [importResults, setImportResults] = useState<any>(null);
+  const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
+  const [sqlSummary, setSqlSummary] = useState<{ executed: number; failed: number; skipped: number; errors: any[] } | null>(null);
 
   const handleExport = async () => {
     setIsExporting(true);
@@ -40,6 +43,17 @@ export const DatabaseBackup = () => {
       }
 
       const blob = await response.blob();
+
+      // Backup dialirkan (streaming). Bila koneksi terputus / timeout di tengah jalan,
+      // file terpotong dan TIDAK berakhir dengan penanda selesai -> jangan dianggap sukses.
+      const tail = await blob.slice(Math.max(0, blob.size - 4000)).text();
+      if (tail.includes('-- EXPORT ERROR')) {
+        throw new Error('Server mengalami error saat membuat backup: ' + (tail.split('-- EXPORT ERROR:')[1] || '').split('\n')[0].trim());
+      }
+      if (!tail.includes('MIGRATION COMPLETE')) {
+        throw new Error('File backup tidak lengkap (koneksi terputus atau waktu habis). Coba lagi.');
+      }
+
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -65,34 +79,69 @@ export const DatabaseBackup = () => {
 
     setIsImporting(true);
     setImportResults(null);
+    setSqlSummary(null);
+    setImportProgress(null);
 
     try {
       const text = await file.text();
-      let body: any;
-      let headers: Record<string, string> = {};
 
-      if (file.name.endsWith('.sql')) {
-        body = text;
-        headers['content-type'] = 'application/sql';
+      if (file.name.toLowerCase().endsWith('.sql')) {
+        if (!text.includes('MIGRATION COMPLETE')) {
+          const proceed = window.confirm(
+            'File SQL ini tampaknya tidak lengkap (tidak ada penanda "MIGRATION COMPLETE"). Tetap lanjutkan restore?',
+          );
+          if (!proceed) return;
+        }
+
+        // SQL dipecah di browser, lalu dikirim bertahap supaya tidak melewati batas ukuran/waktu Edge Function
+        const statements = splitSqlStatements(text);
+        if (statements.length === 0) throw new Error('File SQL kosong');
+        const chunks = chunkStatements(statements);
+
+        const summary = { executed: 0, failed: 0, skipped: 0, errors: [] as any[] };
+        setImportProgress({ done: 0, total: chunks.length });
+
+        for (let i = 0; i < chunks.length; i++) {
+          let data: any = null;
+          let lastError: any = null;
+          // retry untuk gangguan jaringan / cold start
+          for (let attempt = 0; attempt < 3; attempt++) {
+            const res = await supabase.functions.invoke('import-database', { body: { statements: chunks[i] } });
+            if (!res.error) { data = res.data; lastError = null; break; }
+            lastError = res.error;
+            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+          }
+          if (lastError) throw new Error(`Bagian ${i + 1}/${chunks.length} gagal dikirim: ${lastError.message ?? lastError}`);
+          if (data?.error) throw new Error(data.error);
+
+          summary.executed += data.executed ?? 0;
+          summary.failed += data.failed ?? 0;
+          summary.skipped += data.skipped ?? 0;
+          if (summary.errors.length < 100) summary.errors.push(...(data.errors ?? []));
+          setImportProgress({ done: i + 1, total: chunks.length });
+        }
+
+        setSqlSummary(summary);
+        if (summary.failed === 0 && summary.skipped === 0) {
+          toast.success(`Restore selesai: ${summary.executed} pernyataan berhasil dijalankan`);
+        } else {
+          toast.warning(`Restore selesai dengan ${summary.failed} error. Lihat detail di bawah.`);
+        }
       } else {
-        body = JSON.parse(text);
-        headers['content-type'] = 'application/json';
+        const { data, error } = await supabase.functions.invoke('import-database', { body: JSON.parse(text) });
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+        setImportResults(data);
+        const failed = Object.values(data.results ?? {}).filter((r: any) => r.success === false).length;
+        if (failed > 0) toast.warning(`Import selesai, ${failed} tabel gagal`);
+        else toast.success("Database berhasil diimpor");
       }
-
-      const { data, error } = await supabase.functions.invoke('import-database', {
-        body,
-        headers
-      });
-
-      if (error) throw error;
-
-      setImportResults(data);
-      toast.success("Database berhasil diimpor");
     } catch (error) {
       console.error('Import error:', error);
-      toast.error("Gagal mengimpor database");
+      toast.error("Gagal mengimpor database: " + ((error as Error).message || 'kesalahan tidak diketahui'));
     } finally {
       setIsImporting(false);
+      setImportProgress(null);
       event.target.value = '';
     }
   };
@@ -204,6 +253,45 @@ export const DatabaseBackup = () => {
                 </CardContent>
               </Card>
             </div>
+
+            {importProgress && (
+              <div className="space-y-2">
+                <Progress value={(importProgress.done / importProgress.total) * 100} />
+                <p className="text-xs text-muted-foreground text-center">
+                  Memulihkan data... bagian {importProgress.done}/{importProgress.total}. Jangan tutup halaman ini.
+                </p>
+              </div>
+            )}
+
+            {sqlSummary && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    {sqlSummary.failed === 0 ? (
+                      <CheckCircle className="h-5 w-5 text-green-500" />
+                    ) : (
+                      <AlertCircle className="h-5 w-5 text-amber-500" />
+                    )}
+                    Hasil Restore SQL
+                  </CardTitle>
+                  <CardDescription>
+                    {sqlSummary.executed} berhasil, {sqlSummary.failed} error, {sqlSummary.skipped} dilewati
+                  </CardDescription>
+                </CardHeader>
+                {sqlSummary.errors.length > 0 && (
+                  <CardContent>
+                    <div className="max-h-64 space-y-2 overflow-y-auto text-xs">
+                      {sqlSummary.errors.map((e, i) => (
+                        <div key={i} className="rounded border p-2">
+                          <p className="font-mono text-muted-foreground break-all">{e.statement}</p>
+                          <p className="text-red-600">{e.error}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                )}
+              </Card>
+            )}
 
             {importResults && (
               <Card>
