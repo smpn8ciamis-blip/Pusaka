@@ -25,7 +25,7 @@ import { compressImage } from '@/lib/imageCompress';
 import { EkskulPrintDialog } from '@/components/EkskulPrintDialog';
 import { supabase } from '@/integrations/supabase/client';
 import {
-  EKSKUL_PHOTO_BUCKET, canEditEkskul, ekskulDb, useAccessibleEkskulTypes,
+  EKSKUL_PHOTO_BUCKET, canEditEkskul, ekskulDb, useAccessibleEkskulTypes, useIsEkskulCoach,
 } from '@/hooks/useEkskul';
 
 interface Journal {
@@ -86,7 +86,8 @@ const trimTime = (t: string | null) => (t ? t.slice(0, 5) : '');
 export default function EkskulJournal() {
   const { user, userRole, schoolId } = useAuth();
   const queryClient = useQueryClient();
-  const canEdit = canEditEkskul(userRole);
+  const { isCoach } = useIsEkskulCoach();
+  const canEdit = canEditEkskul(userRole, isCoach);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: types = [], isLoading: typesLoading } = useAccessibleEkskulTypes();

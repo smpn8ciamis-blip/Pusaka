@@ -1,4 +1,5 @@
 import { useAuth } from '@/contexts/AuthContext';
+import { useIsEkskulCoach } from '@/hooks/useEkskul';
 import { SubscriptionBanner } from '@/components/SubscriptionBanner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -64,6 +65,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isHomeroomTeacher, setIsHomeroomTeacher] = useState(false);
+  const { isCoach: isEkskulCoach } = useIsEkskulCoach();
   const [menuSearch, setMenuSearch] = useState('');
   const [favorites, setFavorites] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
@@ -425,7 +427,13 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const homeroomRfidItem: MenuItem = { icon: CreditCard, label: 'Absensi RFID', href: '/rfid-attendance' };
   const homeroomFileManagementItem: MenuItem = { icon: FolderOpen, label: 'Manajemen Berkas Siswa', href: '/homeroom-upload-management' };
 
-  const teacherMenuItems: MenuItem[] = isHomeroomTeacher
+  // Guru yang ditugaskan kesiswaan sebagai pembina ekskul
+  const ekskulCoachMenuItems: MenuItem[] = [
+    { icon: BookOpen, label: 'Jurnal Ekskul', href: '/ekskul-journal' },
+    { icon: Users, label: 'Anggota Ekskul', href: '/ekskul-members' },
+  ];
+
+  const teacherMenuItemsBase: MenuItem[] = isHomeroomTeacher
     ? [
         ...baseTeacherMenuItems.slice(0, 4),
         homeroomMenuItem,
@@ -434,6 +442,11 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         ...baseTeacherMenuItems.slice(4),
       ]
     : baseTeacherMenuItems;
+
+  // Sisipkan sebelum "Pengaturan" (item terakhir)
+  const teacherMenuItems: MenuItem[] = isEkskulCoach
+    ? [...teacherMenuItemsBase.slice(0, -1), ...ekskulCoachMenuItems, ...teacherMenuItemsBase.slice(-1)]
+    : teacherMenuItemsBase;
 
   const bendaharaMenuItems: MenuItem[] = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/bendahara-dashboard' },
@@ -487,6 +500,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: ClipboardList, label: 'Jenis Ekskul', href: '/ekskul-types' },
     { icon: BookOpen, label: 'Jurnal Ekskul', href: '/ekskul-journal' },
     { icon: Users, label: 'Anggota Ekskul', href: '/ekskul-members' },
+    { icon: UserCheck, label: 'Pembina Ekskul', href: '/ekskul-coaches' },
     { icon: Settings, label: 'Pengaturan', href: '/settings' },
   ];
 

@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { Link } from 'react-router-dom';
-import { canManageEkskulMembers, ekskulDb, useAccessibleEkskulTypes } from '@/hooks/useEkskul';
+import { canManageEkskulMembers, ekskulDb, useAccessibleEkskulTypes, useIsEkskulCoach } from '@/hooks/useEkskul';
 import { EkskulPrintDialog } from '@/components/EkskulPrintDialog';
 
 interface Member {
@@ -480,8 +480,9 @@ function EkskulMappingTab({ types }: { types: { id: string; name: string }[] }) 
 export default function EkskulMembers() {
   const { userRole } = useAuth();
   const queryClient = useQueryClient();
-  const canEdit = canManageEkskulMembers(userRole);
-  const isPembina = userRole === 'pembina_ekskul';
+  const { isCoach } = useIsEkskulCoach();
+  const canEdit = canManageEkskulMembers(userRole, isCoach);
+  const isPembina = userRole === 'pembina_ekskul' || (userRole === 'teacher' && isCoach);
 
   const { data: types = [], isLoading: typesLoading } = useAccessibleEkskulTypes();
   const typeName = useMemo(() => new Map(types.map((t) => [t.id, t.name])), [types]);
@@ -687,7 +688,7 @@ export default function EkskulMembers() {
           <Card>
             <CardContent className="py-10 text-center text-muted-foreground">
               {isPembina ? (
-                'Akun Anda belum ditugaskan ke ekstrakurikuler mana pun. Hubungi admin sekolah untuk penugasan pembina.'
+                'Akun Anda belum ditugaskan ke ekstrakurikuler mana pun. Hubungi kesiswaan/admin sekolah untuk penugasan pembina.'
               ) : canEdit ? (
                 <>
                   Belum ada ekstrakurikuler aktif.{' '}
