@@ -27,7 +27,8 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/contexts/AuthContext';
-import { canEditEkskul, ekskulDb, useAccessibleEkskulTypes } from '@/hooks/useEkskul';
+import { Link } from 'react-router-dom';
+import { canManageEkskulMembers, ekskulDb, useAccessibleEkskulTypes } from '@/hooks/useEkskul';
 import { EkskulPrintDialog } from '@/components/EkskulPrintDialog';
 
 interface Member {
@@ -478,7 +479,8 @@ function EkskulMappingTab({ types }: { types: { id: string; name: string }[] }) 
 export default function EkskulMembers() {
   const { userRole } = useAuth();
   const queryClient = useQueryClient();
-  const canEdit = canEditEkskul(userRole);
+  const canEdit = canManageEkskulMembers(userRole);
+  const isPembina = userRole === 'pembina_ekskul';
 
   const { data: types = [], isLoading: typesLoading } = useAccessibleEkskulTypes();
   const typeName = useMemo(() => new Map(types.map((t) => [t.id, t.name])), [types]);
@@ -636,7 +638,11 @@ export default function EkskulMembers() {
               <Users className="h-6 w-6 text-primary" /> Anggota Ekstrakurikuler
             </h1>
             <p className="text-sm text-muted-foreground">
-              {canEdit ? 'Kelola daftar siswa yang mengikuti ekskul yang Anda bina.' : 'Daftar siswa anggota setiap ekstrakurikuler.'}
+              {isPembina
+                ? 'Kelola daftar siswa yang mengikuti ekskul yang Anda bina.'
+                : canEdit
+                  ? 'Kelola keanggotaan siswa di setiap ekstrakurikuler.'
+                  : 'Daftar siswa anggota setiap ekstrakurikuler.'}
             </p>
           </div>
           {!noAssignment && (
@@ -645,7 +651,7 @@ export default function EkskulMembers() {
                 <Printer className="mr-2 h-4 w-4" /> Daftar Hadir
               </Button>
               {canEdit && (
-                <Button onClick={() => { setPicked(new Set()); setPickSearch(''); setPickClass('all'); setAddOpen(true); }} disabled={!activeType || activeType === 'all'}>
+                <Button onClick={() => { setPicked(new Set()); setPickSearch(''); setPickClass('all'); setAddOpen(true); }} disabled={!activeType || activeType === 'all'} title={activeType === 'all' ? 'Pilih satu ekskul terlebih dahulu' : undefined}>
                   <UserPlus className="mr-2 h-4 w-4" /> Tambah Anggota
                 </Button>
               )}
@@ -656,9 +662,16 @@ export default function EkskulMembers() {
         {noAssignment ? (
           <Card>
             <CardContent className="py-10 text-center text-muted-foreground">
-              {canEdit
-                ? 'Akun Anda belum ditugaskan ke ekstrakurikuler mana pun. Hubungi admin sekolah untuk penugasan pembina.'
-                : 'Belum ada ekstrakurikuler aktif.'}
+              {isPembina ? (
+                'Akun Anda belum ditugaskan ke ekstrakurikuler mana pun. Hubungi admin sekolah untuk penugasan pembina.'
+              ) : canEdit ? (
+                <>
+                  Belum ada ekstrakurikuler aktif.{' '}
+                  <Link to="/ekskul-types" className="text-primary underline">Tambahkan jenis ekskul</Link> terlebih dahulu.
+                </>
+              ) : (
+                'Belum ada ekstrakurikuler aktif.'
+              )}
             </CardContent>
           </Card>
         ) : (
@@ -677,7 +690,7 @@ export default function EkskulMembers() {
                     <Select value={activeType} onValueChange={setSelectedType}>
                       <SelectTrigger><SelectValue placeholder="Pilih ekskul" /></SelectTrigger>
                       <SelectContent>
-                        {!canEdit && <SelectItem value="all">Semua ekskul</SelectItem>}
+                        {!isPembina && <SelectItem value="all">Semua ekskul</SelectItem>}
                         {types.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
                       </SelectContent>
                     </Select>

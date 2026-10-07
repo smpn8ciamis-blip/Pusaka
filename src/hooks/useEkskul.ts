@@ -49,5 +49,13 @@ export function useAccessibleEkskulTypes() {
   });
 }
 
-/** Hanya pembina yang mengedit dari UI; admin & kesiswaan hanya memantau. */
+/** Jurnal ekskul: hanya pembina yang mengisi; admin & kesiswaan memantau. */
 export const canEditEkskul = (role: string | null | undefined) => role === 'pembina_ekskul';
+
+/** Anggota ekskul: dikelola pembina (ekskul binaannya) dan kesiswaan (semua ekskul). */
+export const canManageEkskulMembers = (role: string | null | undefined) =>
+  role === 'pembina_ekskul' || role === 'kesiswaan';
+
+/** Jenis ekskul: dikelola kesiswaan dan admin. */
+export const canManageEkskulTypes = (role: string | null | undefined) =>
+  role === 'kesiswaan' || role === 'admin';
