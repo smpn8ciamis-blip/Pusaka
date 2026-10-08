@@ -1,6 +1,7 @@
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAcademicYear } from '@/contexts/AcademicYearContext';
+import { ScheduleCombobox } from '@/components/ScheduleCombobox';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -400,7 +401,7 @@ const drawClassChart = (doc: any, data: ClassRow[], startY: number): number => {
 
 const Attendance = () => {
   const { userRole, user } = useAuth();
-  const { selectedYear } = useAcademicYear();
+  const { selectedYear, selectedSemester } = useAcademicYear();
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
   const isFullAccessRole =
@@ -498,12 +499,20 @@ const Attendance = () => {
     enabled: !!selectedYear && (isFullAccessRole || !!user?.id),
   });
 
+  // Hanya jadwal pada tahun ajaran & semester yang sedang difilter.
+  // Jadwal lama tanpa isian semester tetap ikut agar tidak hilang.
   const { data: schedules } = useQuery({
-    queryKey: ['teacher-schedules', user?.id, userRole],
+    queryKey: ['teacher-schedules', user?.id, userRole, selectedYear, selectedSemester],
     queryFn: async () => {
+      if (!selectedYear) return [];
+      const semesterFilter = `semester.eq.${selectedSemester},semester.is.null`;
       if (isFullAccessRole) {
         const { data, error } = await supabase
-          .from('schedules').select(`*, classes(id, name), teachers!inner(id, user_id)`).order('day_of_week');
+          .from('schedules')
+          .select(`*, classes(id, name), teachers!inner(id, user_id)`)
+          .eq('academic_year', selectedYear)
+          .or(semesterFilter)
+          .order('day_of_week');
         if (error) throw error;
         return data;
       }
@@ -514,12 +523,22 @@ const Attendance = () => {
       const { data, error } = await supabase
         .from('schedules')
         .select(`*, classes(id, name), teachers!inner(id, user_id)`)
-        .eq('teacher_id', teacher.id).eq('academic_year', selectedYear).order('day_of_week');
+        .eq('teacher_id', teacher.id)
+        .eq('academic_year', selectedYear)
+        .or(semesterFilter)
+        .order('day_of_week');
       if (error) throw error;
       return data;
     },
-    enabled: !!user?.id && !!userRole,
+    enabled: !!user?.id && !!userRole && !!selectedYear,
   });
+
+  // Jadwal terpilih yang tidak lagi ada di daftar (ganti tahun/semester) dikosongkan
+  React.useEffect(() => {
+    if (selectedSchedule && schedules && !schedules.some((sc: any) => sc.id === selectedSchedule)) {
+      setSelectedSchedule('');
+    }
+  }, [schedules, selectedSchedule]);
 
   const { data: students } = useQuery({
     queryKey: ['schedule-students', selectedSchedule],
@@ -1624,21 +1643,7 @@ const Attendance = () => {
                           <div className="space-y-3">
                             <div className="space-y-1.5">
                               <Label className="text-sm font-semibold">Jadwal Pelajaran</Label>
-                              <Select value={selectedSchedule} onValueChange={setSelectedSchedule}>
-                                <SelectTrigger className="h-11 border-2 text-sm w-full">
-                                  <SelectValue placeholder="Pilih jadwal" />
-                                </SelectTrigger>
-                                <SelectContent className="max-h-[250px] w-[calc(100vw-32px)]" position="popper" side="bottom" align="start">
-                                  {schedules?.map((schedule: any) => (
-                                    <SelectItem key={schedule.id} value={schedule.id} className="py-2.5">
-                                      <div className="flex flex-col">
-                                        <span className="font-medium text-sm">{schedule.classes?.name} - {schedule.subject}</span>
-                                        <span className="text-xs text-muted-foreground">{schedule.start_time} - {schedule.end_time}</span>
-                                      </div>
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                              <ScheduleCombobox schedules={(schedules ?? []) as any} value={selectedSchedule} onChange={setSelectedSchedule} placeholder="Pilih jadwal pelajaran" />
                             </div>
                             <div className="space-y-1.5">
                               <Label className="text-sm font-semibold">Tanggal</Label>
@@ -1823,21 +1828,7 @@ const Attendance = () => {
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-2">
                               <Label className="text-sm font-semibold">Jadwal Pelajaran</Label>
-                              <Select value={selectedSchedule} onValueChange={setSelectedSchedule}>
-                                <SelectTrigger className="h-12 border-2">
-                                  <SelectValue placeholder="Pilih jadwal pelajaran" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {schedules?.map((schedule: any) => (
-                                    <SelectItem key={schedule.id} value={schedule.id}>
-                                      <div className="flex items-center gap-2">
-                                        <span className="font-medium">{schedule.classes?.name} - {schedule.subject}</span>
-                                        <span className="text-xs text-muted-foreground">{schedule.start_time} - {schedule.end_time}</span>
-                                      </div>
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                              <ScheduleCombobox schedules={(schedules ?? []) as any} value={selectedSchedule} onChange={setSelectedSchedule} placeholder="Pilih jadwal pelajaran" />
                             </div>
                             <div className="space-y-2">
                               <Label className="text-sm font-semibold">Tanggal</Label>
