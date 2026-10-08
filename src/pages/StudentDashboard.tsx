@@ -1073,7 +1073,7 @@ const StudentDashboardPage = () => {
       case 'announcements': return renderAnnouncementsTab();
       case 'dispensasi': return renderDispensasiTab();
       case 'elearning':
-        return <StudentElearningTab classId={classId} />;
+        return <StudentElearningTab classId={classId} studentId={studentId} />;
       case 'uploads':
         return <StudentUploadTab studentAccount={studentAccount} user={user} />;
       case 'settings': return renderSettingsTab();

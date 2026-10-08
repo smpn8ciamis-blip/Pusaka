@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Eye, EyeOff, FileText, GraduationCap, Image as ImageIcon, Loader2, Pencil, Plus, Search, Trash2, Upload } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { ElearningViewer } from '@/components/ElearningViewer';
+import { SubmissionsDialog } from '@/components/SubmissionsDialog';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,50 +22,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAcademicYear } from '@/contexts/AcademicYearContext';
-import { compressImage } from '@/lib/imageCompress';
-import { compressPdf, isPayloadTooLarge } from '@/lib/pdfCompress';
+import { isPayloadTooLarge } from '@/lib/pdfCompress';
+import { prepareFile } from '@/lib/elearningUpload';
 import {
-  ELEARNING_ACCEPT, ELEARNING_BUCKET, ELEARNING_MAX_BYTES, KIND_LABEL, detectElearningKind, elearningMime,
-  formatFileSize, safeFileName, type ElearningKind, type ElearningMaterial,
+  ELEARNING_ACCEPT, ELEARNING_BUCKET, ELEARNING_MAX_BYTES, KIND_LABEL, detectElearningKind,
+  formatFileSize, safeFileName, type ElearningMaterial,
 } from '@/lib/elearning';
-
-// Server/proxy sekolah menolak body besar (HTTP 413), jadi file dikecilkan dulu sebelum diunggah.
-const UPLOAD_TARGET_BYTES = 900 * 1024;
-
-interface PreparedFile { upload: File; kind: ElearningKind; mime: string; fileName: string; notes: string[] }
-
-async function prepareFile(file: File, onProgress: (m: string) => void): Promise<PreparedFile> {
-  const kind = detectElearningKind(file)!;
-  const notes: string[] = [];
-  let upload = file;
-  let fileName = file.name;
-
-  if (kind === 'image' && file.type !== 'image/gif' && file.size > 300 * 1024) {
-    onProgress('Mengompres gambar…');
-    for (const o of [
-      { maxWidth: 2000, maxHeight: 2000, quality: 0.82 },
-      { maxWidth: 1600, maxHeight: 1600, quality: 0.7 },
-      { maxWidth: 1280, maxHeight: 1280, quality: 0.6 },
-    ]) {
-      try { upload = await compressImage(file, o); } catch { break; }
-      if (upload.size <= UPLOAD_TARGET_BYTES) break;
-    }
-    if (upload !== file) fileName = file.name.replace(/\.[^.]+$/, '') + '.jpg';
-  } else if (kind === 'pdf' && file.size > UPLOAD_TARGET_BYTES) {
-    onProgress('Mengompres PDF…');
-    const res = await compressPdf(file, UPLOAD_TARGET_BYTES, onProgress);
-    if (res.compressed) {
-      upload = res.file;
-      notes.push(`PDF dikompres ${formatFileSize(file.size)} → ${formatFileSize(upload.size)} (teks menjadi gambar)`);
-    } else if (res.reason === 'too_many_pages') {
-      notes.push('PDF lebih dari 60 halaman, tidak dikompres');
-    }
-  }
-  return { upload, kind, mime: elearningMime(kind, upload), fileName, notes };
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const db = supabase as any;
 
 interface TeachingGroup {
   key: string;
@@ -86,6 +49,8 @@ export default function Elearning() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [published, setPublished] = useState(true);
+  const [acceptsSubs, setAcceptsSubs] = useState(true);
+  const [gradingFor, setGradingFor] = useState<ElearningMaterial | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [editing, setEditing] = useState<ElearningMaterial | null>(null);
   const [progress, setProgress] = useState('');
@@ -134,6 +99,22 @@ export default function Elearning() {
     },
   });
 
+  // Jumlah jawaban terkumpul per materi
+  const { data: counts = {} } = useQuery({
+    queryKey: ['submission-counts', teacher?.id, materials.length],
+    enabled: !!teacher?.id && materials.length > 0,
+    queryFn: async (): Promise<Record<string, number>> => {
+      const { data, error } = await db
+        .from('elearning_submissions')
+        .select('material_id')
+        .in('material_id', materials.map((m) => m.id));
+      if (error) throw error;
+      const out: Record<string, number> = {};
+      ((data ?? []) as Array<{ material_id: string }>).forEach((r) => { out[r.material_id] = (out[r.material_id] ?? 0) + 1; });
+      return out;
+    },
+  });
+
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
     return materials.filter((m) => {
@@ -148,6 +129,7 @@ export default function Elearning() {
     setTitle('');
     setDescription('');
     setPublished(true);
+    setAcceptsSubs(true);
     setFile(null);
     if (fileRef.current) fileRef.current.value = '';
     setFormOpen(true);
@@ -159,6 +141,7 @@ export default function Elearning() {
     setTitle(m.title);
     setDescription(m.description ?? '');
     setPublished(m.is_published);
+    setAcceptsSubs(m.accepts_submissions ?? true);
     setFile(null);
     if (fileRef.current) fileRef.current.value = '';
     setFormOpen(true);
@@ -205,6 +188,7 @@ export default function Elearning() {
         title: title.trim(),
         description: description.trim() || null,
         is_published: published,
+        accepts_submissions: acceptsSubs,
       };
 
       // Tanpa ganti file: cukup perbarui data
@@ -358,6 +342,11 @@ export default function Elearning() {
                     </span>
                     <div className="flex items-center gap-1">
                       <Button size="sm" variant="outline" onClick={() => setViewing(m)}>Buka</Button>
+                      {m.accepts_submissions && (
+                        <Button size="sm" variant="outline" onClick={() => setGradingFor(m)}>
+                          Jawaban ({counts[m.id] ?? 0})
+                        </Button>
+                      )}
                       <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(m)} aria-label="Ubah">
                         <Pencil className="h-4 w-4" />
                       </Button>
@@ -421,6 +410,13 @@ export default function Elearning() {
             </div>
             <label className="flex cursor-pointer items-center justify-between rounded-md border p-3 text-sm">
               <span>
+                Terima jawaban / rangkuman siswa
+                <span className="block text-xs text-muted-foreground">Siswa dapat mengunggah jawaban pada materi ini.</span>
+              </span>
+              <Switch checked={acceptsSubs} onCheckedChange={setAcceptsSubs} />
+            </label>
+            <label className="flex cursor-pointer items-center justify-between rounded-md border p-3 text-sm">
+              <span>
                 Tampilkan ke siswa
                 <span className="block text-xs text-muted-foreground">Matikan untuk menyimpan sebagai draf.</span>
               </span>
@@ -438,6 +434,7 @@ export default function Elearning() {
       </Dialog>
 
       <ElearningViewer material={viewing} onClose={() => setViewing(null)} />
+      <SubmissionsDialog material={gradingFor} onClose={() => setGradingFor(null)} />
 
       <AlertDialog open={!!deleting} onOpenChange={(o) => !o && !remove.isPending && setDeleting(null)}>
         <AlertDialogContent>
