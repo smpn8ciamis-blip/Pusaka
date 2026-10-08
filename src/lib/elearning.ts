@@ -58,7 +58,27 @@ export interface ElearningMaterial {
   mime_type: string | null;
   file_size: number | null;
   is_published: boolean;
+  accepts_submissions: boolean;
   created_at: string;
   classes?: { name: string } | null;
   teachers?: { profiles?: { full_name: string | null } | null } | null;
+}
+
+export const SUBMISSION_BUCKET = 'elearning-submissions';
+
+export interface ElearningSubmission {
+  id: string;
+  material_id: string;
+  student_id: string;
+  answer_text: string | null;
+  file_path: string | null;
+  file_name: string | null;
+  file_type: ElearningKind | null;
+  mime_type: string | null;
+  file_size: number | null;
+  score: number | null;
+  teacher_feedback: string | null;
+  graded_at: string | null;
+  submitted_at: string;
+  updated_at: string;
 }

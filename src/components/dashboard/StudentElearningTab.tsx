@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { FileText, GraduationCap, Image as ImageIcon, Search } from 'lucide-react';
+import { CheckCircle2, FileText, GraduationCap, Image as ImageIcon, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ElearningViewer } from '@/components/ElearningViewer';
+import { StudentSubmissionDialog } from '@/components/dashboard/StudentSubmissionDialog';
 import { supabase } from '@/integrations/supabase/client';
 import { KIND_LABEL, formatFileSize, type ElearningMaterial } from '@/lib/elearning';
 import { format } from 'date-fns';
@@ -14,10 +15,11 @@ import { id as localeId } from 'date-fns/locale';
 const db = supabase as any;
 
 /** Materi e-learning untuk kelas siswa (hanya yang ditampilkan guru; dijaga juga oleh RLS). */
-export default function StudentElearningTab({ classId }: { classId?: string | null }) {
+export default function StudentElearningTab({ classId, studentId }: { classId?: string | null; studentId?: string | null }) {
   const [search, setSearch] = useState('');
   const [subject, setSubject] = useState('all');
   const [viewing, setViewing] = useState<ElearningMaterial | null>(null);
+  const [submitting, setSubmitting] = useState<ElearningMaterial | null>(null);
 
   const { data: materials = [], isLoading } = useQuery({
     queryKey: ['student-elearning', classId],
@@ -33,6 +35,21 @@ export default function StudentElearningTab({ classId }: { classId?: string | nu
       return (data ?? []) as ElearningMaterial[];
     },
   });
+
+  // Status pengumpulan jawaban siswa ini
+  const { data: mine = [] } = useQuery({
+    queryKey: ['student-submissions', studentId],
+    enabled: !!studentId,
+    queryFn: async (): Promise<Array<{ material_id: string; graded_at: string | null; score: number | null }>> => {
+      const { data, error } = await db
+        .from('elearning_submissions')
+        .select('material_id, graded_at, score')
+        .eq('student_id', studentId);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+  const mineByMaterial = useMemo(() => new Map(mine.map((r) => [r.material_id, r])), [mine]);
 
   const subjects = useMemo(() => [...new Set(materials.map((m) => m.subject))].sort(), [materials]);
 
@@ -85,31 +102,54 @@ export default function StudentElearningTab({ classId }: { classId?: string | nu
         </p>
       ) : (
         <div className="space-y-3">
-          {visible.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => setViewing(m)}
-              className="flex w-full items-start gap-3 rounded-2xl border border-gray-100 bg-white p-3 text-left shadow-sm transition-shadow hover:shadow-md dark:border-gray-800 dark:bg-gray-900"
-            >
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                {m.file_type === 'image' ? <ImageIcon className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
+          {visible.map((m) => {
+            const sub = mineByMaterial.get(m.id);
+            return (
+              <div
+                key={m.id}
+                className="rounded-2xl border border-gray-100 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+              >
+                <button onClick={() => setViewing(m)} className="flex w-full items-start gap-3 text-left">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                    {m.file_type === 'image' ? <ImageIcon className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">{m.title}</p>
+                    <p className="truncate text-xs text-gray-500">{m.subject}</p>
+                    {m.description && <p className="mt-0.5 line-clamp-2 text-xs text-gray-400">{m.description}</p>}
+                    <p className="mt-1 text-[10px] text-gray-400">
+                      {KIND_LABEL[m.file_type]}
+                      {m.file_size ? ` • ${formatFileSize(m.file_size)}` : ''} •{' '}
+                      {format(new Date(m.created_at), 'd MMM yyyy', { locale: localeId })}
+                    </p>
+                  </div>
+                </button>
+                {m.accepts_submissions && (
+                  <div className="mt-3 flex items-center justify-between gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+                    {sub ? (
+                      <span className="flex items-center gap-1 text-xs text-green-600">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        {sub.graded_at ? `Dinilai${sub.score !== null ? `: ${sub.score}` : ''}` : 'Jawaban terkumpul'}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-400">Belum mengumpulkan jawaban</span>
+                    )}
+                    <button
+                      onClick={() => setSubmitting(m)}
+                      className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                    >
+                      {sub ? 'Lihat / Ubah' : 'Kumpulkan Jawaban'}
+                    </button>
+                  </div>
+                )}
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold">{m.title}</p>
-                <p className="truncate text-xs text-gray-500">{m.subject}</p>
-                {m.description && <p className="mt-0.5 line-clamp-2 text-xs text-gray-400">{m.description}</p>}
-                <p className="mt-1 text-[10px] text-gray-400">
-                  {KIND_LABEL[m.file_type]}
-                  {m.file_size ? ` • ${formatFileSize(m.file_size)}` : ''} •{' '}
-                  {format(new Date(m.created_at), 'd MMM yyyy', { locale: localeId })}
-                </p>
-              </div>
-            </button>
-          ))}
+            );
+          })}
         </div>
       )}
 
       <ElearningViewer material={viewing} onClose={() => setViewing(null)} />
+      <StudentSubmissionDialog material={submitting} studentId={studentId} onClose={() => setSubmitting(null)} />
     </div>
   );
 }
