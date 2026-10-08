@@ -27,6 +27,7 @@ import { id as localeId } from "date-fns/locale";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
 import { AcademicYearSelector } from "@/components/AcademicYearSelector";
+import { useAcademicYear } from "@/contexts/AcademicYearContext";
 import { getMessagingInstance, getToken, onMessage } from "@/integrations/firebase";
 
 import StudentUploadTab from "@/components/dashboard/StudentUploadTab";
@@ -264,6 +265,8 @@ const StudentDashboardPage = () => {
   });
   const [passwordLoading, setPasswordLoading] = useState(false);
 
+  const { selectedYear, selectedSemester } = useAcademicYear();
+
   // ─── Request notification permission once ──────────────────────────────
   useEffect(() => {
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
@@ -272,16 +275,6 @@ const StudentDashboardPage = () => {
   }, []);
 
   // ─── Queries ───────────────────────────────────────────────────────────
-  const { data: schoolSetting } = useQuery({
-    queryKey: ['school_settings'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('school_settings').select('*').maybeSingle();
-      if (error) throw error;
-      return data;
-    },
-    staleTime: 10 * 60 * 1000,
-  });
-
   const { data: studentAccount, isLoading: accountLoading } = useQuery({
     queryKey: ['student-account', user?.id],
     queryFn: async () => {
@@ -300,6 +293,21 @@ const StudentDashboardPage = () => {
 
   const studentId = studentAccount?.student_id;
   const classId = studentAccount?.students?.class_id;
+  const schoolId = (studentAccount as any)?.school_id ?? (studentAccount as any)?.students?.school_id ?? null;
+
+  // Pengaturan sekolah: dibatasi ke sekolah siswa (bila diketahui), ambil satu baris saja
+  const { data: schoolSetting } = useQuery({
+    queryKey: ['school_settings', schoolId],
+    enabled: !!studentAccount,
+    queryFn: async () => {
+      let q = supabase.from('school_settings').select('*');
+      if (schoolId) q = q.eq('school_id', schoolId);
+      const { data, error } = await q.limit(1).maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    staleTime: 10 * 60 * 1000,
+  });
 
   // ─── FCM ───────────────────────────────────────────────────────────────
   useFCM(studentId);
@@ -321,19 +329,22 @@ const StudentDashboardPage = () => {
   });
 
   const { data: todaySchedules, isLoading: schedulesLoading } = useQuery({
-    queryKey: ['student-schedules-today', classId],
+    queryKey: ['student-schedules-today', classId, selectedYear, selectedSemester],
     queryFn: async () => {
-      const today = new Date().getDay();
-      const { data, error } = await supabase
+      // Di tabel jadwal Minggu = 7 (getDay() mengembalikan 0)
+      const jsDay = new Date().getDay();
+      const today = jsDay === 0 ? 7 : jsDay;
+      let q = supabase
         .from('schedules')
         .select('*, teachers(*, profiles:profiles_public(full_name))')
         .eq('class_id', classId!)
-        .eq('day_of_week', today)
-        .order('start_time');
+        .eq('day_of_week', today);
+      if (selectedYear) q = q.eq('academic_year', selectedYear).eq('semester', selectedSemester);
+      const { data, error } = await q.order('start_time');
       if (error) throw error;
       return data || [];
     },
-    enabled: !!classId,
+    enabled: !!classId && !!selectedYear,
     staleTime: 2 * 60 * 1000,
   });
 
@@ -395,7 +406,7 @@ const StudentDashboardPage = () => {
       if (error) throw error;
       return data || [];
     },
-    enabled: !!studentId && activeTab === 'violations',
+    enabled: !!studentId && (activeTab === 'violations' || activeTab === 'overview'),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -410,16 +421,16 @@ const StudentDashboardPage = () => {
       if (error) throw error;
       return data || [];
     },
-    enabled: !!studentId && activeTab === 'achievements',
+    enabled: !!studentId && (activeTab === 'achievements' || activeTab === 'overview'),
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: grades, isLoading: gradesLoading } = useQuery({
+  const { data: allGrades, isLoading: gradesLoading } = useQuery({
     queryKey: ['student-grades', studentId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('grades')
-        .select('*, schedules(subject, teachers(*, profiles:profiles_public(full_name)))')
+        .select('*, schedules(subject, academic_year, semester, teachers(*, profiles:profiles_public(full_name)))')
         .eq('student_id', studentId!)
         .order('created_at', { ascending: false });
       if (error) throw error;
@@ -519,6 +530,17 @@ const StudentDashboardPage = () => {
     [violations]
   );
 
+  // Nilai dibatasi ke tahun ajaran & semester yang dipilih
+  const grades = useMemo(() => {
+    if (!allGrades) return allGrades;
+    if (!selectedYear) return allGrades;
+    return allGrades.filter((g: any) => {
+      const sc = g.schedules;
+      if (!sc || !sc.academic_year) return true;
+      return sc.academic_year === selectedYear && Number(sc.semester) === Number(selectedSemester);
+    });
+  }, [allGrades, selectedYear, selectedSemester]);
+
   const averageGrade = useMemo(() => {
     if (!grades?.length) return null;
     const valid = grades.filter((g: any) => typeof g.final_grade === 'number');
@@ -536,6 +558,21 @@ const StudentDashboardPage = () => {
     setSearchParams({ tab });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [setSearchParams]);
+
+  const unreadCount = useMemo(() => notifications.filter((n) => !n.is_read).length, [notifications]);
+
+  const markNotificationsRead = useCallback(async (ids?: string[]) => {
+    if (!studentId) return;
+    const target = ids ?? notifications.filter((n) => !n.is_read).map((n) => n.id);
+    if (target.length === 0) return;
+    // Optimis: tandai di cache dulu
+    queryClient.setQueryData(
+      ['student-notifications', studentId],
+      (old: NotificationItem[] = []) => old.map((n) => (target.includes(n.id) ? { ...n, is_read: true } : n))
+    );
+    const { error } = await (supabase as any).rpc('mark_my_notifications_read', { _ids: target });
+    if (error) refetchNotifications();
+  }, [studentId, notifications, queryClient, refetchNotifications]);
 
   const handleDeleteNotification = useCallback(async (id: string) => {
     try {
@@ -673,7 +710,7 @@ const StudentDashboardPage = () => {
         <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100 mb-3">Statistik Saya</h3>
         <div className="grid grid-cols-2 gap-3">
           {[
-            { bg: 'bg-blue-100 border-blue-200', icon: BookOpen, iconColor: 'text-blue-600', trend: TrendingUp, trendColor: 'text-blue-400', value: showData ? (averageGrade || '-') : '•••', label: 'Rata-rata Nilai', sub: showData ? `${grades?.length || 0} Mapel` : '•••', labelColor: 'text-blue-600', subColor: 'text-blue-400' },
+            { bg: 'bg-blue-100 border-blue-200', icon: BookOpen, iconColor: 'text-blue-600', trend: TrendingUp, trendColor: 'text-blue-400', value: showData ? (averageGrade ?? '-') : '•••', label: 'Rata-rata Nilai', sub: showData ? `${grades?.length || 0} Mapel` : '•••', labelColor: 'text-blue-600', subColor: 'text-blue-400' },
             { bg: 'bg-amber-100 border-amber-200', icon: AlertTriangle, iconColor: 'text-amber-600', trend: AlertCircle, trendColor: 'text-amber-400', value: showData ? totalViolationPoints : '•••', label: 'Poin Pelanggaran', sub: showData ? `${violations?.length || 0} Catatan` : '•••', labelColor: 'text-amber-600', subColor: 'text-amber-400' },
             { bg: 'bg-green-100 border-green-200', icon: Trophy, iconColor: 'text-green-600', trend: BadgeCheck, trendColor: 'text-green-400', value: showData ? (achievements?.length || 0) : '•••', label: 'Total Prestasi', sub: 'Penghargaan', labelColor: 'text-green-600', subColor: 'text-green-400' },
             { bg: 'bg-purple-100 border-purple-200', icon: Calendar, iconColor: 'text-purple-600', trend: ChevronRight, trendColor: 'text-purple-400', value: showData ? (todaySchedules?.length || 0) : '•••', label: 'Mapel Hari Ini', sub: DAY_NAMES[new Date().getDay()], labelColor: 'text-purple-600', subColor: 'text-purple-400' },
@@ -840,11 +877,12 @@ const StudentDashboardPage = () => {
         <h2 className="text-lg font-bold">Nilai Akademik</h2>
         <Badge className="bg-blue-100 text-blue-700 text-xs">{grades?.length || 0} Mapel</Badge>
       </div>
+      <AcademicYearSelector />
       <p className="text-[11px] text-gray-400">Nilai mapel yang disembunyikan oleh guru tidak ditampilkan.</p>
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl p-4 text-white shadow-lg shadow-blue-200">
           <p className="text-blue-100 text-xs">Rata-rata</p>
-          <p className="text-3xl font-extrabold">{averageGrade || '-'}</p>
+          <p className="text-3xl font-extrabold">{averageGrade ?? '-'}</p>
         </div>
         <div className="bg-white dark:bg-gray-900 rounded-2xl p-4 shadow-lg border border-gray-100 dark:border-gray-800">
           <p className="text-xs text-gray-400">Jumlah Nilai</p>
@@ -854,13 +892,13 @@ const StudentDashboardPage = () => {
       <div className="space-y-2">
         {gradesLoading ? <LoadingState label="Memuat nilai..." /> :
           grades && grades.length > 0 ? grades.map((grade: any) => {
-            const score = grade.final_grade || 0;
+            const score = grade.final_grade ?? 0;
             const color = score >= 80 ? 'text-emerald-600' : score >= 70 ? 'text-blue-600' : 'text-red-600';
             return (
               <div key={grade.id} className="bg-white dark:bg-gray-900 rounded-xl p-4 shadow-lg border border-gray-100 dark:border-gray-800">
                 <div className="flex items-center justify-between mb-2">
                   <p className="font-semibold text-sm text-gray-800 dark:text-gray-100 truncate flex-1">{grade.schedules?.subject}</p>
-                  <span className={`text-lg font-bold ${color}`}>{grade.final_grade?.toFixed(1) || '-'}</span>
+                  <span className={`text-lg font-bold ${color}`}>{typeof grade.final_grade === 'number' ? grade.final_grade.toFixed(1) : '-'}</span>
                 </div>
                 <div className="grid grid-cols-5 gap-1 text-center">
                   {[
@@ -870,7 +908,7 @@ const StudentDashboardPage = () => {
                   ].map((item) => (
                     <div key={item.label} className="bg-gray-50 dark:bg-gray-800 rounded-lg py-1">
                       <p className="text-[10px] text-gray-400">{item.label}</p>
-                      <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">{item.value || '-'}</p>
+                      <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">{item.value ?? '-'}</p>
                     </div>
                   ))}
                 </div>
@@ -1108,12 +1146,13 @@ const StudentDashboardPage = () => {
             <button
               data-notif-btn
               onClick={() => setShowNotifications((v) => !v)}
+              aria-label="Notifikasi"
               className="w-10 h-10 bg-white/20 backdrop-blur rounded-full flex items-center justify-center hover:bg-white/30 transition-colors relative"
             >
               <Bell className="h-5 w-5" />
-              {notifications.length > 0 && (
+              {unreadCount > 0 && (
                 <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center">
-                  {notifications.length > 99 ? '99+' : notifications.length}
+                  {unreadCount > 99 ? '99+' : unreadCount}
                 </span>
               )}
             </button>
@@ -1195,6 +1234,12 @@ const StudentDashboardPage = () => {
           <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
             <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">Notifikasi</h3>
             <div className="flex items-center gap-2">
+              {unreadCount > 0 && (
+                <button onClick={() => markNotificationsRead()}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
+                  <CheckCircle className="h-3 w-3" /> Tandai dibaca
+                </button>
+              )}
               {notifications.length > 0 && (
                 <button onClick={() => setDeleteAllConfirm(true)}
                   className="text-xs text-red-500 hover:text-red-700 font-medium flex items-center gap-1">
@@ -1209,20 +1254,24 @@ const StudentDashboardPage = () => {
           <div className="max-h-80 overflow-y-auto">
             {notifications.length > 0 ? notifications.map((notif) => (
               <div key={notif.id}
-                className="p-3 border-b border-gray-50 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-start justify-between gap-2">
+                onClick={() => { if (!notif.is_read) markNotificationsRead([notif.id]); }}
+                className={`p-3 border-b border-gray-50 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-start justify-between gap-2 ${notif.is_read ? '' : 'bg-blue-50/60 dark:bg-blue-900/10 cursor-pointer'}`}>
                 <div className="flex items-start gap-3 min-w-0 flex-1">
                   <div className="w-8 h-8 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center shrink-0">
                     <CheckCircle className="h-4 w-4 text-green-600" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-gray-800 dark:text-gray-100">{notif.title}</p>
+                    <p className="text-xs font-semibold text-gray-800 dark:text-gray-100">
+                      {!notif.is_read && <span className="inline-block w-2 h-2 bg-blue-500 rounded-full mr-1.5 align-middle" />}
+                      {notif.title}
+                    </p>
                     <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{notif.message}</p>
                     <p className="text-[10px] text-gray-400 mt-0.5">
                       {safeFormatDate(notif.created_at, 'dd MMM yyyy HH:mm')}
                     </p>
                   </div>
                 </div>
-                <button onClick={() => handleDeleteNotification(notif.id)}
+                <button onClick={(e) => { e.stopPropagation(); handleDeleteNotification(notif.id); }}
                   className="text-gray-300 hover:text-red-500 transition-colors shrink-0">
                   <Trash2 className="h-4 w-4" />
                 </button>
