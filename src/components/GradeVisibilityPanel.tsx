@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Eye, EyeOff } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
@@ -32,9 +33,26 @@ const keyOf = (c: string, s: string, y: string) => `${c}|${s}|${y}`;
  * Guru mapel menentukan apakah nilai satu kelas+mapel terlihat oleh siswa.
  * Tanpa pengaturan = terlihat (perilaku lama).
  */
-export function GradeVisibilityPanel({ schedules }: { schedules: ScheduleLike[] }) {
-  const { user } = useAuth();
+export function GradeVisibilityPanel() {
+  const { user, userRole } = useAuth();
   const queryClient = useQueryClient();
+
+  // Semua tahun ajaran: nilai tahun lalu (kelas lama) tetap bisa dilihat siswa bila tidak diatur
+  const { data: schedules = [] } = useQuery({
+    queryKey: ['grade-visibility-schedules', user?.id, userRole],
+    enabled: !!user?.id && !!userRole,
+    queryFn: async (): Promise<ScheduleLike[]> => {
+      let q = supabase.from('schedules').select('class_id, subject, academic_year, classes(name)');
+      if (userRole !== 'admin') {
+        const { data: teacher } = await supabase.from('teachers').select('id').eq('user_id', user!.id).maybeSingle();
+        if (!teacher) return [];
+        q = q.eq('teacher_id', teacher.id);
+      }
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []) as unknown as ScheduleLike[];
+    },
+  });
 
   const groups = useMemo(() => {
     const map = new Map<string, ScheduleLike>();
@@ -42,8 +60,10 @@ export function GradeVisibilityPanel({ schedules }: { schedules: ScheduleLike[] 
       const k = keyOf(s.class_id, s.subject, s.academic_year);
       if (!map.has(k)) map.set(k, s);
     });
-    return [...map.values()].sort((a, b) =>
-      `${a.classes?.name ?? ''} ${a.subject}`.localeCompare(`${b.classes?.name ?? ''} ${b.subject}`),
+    return [...map.values()].sort(
+      (a, b) =>
+        b.academic_year.localeCompare(a.academic_year) ||
+        `${a.classes?.name ?? ''} ${a.subject}`.localeCompare(`${b.classes?.name ?? ''} ${b.subject}`),
     );
   }, [schedules]);
 
@@ -89,6 +109,28 @@ export function GradeVisibilityPanel({ schedules }: { schedules: ScheduleLike[] 
     onError: () => toast.error('Gagal mengubah visibilitas nilai'),
   });
 
+  const bulk = useMutation({
+    mutationFn: async (visible: boolean) => {
+      const { error } = await db.from('grade_visibility').upsert(
+        groups.map((g) => ({
+          class_id: g.class_id,
+          subject: g.subject,
+          academic_year: g.academic_year,
+          is_visible: visible,
+          updated_by: user?.id ?? null,
+        })),
+        { onConflict: 'class_id,subject,academic_year' },
+      );
+      if (error) throw error;
+      return visible;
+    },
+    onSuccess: (visible) => {
+      queryClient.invalidateQueries({ queryKey: ['grade-visibility'] });
+      toast.success(visible ? 'Semua nilai kini terlihat oleh siswa' : 'Semua nilai disembunyikan dari siswa');
+    },
+    onError: () => toast.error('Gagal mengubah visibilitas nilai'),
+  });
+
   if (groups.length === 0) return null;
 
   return (
@@ -98,8 +140,16 @@ export function GradeVisibilityPanel({ schedules }: { schedules: ScheduleLike[] 
           <Eye className="h-4 w-4 text-primary" /> Visibilitas Nilai untuk Siswa
         </CardTitle>
         <CardDescription>
-          Atur per kelas dan mapel. Bila disembunyikan, siswa tidak melihat nilai mapel tersebut di akunnya.
+          Atur per tahun ajaran, kelas, dan mapel. Bila disembunyikan, siswa tidak melihat nilai mapel tersebut di akunnya.
         </CardDescription>
+        <div className="flex gap-2 pt-1">
+          <Button size="sm" variant="outline" disabled={bulk.isPending} onClick={() => bulk.mutate(false)}>
+            <EyeOff className="mr-1.5 h-3.5 w-3.5" /> Sembunyikan semua
+          </Button>
+          <Button size="sm" variant="outline" disabled={bulk.isPending} onClick={() => bulk.mutate(true)}>
+            <Eye className="mr-1.5 h-3.5 w-3.5" /> Tampilkan semua
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {groups.map((g) => {
@@ -113,7 +163,7 @@ export function GradeVisibilityPanel({ schedules }: { schedules: ScheduleLike[] 
               <span className="min-w-0">
                 <span className="block truncate font-medium">{g.subject}</span>
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  {g.classes?.name ?? 'Kelas'}
+                  {g.classes?.name ?? 'Kelas'} • {g.academic_year}
                   <Badge variant={visible ? 'secondary' : 'outline'} className="gap-1 px-1.5 text-[10px]">
                     {visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
                     {visible ? 'Terlihat' : 'Disembunyikan'}
