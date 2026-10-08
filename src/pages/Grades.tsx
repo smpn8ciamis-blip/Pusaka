@@ -16,6 +16,7 @@ import { useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { addLetterheadToPDF, addSignatureToPDF } from '@/lib/pdfLetterhead';
+import { GradeVisibilityPanel } from '@/components/GradeVisibilityPanel';
 
 interface GradeInput {
   student_id: string;
@@ -581,6 +582,8 @@ function GradesPage() {
             </Dialog>
           </div>
         </div>
+
+        <GradeVisibilityPanel schedules={(schedules ?? []) as any} />
 
         {/* Filter Section */}
         <Card className="card-hover border-none shadow-md">

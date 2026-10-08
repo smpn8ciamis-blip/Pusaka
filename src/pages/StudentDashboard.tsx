@@ -30,6 +30,7 @@ import { AcademicYearSelector } from "@/components/AcademicYearSelector";
 import { getMessagingInstance, getToken, onMessage } from "@/integrations/firebase";
 
 import StudentUploadTab from "@/components/dashboard/StudentUploadTab";
+import StudentElearningTab from "@/components/dashboard/StudentElearningTab";
 import AttendanceTrendChart from "@/components/dashboard/AttendanceTrendChart";
 import AttendanceLogList from "@/components/dashboard/AttendanceLogList";
 
@@ -627,6 +628,7 @@ const StudentDashboardPage = () => {
   const shortcutMenus = useMemo(() => [
     { tab: 'schedule', label: 'Jadwal', icon: Calendar, color: 'bg-blue-500' },
     { tab: 'grades', label: 'Nilai', icon: BookOpen, color: 'bg-emerald-500' },
+    { tab: 'elearning', label: 'E-Learning', icon: GraduationCap, color: 'bg-sky-500' },
     { tab: 'attendance', label: 'Absensi', icon: CalendarCheck, color: 'bg-amber-500' },
     { tab: 'violations', label: 'Pelanggaran', icon: AlertTriangle, color: 'bg-red-500' },
     { tab: 'achievements', label: 'Prestasi', icon: Trophy, color: 'bg-purple-500' },
@@ -838,6 +840,7 @@ const StudentDashboardPage = () => {
         <h2 className="text-lg font-bold">Nilai Akademik</h2>
         <Badge className="bg-blue-100 text-blue-700 text-xs">{grades?.length || 0} Mapel</Badge>
       </div>
+      <p className="text-[11px] text-gray-400">Nilai mapel yang disembunyikan oleh guru tidak ditampilkan.</p>
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl p-4 text-white shadow-lg shadow-blue-200">
           <p className="text-blue-100 text-xs">Rata-rata</p>
@@ -1069,6 +1072,8 @@ const StudentDashboardPage = () => {
       case 'achievements': return renderAchievementsTab();
       case 'announcements': return renderAnnouncementsTab();
       case 'dispensasi': return renderDispensasiTab();
+      case 'elearning':
+        return <StudentElearningTab classId={classId} />;
       case 'uploads':
         return <StudentUploadTab studentAccount={studentAccount} user={user} />;
       case 'settings': return renderSettingsTab();

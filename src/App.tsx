@@ -44,6 +44,7 @@ const TeacherWorkload = lazy(() => import("./pages/TeacherWorkload"));
 const StudentDetail = lazy(() => import("./pages/StudentDetail"));
 const Achievements = lazy(() => import("./pages/Achievements"));
 const Repository = lazy(() => import("./pages/Repository"));
+const Elearning = lazy(() => import("./pages/Elearning"));
 const Complaints = lazy(() => import("./pages/Complaints"));
 const ComplaintsManagement = lazy(() => import("./pages/ComplaintsManagement"));
 const PublicComplaintCheck = lazy(() => import("./pages/PublicComplaintCheck"));
@@ -244,6 +245,7 @@ const App = () => (
               <Route path="/permission-letters" element={<ProtectedRoute><PermissionLetters /></ProtectedRoute>} />
               <Route path="/violations" element={<ProtectedRoute><Violations /></ProtectedRoute>} />
               <Route path="/achievements" element={<ProtectedRoute><Achievements /></ProtectedRoute>} />
+              <Route path="/elearning" element={<ProtectedRoute allowedRoles={['teacher']}><Elearning /></ProtectedRoute>} />
               <Route path="/repository" element={<ProtectedRoute><Repository /></ProtectedRoute>} />
               <Route path="/homeroom-attendance" element={<ProtectedRoute><HomeroomAttendance /></ProtectedRoute>} />
               <Route path="/announcements" element={<ProtectedRoute><Announcements /></ProtectedRoute>} />
