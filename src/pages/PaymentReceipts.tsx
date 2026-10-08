@@ -28,6 +28,7 @@ import { ReceiptPreviewDialog } from "@/components/receipt/ReceiptPreviewDialog"
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DataPagination } from "@/components/ui/data-pagination";
 import { usePagination } from "@/hooks/usePagination";
+import { buildLineItems, drawCollectiveTable, resolveLineItems } from "@/lib/collectiveReceiptTable";
 
 const numberToWords = (num: number): string => {
   const satuan = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
@@ -473,6 +474,19 @@ export default function PaymentReceipts() {
     }
   };
 
+  const [editingOriginal, setEditingOriginal] = useState<{ official_travel_id: string; payment_type: string } | null>(null);
+
+  /** Bekukan rincian per orang + hari dengan tarif saat ini ke kwitansi. */
+  const buildSnapshot = (paymentType: string) => {
+    const sppd = sppdList?.find((s) => s.id === selectedSPPD);
+    const days = sppd?.departure_date && sppd?.return_date
+      ? calculateTravelDays(sppd.departure_date, sppd.return_date) : 1;
+    return {
+      line_items: buildLineItems(sppdTeachersData, sppdStudentsData, travelRates, paymentType, days),
+      travel_days: days,
+    } as any;
+  };
+
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
       const submitData = { ...data, ...autoData, official_travel_id: selectedSPPD };
@@ -483,7 +497,9 @@ export default function PaymentReceipts() {
       });
 
       const amountNum = parseFloat(autoData.amount) || 0;
+      const snapshot = buildSnapshot(data.payment_type);
       const { error } = await supabase.from("payment_receipts").insert({
+        ...snapshot,
         official_travel_id: selectedSPPD,
         receipt_number: data.receipt_number,
         receipt_date: autoData.receipt_date,
@@ -520,7 +536,12 @@ export default function PaymentReceipts() {
       });
 
       const amountNum = parseFloat(autoData.amount) || 0;
+      // Angka dibekukan: snapshot dibuat ulang hanya bila SPPD / jenis pembayaran diubah.
+      const orig = editingOriginal;
+      const changed = !orig || orig.official_travel_id !== selectedSPPD || orig.payment_type !== data.payment_type;
+      const snapshot = changed ? buildSnapshot(data.payment_type) : {};
       const { error } = await supabase.from("payment_receipts").update({
+        ...snapshot,
         official_travel_id: selectedSPPD,
         receipt_number: data.receipt_number,
         receipt_date: autoData.receipt_date,
@@ -569,6 +590,7 @@ export default function PaymentReceipts() {
     setSPPDStudentsData([]);
     setIsEditMode(false);
     setEditingId(null);
+    setEditingOriginal(null);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -580,6 +602,7 @@ export default function PaymentReceipts() {
   const handleEdit = async (receipt: any) => {
     setIsEditMode(true);
     setEditingId(receipt.id);
+    setEditingOriginal({ official_travel_id: receipt.official_travel_id, payment_type: receipt.payment_type });
     setSelectedSPPD(receipt.official_travel_id);
 
     const teachers = await fetchSPPDTeachers(receipt.official_travel_id);
@@ -833,118 +856,17 @@ export default function PaymentReceipts() {
       yPos += (descLines.length - 1) * 4;
 
       yPos += 10;
-      const colNo = leftMargin;
-      const colName = leftMargin + 8;
-      const colNameWidth = 50;
-      const colNIP = leftMargin + 58;
-      const colJabatan = leftMargin + 90;
-      const colKelas = leftMargin + 110;
-      const colHarga = leftMargin + 125;
-      const colHari = leftMargin + 142;
-      const colAmount = leftMargin + 155;
-      const colTTD = pageWidth - 15;
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(7);
-
-      doc.setDrawColor(0);
-      doc.setLineWidth(0.3);
-      doc.line(leftMargin, yPos - 3, pageWidth - 15, yPos - 3);
-
-      doc.text("No", colNo, yPos);
-      doc.text("Nama", colName, yPos);
-      doc.text("NIP/NIS", colNIP, yPos);
-      doc.text("Jabatan", colJabatan, yPos);
-      doc.text("Kelas", colKelas, yPos);
-      doc.text("Satuan", colHarga, yPos);
-      doc.text("Hari", colHari, yPos);
-      doc.text("Jumlah (Rp)", colAmount, yPos);
-      doc.text("TTD", colTTD, yPos, { align: "right" });
-
-      yPos += 2;
-      doc.line(leftMargin, yPos, pageWidth - 15, yPos);
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(7);
-
-      let totalAmount = 0;
-      let rowNumber = 0;
-
-      const renderNameWithWrap = (name: string, maxWidth: number) => doc.splitTextToSize(name || "-", maxWidth);
-      const nameMaxWidth = colNIP - colName - 2;
-
-      teachers.forEach((teacher) => {
-        const jabatan = teacher.jabatan || "Guru";
-        const rate = travelRates?.find(r => r.position_type === jabatan);
-        let dailyRate = 0;
-        if (rate) {
-          switch (receipt.payment_type) {
-            case "transport": dailyRate = Number(rate.transport_rate); break;
-            case "accommodation": dailyRate = Number(rate.accommodation_rate); break;
-            case "meals": dailyRate = Number(rate.daily_rate); break;
-          }
-        }
-        const amount = dailyRate * travelDays;
-
-        rowNumber++;
-        const nameLines = renderNameWithWrap(toTitleCase(teacher.full_name) || "-", nameMaxWidth);
-        const rowHeight = Math.max(7, nameLines.length * 3.5);
-        yPos += rowHeight;
-
-        doc.text(`${rowNumber}`, colNo, yPos - (nameLines.length > 1 ? (nameLines.length - 1) * 1.75 : 0));
-        nameLines.forEach((line: string, idx: number) => {
-          doc.text(line, colName, yPos - (nameLines.length - 1 - idx) * 3.5);
-        });
-        doc.text(teacher.nip || "-", colNIP, yPos);
-        doc.text(jabatan, colJabatan, yPos);
-        doc.text("-", colKelas, yPos);
-        doc.text(dailyRate.toLocaleString("id-ID"), colHarga, yPos);
-        doc.text(`${travelDays}`, colHari, yPos);
-        doc.text(amount.toLocaleString("id-ID"), colAmount, yPos);
-        doc.rect(colTTD - 18, yPos - 5, 18, 6);
-        totalAmount += amount;
+      const items = resolveLineItems(receipt, teachers, students, travelRates, travelDays);
+      const table = drawCollectiveTable(doc, items, {
+        leftMargin,
+        rightEdge: pageWidth - 15,
+        startY: yPos,
+        fontSize: 7,
+        minRowHeight: 7,
+        lineWidth: 0.3,
       });
-
-      students.forEach((student) => {
-        const rate = travelRates?.find(r => r.position_type === "Siswa");
-        let dailyRate = 0;
-        if (rate) {
-          switch (receipt.payment_type) {
-            case "transport": dailyRate = Number(rate.transport_rate); break;
-            case "accommodation": dailyRate = Number(rate.accommodation_rate); break;
-            case "meals": dailyRate = Number(rate.daily_rate); break;
-          }
-        }
-        const amount = dailyRate * travelDays;
-
-        rowNumber++;
-        const nameLines = renderNameWithWrap(toTitleCase(student.full_name) || "-", nameMaxWidth);
-        const rowHeight = Math.max(7, nameLines.length * 3.5);
-        yPos += rowHeight;
-
-        doc.text(`${rowNumber}`, colNo, yPos - (nameLines.length > 1 ? (nameLines.length - 1) * 1.75 : 0));
-        nameLines.forEach((line: string, idx: number) => {
-          doc.text(line, colName, yPos - (nameLines.length - 1 - idx) * 3.5);
-        });
-        doc.text(student.nis || "-", colNIP, yPos);
-        doc.text("Siswa", colJabatan, yPos);
-        doc.text(student.class_name || "-", colKelas, yPos);
-        doc.text(dailyRate.toLocaleString("id-ID"), colHarga, yPos);
-        doc.text(`${travelDays}`, colHari, yPos);
-        doc.text(amount.toLocaleString("id-ID"), colAmount, yPos);
-        doc.rect(colTTD - 18, yPos - 5, 18, 6);
-        totalAmount += amount;
-      });
-
-      yPos += 3;
-      doc.line(leftMargin, yPos, pageWidth - 15, yPos);
-      yPos += 5;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8);
-      doc.text("TOTAL", colJabatan, yPos);
-      doc.text(totalAmount.toLocaleString("id-ID"), colAmount, yPos);
-      yPos += 2;
-      doc.line(leftMargin, yPos, pageWidth - 15, yPos);
+      yPos = table.y;
+      const totalAmount = table.total;
 
       yPos += 10;
       doc.setFontSize(9);
