@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Eye, EyeOff, FileText, GraduationCap, Image as ImageIcon, Loader2, Plus, Search, Trash2, Upload } from 'lucide-react';
+import { Eye, EyeOff, FileText, GraduationCap, Image as ImageIcon, Loader2, Pencil, Plus, Search, Trash2, Upload } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { ElearningViewer } from '@/components/ElearningViewer';
 import { Card, CardContent } from '@/components/ui/card';
@@ -22,10 +22,46 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAcademicYear } from '@/contexts/AcademicYearContext';
 import { compressImage } from '@/lib/imageCompress';
+import { compressPdf, isPayloadTooLarge } from '@/lib/pdfCompress';
 import {
   ELEARNING_ACCEPT, ELEARNING_BUCKET, ELEARNING_MAX_BYTES, KIND_LABEL, detectElearningKind, elearningMime,
-  formatFileSize, safeFileName, type ElearningMaterial,
+  formatFileSize, safeFileName, type ElearningKind, type ElearningMaterial,
 } from '@/lib/elearning';
+
+// Server/proxy sekolah menolak body besar (HTTP 413), jadi file dikecilkan dulu sebelum diunggah.
+const UPLOAD_TARGET_BYTES = 900 * 1024;
+
+interface PreparedFile { upload: File; kind: ElearningKind; mime: string; fileName: string; notes: string[] }
+
+async function prepareFile(file: File, onProgress: (m: string) => void): Promise<PreparedFile> {
+  const kind = detectElearningKind(file)!;
+  const notes: string[] = [];
+  let upload = file;
+  let fileName = file.name;
+
+  if (kind === 'image' && file.type !== 'image/gif' && file.size > 300 * 1024) {
+    onProgress('Mengompres gambar…');
+    for (const o of [
+      { maxWidth: 2000, maxHeight: 2000, quality: 0.82 },
+      { maxWidth: 1600, maxHeight: 1600, quality: 0.7 },
+      { maxWidth: 1280, maxHeight: 1280, quality: 0.6 },
+    ]) {
+      try { upload = await compressImage(file, o); } catch { break; }
+      if (upload.size <= UPLOAD_TARGET_BYTES) break;
+    }
+    if (upload !== file) fileName = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+  } else if (kind === 'pdf' && file.size > UPLOAD_TARGET_BYTES) {
+    onProgress('Mengompres PDF…');
+    const res = await compressPdf(file, UPLOAD_TARGET_BYTES, onProgress);
+    if (res.compressed) {
+      upload = res.file;
+      notes.push(`PDF dikompres ${formatFileSize(file.size)} → ${formatFileSize(upload.size)} (teks menjadi gambar)`);
+    } else if (res.reason === 'too_many_pages') {
+      notes.push('PDF lebih dari 60 halaman, tidak dikompres');
+    }
+  }
+  return { upload, kind, mime: elearningMime(kind, upload), fileName, notes };
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = supabase as any;
@@ -51,6 +87,8 @@ export default function Elearning() {
   const [description, setDescription] = useState('');
   const [published, setPublished] = useState(true);
   const [file, setFile] = useState<File | null>(null);
+  const [editing, setEditing] = useState<ElearningMaterial | null>(null);
+  const [progress, setProgress] = useState('');
   const [viewing, setViewing] = useState<ElearningMaterial | null>(null);
   const [deleting, setDeleting] = useState<ElearningMaterial | null>(null);
 
@@ -105,10 +143,22 @@ export default function Elearning() {
   }, [materials, search, filterGroup]);
 
   const openForm = () => {
+    setEditing(null);
     setGroupKey(filterGroup !== 'all' ? filterGroup : '');
     setTitle('');
     setDescription('');
     setPublished(true);
+    setFile(null);
+    if (fileRef.current) fileRef.current.value = '';
+    setFormOpen(true);
+  };
+
+  const openEdit = (m: ElearningMaterial) => {
+    setEditing(m);
+    setGroupKey(`${m.class_id}|${m.subject}`);
+    setTitle(m.title);
+    setDescription(m.description ?? '');
+    setPublished(m.is_published);
     setFile(null);
     if (fileRef.current) fileRef.current.value = '';
     setFormOpen(true);
@@ -128,54 +178,85 @@ export default function Elearning() {
       return;
     }
     setFile(f);
-    if (!title.trim()) setTitle(f.name.replace(/\.[^.]+$/, ''));
+    if (!title.trim() && !editing) setTitle(f.name.replace(/\.[^.]+$/, ''));
   };
 
-  const selectedGroup = groups.find((g) => g.key === groupKey);
+  // Saat edit, kelas/mapel lama tetap bisa dipilih meski di luar tahun ajaran aktif
+  const groupOptions = useMemo(() => {
+    if (editing && !groups.some((g) => g.key === `${editing.class_id}|${editing.subject}`)) {
+      return [
+        { key: `${editing.class_id}|${editing.subject}`, class_id: editing.class_id, class_name: editing.classes?.name ?? 'Kelas', subject: editing.subject },
+        ...groups,
+      ];
+    }
+    return groups;
+  }, [groups, editing]);
+
+  const selectedGroup = groupOptions.find((g) => g.key === groupKey);
 
   const save = useMutation({
     mutationFn: async () => {
-      if (!file || !selectedGroup || !teacher?.id || !schoolId) throw new Error('Data belum lengkap');
-      const kind = detectElearningKind(file)!;
+      if (!selectedGroup || !teacher?.id || !schoolId) throw new Error('Data belum lengkap');
+      if (!editing && !file) throw new Error('Pilih file materi');
 
-      let upload: File = file;
-      // Foto besar dikompres agar hemat kuota siswa (GIF dibiarkan agar animasinya utuh)
-      if (kind === 'image' && file.type !== 'image/gif' && file.size > 600 * 1024) {
-        try { upload = await compressImage(file, { maxWidth: 2000, maxHeight: 2000, quality: 0.82 }); } catch { upload = file; }
-      }
-      const mime = elearningMime(kind, upload);
-      const fileName = upload === file ? file.name : file.name.replace(/\.[^.]+$/, '') + '.jpg';
-      const path = `${schoolId}/${selectedGroup.class_id}/${crypto.randomUUID()}-${safeFileName(fileName)}`;
-
-      const { error: upErr } = await supabase.storage
-        .from(ELEARNING_BUCKET)
-        .upload(path, upload, { contentType: mime, upsert: false });
-      if (upErr) throw upErr;
-
-      const { error } = await db.from('elearning_materials').insert({
-        teacher_id: teacher.id,
+      const fields = {
         class_id: selectedGroup.class_id,
         subject: selectedGroup.subject,
         title: title.trim(),
         description: description.trim() || null,
-        file_path: path,
-        file_name: fileName,
-        file_type: kind,
-        mime_type: mime,
-        file_size: upload.size,
         is_published: published,
-      });
+      };
+
+      // Tanpa ganti file: cukup perbarui data
+      if (editing && !file) {
+        const { error } = await db.from('elearning_materials').update(fields).eq('id', editing.id);
+        if (error) throw error;
+        return { notes: [] as string[] };
+      }
+
+      const prep = await prepareFile(file!, setProgress);
+      setProgress('Mengunggah file…');
+      const path = `${schoolId}/${selectedGroup.class_id}/${crypto.randomUUID()}-${safeFileName(prep.fileName)}`;
+
+      const { error: upErr } = await supabase.storage
+        .from(ELEARNING_BUCKET)
+        .upload(path, prep.upload, { contentType: prep.mime, upsert: false });
+      if (upErr) throw upErr;
+
+      const fileFields = {
+        file_path: path,
+        file_name: prep.fileName,
+        file_type: prep.kind,
+        mime_type: prep.mime,
+        file_size: prep.upload.size,
+      };
+
+      const { error } = editing
+        ? await db.from('elearning_materials').update({ ...fields, ...fileFields }).eq('id', editing.id)
+        : await db.from('elearning_materials').insert({ ...fields, ...fileFields, teacher_id: teacher.id });
       if (error) {
         await supabase.storage.from(ELEARNING_BUCKET).remove([path]); // jangan tinggalkan file yatim
         throw error;
       }
+      // Ganti file: hapus file lama setelah data berhasil diperbarui
+      if (editing) await supabase.storage.from(ELEARNING_BUCKET).remove([editing.file_path]);
+      return { notes: prep.notes };
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['elearning-materials'] });
-      toast.success(published ? 'Materi diunggah dan terlihat oleh siswa' : 'Materi disimpan sebagai draf');
+      queryClient.invalidateQueries({ queryKey: ['student-elearning'] });
+      toast.success(editing ? 'Materi diperbarui' : published ? 'Materi diunggah dan terlihat oleh siswa' : 'Materi disimpan sebagai draf');
+      res.notes.forEach((n) => toast.info(n));
       setFormOpen(false);
     },
-    onError: (err: { message?: string }) => toast.error(`Gagal menyimpan materi${err?.message ? `: ${err.message}` : ''}`),
+    onError: (err: { message?: string }) => {
+      if (isPayloadTooLarge(err)) {
+        toast.error('Server menolak ukuran file (413). Kecilkan file, atau minta admin server menaikkan batas upload (client_max_body_size).', { duration: 9000 });
+      } else {
+        toast.error(`Gagal menyimpan materi${err?.message ? `: ${err.message}` : ''}`);
+      }
+    },
+    onSettled: () => setProgress(''),
   });
 
   const togglePublish = useMutation({
@@ -205,7 +286,7 @@ export default function Elearning() {
     onError: () => toast.error('Gagal menghapus materi'),
   });
 
-  const canSave = !!file && !!selectedGroup && title.trim().length > 0 && !save.isPending;
+  const canSave = (!!file || !!editing) && !!selectedGroup && title.trim().length > 0 && !save.isPending;
 
   return (
     <DashboardLayout>
@@ -277,6 +358,9 @@ export default function Elearning() {
                     </span>
                     <div className="flex items-center gap-1">
                       <Button size="sm" variant="outline" onClick={() => setViewing(m)}>Buka</Button>
+                      <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(m)} aria-label="Ubah">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
                       <Button
                         size="sm"
                         variant="outline"
@@ -300,8 +384,8 @@ export default function Elearning() {
       <Dialog open={formOpen} onOpenChange={(o) => !save.isPending && setFormOpen(o)}>
         <DialogContent className="flex max-h-[90dvh] max-w-lg flex-col gap-0 p-0">
           <DialogHeader className="shrink-0 px-6 pb-3 pr-12 pt-6">
-            <DialogTitle>Unggah Materi</DialogTitle>
-            <DialogDescription>Format: gambar, PDF, atau DOCX. Maksimal 20 MB.</DialogDescription>
+            <DialogTitle>{editing ? 'Ubah Materi' : 'Unggah Materi'}</DialogTitle>
+            <DialogDescription>Format: gambar, PDF, atau DOCX. Maksimal 20 MB; file besar dikompres otomatis.</DialogDescription>
           </DialogHeader>
           <div className="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto px-6 py-3">
             <div className="space-y-1.5">
@@ -309,12 +393,12 @@ export default function Elearning() {
               <Select value={groupKey} onValueChange={setGroupKey}>
                 <SelectTrigger><SelectValue placeholder="Pilih kelas dan mapel" /></SelectTrigger>
                 <SelectContent>
-                  {groups.map((g) => <SelectItem key={g.key} value={g.key}>{g.class_name} — {g.subject}</SelectItem>)}
+                  {groupOptions.map((g) => <SelectItem key={g.key} value={g.key}>{g.class_name} — {g.subject}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>File materi *</Label>
+              <Label>File materi {editing ? '(opsional — pilih untuk mengganti)' : '*'}</Label>
               <input
                 ref={fileRef}
                 type="file"
@@ -324,7 +408,7 @@ export default function Elearning() {
               />
               <Button type="button" variant="outline" className="w-full justify-start" onClick={() => fileRef.current?.click()}>
                 <Upload className="mr-2 h-4 w-4 shrink-0" />
-                <span className="truncate">{file ? `${file.name} (${formatFileSize(file.size)})` : 'Pilih file...'}</span>
+                <span className="truncate">{file ? `${file.name} (${formatFileSize(file.size)})` : editing ? `${editing.file_name} — klik untuk mengganti` : 'Pilih file...'}</span>
               </Button>
             </div>
             <div className="space-y-1.5">
@@ -347,7 +431,7 @@ export default function Elearning() {
             <Button variant="outline" onClick={() => setFormOpen(false)} disabled={save.isPending}>Batal</Button>
             <Button onClick={() => save.mutate()} disabled={!canSave}>
               {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Unggah
+              {save.isPending ? (progress || 'Memproses…') : editing ? 'Simpan Perubahan' : 'Unggah'}
             </Button>
           </DialogFooter>
         </DialogContent>
