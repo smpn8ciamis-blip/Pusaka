@@ -583,7 +583,7 @@ function GradesPage() {
           </div>
         </div>
 
-        <GradeVisibilityPanel schedules={(schedules ?? []) as any} />
+        <GradeVisibilityPanel />
 
         {/* Filter Section */}
         <Card className="card-hover border-none shadow-md">
