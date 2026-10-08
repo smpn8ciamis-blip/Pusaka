@@ -29,6 +29,10 @@ import {
   formatFileSize, safeFileName, type ElearningMaterial,
 } from '@/lib/elearning';
 
+// Tabel baru belum ada di types.ts yang digenerate
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const db = supabase as any;
+
 interface TeachingGroup {
   key: string;
   class_id: string;

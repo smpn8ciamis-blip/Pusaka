@@ -36,7 +36,3 @@ export async function prepareFile(file: File, onProgress: (m: string) => void): 
   }
   return { upload, kind, mime: elearningMime(kind, upload), fileName, notes };
 }
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const db = supabase as any;
-
