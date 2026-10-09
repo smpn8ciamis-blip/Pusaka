@@ -145,9 +145,21 @@ export function useDeleteStudent() {
 
 /* ============== ACCOUNT MUTATIONS (Edge Functions) ============== */
 
+/** Ambil pesan error asli dari respons edge function (bukan pesan umum 'non-2xx'). */
+export async function edgeErrorMessage(error: any): Promise<string> {
+  try {
+    const res = error?.context;
+    if (res && typeof res.json === "function") {
+      const body = await res.json();
+      if (body?.error) return String(body.error);
+    }
+  } catch { /* abaikan */ }
+  return error?.message ?? "Terjadi kesalahan";
+}
+
 async function invokeFn<T>(name: string, body: unknown): Promise<T> {
   const { data, error } = await supabase.functions.invoke(name, { body });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(await edgeErrorMessage(error));
   if ((data as any)?.error) throw new Error((data as any).error);
   return data as T;
 }
