@@ -103,6 +103,15 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     ],
     defaultBody: `📝 *PENGINGAT PENGISIAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\nData berikut belum terisi untuk kelas *{{kelas}}* ({{mapel}}, {{jam}}):\n{{belum_terisi}}\n\nMohon segera dilengkapi di aplikasi Pusaka.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`,
   },
+  {
+    key: 'test_connection',
+    title: 'Tes Koneksi ke Guru',
+    description: 'Dikirim lewat tombol "Kirim Tes Koneksi ke Semua Guru" di tab Koneksi, agar guru menyimpan nomor bot.',
+    variables: [
+      { name: 'nama_guru', sample: 'Budi Santoso, S.Pd', hint: 'Nama guru penerima' },
+    ],
+    defaultBody: `✅ *TES KONEKSI BERHASIL*\n\nHalo Bapak/Ibu,\n\nNomor WhatsApp ini adalah *Akun Resmi SMP Negeri 8 Ciamis* yang digunakan untuk mengirimkan:\n\n📅 *Notifikasi Jadwal Pelajaran*\n📢 *Notifikasi Presensi Siswa*\n🔔 *Pengingat Mengajar*\n📝 *Pengingat Pengisian Jurnal*\n\n━━━━━━━━━━━━━━━━━━\n\n⚠️ *PENTING:*\nSilakan *SIMPAN NOMOR INI* ke kontak WhatsApp Bapak/Ibu.\n\nJika nomor ini *TIDAK disimpan*, WhatsApp akan memblokir pesan dari nomor yang tidak dikenal, sehingga Bapak/Ibu *tidak akan menerima notifikasi* penting dari sekolah.\n\n━━━━━━━━━━━━━━━━━━\n\nTerima kasih atas perhatiannya.\n_SMP Negeri 8 Ciamis_`,
+  },
 ];
 
 export function fillWaTemplate(body: string, vars: Record<string, string>) {

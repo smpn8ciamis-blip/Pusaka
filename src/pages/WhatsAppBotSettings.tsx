@@ -35,6 +35,7 @@ function ConnectionTab() {
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [testPhone, setTestPhone] = useState('');
   const [localCode, setLocalCode] = useState<string | null>(null);
+  const [confirmBroadcast, setConfirmBroadcast] = useState(false);
 
   const { data: status, error, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['wa-bot-status'],
@@ -62,6 +63,22 @@ function ConnectionTab() {
     }),
     onSuccess: () => toast.success('Pesan uji masuk antrian.'),
     onError: (e: Error) => toast.error(e.message),
+  });
+
+  const contacts = useQuery({
+    queryKey: ['wa-teacher-contacts'],
+    enabled: confirmBroadcast,
+    queryFn: () => waAdminFetch<{ total: number; with_phone: number; without_phone: number }>('/admin/teacher-contacts'),
+    retry: false,
+  });
+
+  const broadcast = useMutation({
+    mutationFn: () => waAdminFetch<{ queued: number; skipped_no_phone: number; message: string }>('/admin/test-connection-teachers', { method: 'POST' }),
+    onSuccess: (r) => {
+      setConfirmBroadcast(false);
+      toast.success(`${r.queued} pesan tes koneksi masuk antrian${r.skipped_no_phone ? ` (${r.skipped_no_phone} guru tanpa nomor dilewati)` : ''}.`);
+    },
+    onError: (e: Error) => { setConfirmBroadcast(false); toast.error(e.message); },
   });
 
   const code = status?.pairing_code || localCode;
@@ -144,12 +161,43 @@ function ConnectionTab() {
                 {test.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />} Kirim Pesan Uji
               </Button>
             </div>
+            <div className="rounded-lg border p-3 space-y-2">
+              <p className="text-sm">
+                Kirim pesan <b>Tes Koneksi</b> ke semua guru agar mereka menyimpan nomor bot. Isi pesan diambil dari template "Tes Koneksi ke Guru" (tab Template Pesan).
+              </p>
+              <Button onClick={() => setConfirmBroadcast(true)} disabled={broadcast.isPending}>
+                {broadcast.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />}
+                Kirim Tes Koneksi ke Semua Guru
+              </Button>
+            </div>
             <Button variant="destructive" onClick={() => setConfirmLogout(true)}>
               <Unlink className="h-4 w-4 mr-1" /> Putuskan Tautan
             </Button>
           </CardContent>
         </Card>
       )}
+
+      <AlertDialog open={confirmBroadcast} onOpenChange={setConfirmBroadcast}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Kirim tes koneksi ke semua guru?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {contacts.isLoading && 'Menghitung guru yang punya nomor WhatsApp…'}
+              {contacts.error && (contacts.error as Error).message}
+              {contacts.data && `${contacts.data.with_phone} guru akan menerima pesan${contacts.data.without_phone ? `, ${contacts.data.without_phone} guru tanpa nomor WA dilewati` : ''}. Pesan dikirim bertahap (jeda beberapa detik per pesan) agar aman dari pemblokiran WhatsApp.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!contacts.data || contacts.data.with_phone === 0 || broadcast.isPending}
+              onClick={(e) => { e.preventDefault(); broadcast.mutate(); }}
+            >
+              Kirim Sekarang
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={confirmLogout} onOpenChange={setConfirmLogout}>
         <AlertDialogContent>
