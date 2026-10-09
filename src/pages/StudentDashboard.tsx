@@ -1,7 +1,7 @@
 // src/pages/StudentDashboard.tsx
 
-import { useState, useEffect, useMemo, useCallback, memo } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useState, useEffect, useMemo, useCallback, memo, useRef } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,7 +22,7 @@ import {
   Search, Grid3X3, CalendarCheck, Megaphone, Hourglass, ExternalLink, Link2,
   Trash2, X, Upload, CheckCircle2, Wifi, WifiOff,
 } from "lucide-react";
-import { format, isValid } from "date-fns";
+import { format, isValid, formatDistanceToNow } from "date-fns";
 import { id as localeId } from "date-fns/locale";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
@@ -66,6 +66,16 @@ interface NotificationItem {
   is_read: boolean;
   created_at: string;
   metadata?: { status?: string; source?: string };
+}
+
+interface HeroNews {
+  id: string;
+  title: string;
+  slug: string;
+  excerpt: string | null;
+  cover_image_url: string | null;
+  published_at: string | null;
+  website_news_categories?: { name: string } | null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -363,6 +373,43 @@ const StudentDashboardPage = () => {
 
   const [showData, setShowData] = useState(true);
   const [showAllMenu, setShowAllMenu] = useState(false);
+  const navigate = useNavigate();
+  const [newsIdx, setNewsIdx] = useState(0);
+  const touchX = useRef<number | null>(null);
+
+  // Berita terbaru dari web sekolah (hanya yang terbit & punya gambar sampul)
+  const { data: heroNews = [] } = useQuery({
+    queryKey: ['student-hero-news'],
+    staleTime: 10 * 60 * 1000,
+    queryFn: async (): Promise<HeroNews[]> => {
+      const { data, error } = await supabase
+        .from('website_news')
+        .select('id, title, slug, excerpt, cover_image_url, published_at, website_news_categories(name)')
+        .eq('status', 'published')
+        .not('cover_image_url', 'is', null)
+        .order('published_at', { ascending: false })
+        .limit(6);
+      if (error) throw error;
+      return (data ?? []) as unknown as HeroNews[];
+    },
+  });
+  const heroSlides = heroNews.slice(0, 5);
+
+  // Ganti slide otomatis; berhenti saat tab tidak terlihat; hitung ulang tiap pergantian
+  useEffect(() => {
+    if (heroSlides.length < 2) return;
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible') setNewsIdx((i) => (i + 1) % heroSlides.length);
+    }, 6500);
+    return () => clearInterval(t);
+  }, [heroSlides.length, newsIdx]);
+
+  // Muat gambar slide berikutnya lebih dulu agar transisi mulus
+  useEffect(() => {
+    if (heroSlides.length < 2) return;
+    const nxt = heroSlides[(newsIdx + 1) % heroSlides.length]?.cover_image_url;
+    if (nxt) { const im = new Image(); im.src = nxt; }
+  }, [newsIdx, heroSlides]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
@@ -865,7 +912,7 @@ const StudentDashboardPage = () => {
 
         {/* Layanan Cepat */}
         <section aria-label="Layanan cepat">
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white mb-4">Layanan Cepat</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-white mb-4">Layanan Cepat</h2>
           <div className="grid grid-cols-4 gap-x-3 gap-y-5">
             {menusShown.map((menu: any) => {
               const pal = PASTEL[menu.tab as string] ?? FALLBACK;
@@ -876,15 +923,15 @@ const StudentDashboardPage = () => {
                   onClick={() => menu.isExternal ? (window.location.href = menu.url!) : handleTabChange(menu.tab!)}
                   className="group flex flex-col items-center gap-2 rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1E6FE0] active:scale-95 transition-transform"
                 >
-                  <span className={`relative flex aspect-square w-full items-center justify-center rounded-[1.6rem] ${pal.tile}`}>
+                  <span className={`relative flex aspect-square w-full items-center justify-center rounded-[1.75rem] ${pal.tile}`}>
                     {badge && (
-                      <span className="absolute -top-1.5 -left-1.5 max-w-[calc(100%+0.5rem)] truncate rounded-lg bg-slate-700 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                      <span className="absolute -top-1.5 -left-1.5 max-w-[calc(100%+0.5rem)] truncate rounded-full bg-slate-800/85 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur">
                         {badge}
                       </span>
                     )}
                     <menu.icon className={`h-8 w-8 ${pal.icon}`} strokeWidth={1.75} />
                   </span>
-                  <span className="text-[13px] font-medium leading-tight text-slate-800 dark:text-slate-200 text-center">{menu.label}</span>
+                  <span className="text-[12.5px] font-medium leading-tight text-slate-700 dark:text-slate-200 text-center">{menu.label}</span>
                 </button>
               );
             })}
@@ -893,8 +940,8 @@ const StudentDashboardPage = () => {
                 onClick={() => setShowAllMenu(true)}
                 className="flex flex-col items-center gap-2 rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1E6FE0] active:scale-95 transition-transform"
               >
-                <span className="relative flex aspect-square w-full items-center justify-center rounded-[1.6rem] bg-[#EFEFF2] dark:bg-slate-800">
-                  <span className="absolute -top-1.5 -left-1.5 rounded-lg bg-slate-700 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                <span className="relative flex aspect-square w-full items-center justify-center rounded-[1.75rem] bg-[#EFEFF2] dark:bg-slate-800">
+                  <span className="absolute -top-1.5 -left-1.5 rounded-full bg-slate-800/85 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur">
                     {shortcutMenus.length - VISIBLE} lagi
                   </span>
                   <Grid3X3 className="h-8 w-8 text-slate-500" strokeWidth={1.75} />
@@ -910,10 +957,42 @@ const StudentDashboardPage = () => {
           )}
         </section>
 
+        {/* Berita terbaru dari web sekolah */}
+        {heroNews.length > 0 && (
+          <section aria-label="Berita sekolah">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Berita Sekolah</h2>
+              <button onClick={() => navigate('/website/berita')} className="text-sm font-medium text-[#1E6FE0] flex items-center gap-0.5">
+                Lihat semua <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {heroNews.map((n) => (
+                <button
+                  key={n.id}
+                  onClick={() => navigate(`/website/berita/${n.slug}`)}
+                  className="group snap-start shrink-0 w-64 overflow-hidden rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 text-left shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1E6FE0]"
+                >
+                  <div className="aspect-[16/9] overflow-hidden bg-slate-100 dark:bg-slate-800">
+                    <img src={n.cover_image_url!} alt="" loading="lazy" className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                  </div>
+                  <div className="p-3.5">
+                    <p className="line-clamp-2 text-sm font-semibold leading-snug text-slate-900 dark:text-slate-100">{n.title}</p>
+                    <p className="mt-1.5 text-xs text-slate-500">
+                      {n.website_news_categories?.name ? `${n.website_news_categories.name} · ` : ''}
+                      {n.published_at ? formatDistanceToNow(new Date(n.published_at), { addSuffix: true, locale: localeId }) : ''}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* Statistik */}
         <section aria-label="Statistik saya">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Statistik Saya</h2>
+            <h2 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Statistik Saya</h2>
             <button
               onClick={() => setShowData((v) => !v)}
               className="flex items-center gap-1.5 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1E6FE0]"
@@ -934,7 +1013,7 @@ const StudentDashboardPage = () => {
                 <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white shadow-sm">
                   <st.icon className="h-5 w-5 text-slate-600" />
                 </span>
-                <p className="mt-6 text-3xl font-bold tabular-nums text-slate-900">{st.value}</p>
+                <p className="mt-6 text-3xl font-semibold tabular-nums tracking-tight text-slate-900">{st.value}</p>
                 <p className="text-sm text-slate-600">{st.label}</p>
                 <p className="mt-0.5 text-xs text-slate-500">{st.unit}</p>
               </button>
@@ -945,7 +1024,7 @@ const StudentDashboardPage = () => {
         {/* Jadwal hari ini */}
         <section aria-label="Jadwal hari ini">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Jadwal Hari Ini</h2>
+            <h2 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Jadwal Hari Ini</h2>
             <button onClick={() => handleTabChange('schedule')} className="text-sm font-semibold text-[#1E6FE0] flex items-center gap-0.5">
               Lihat semua <ChevronRight className="h-4 w-4" />
             </button>
@@ -1398,28 +1477,109 @@ const StudentDashboardPage = () => {
         );
 
         if (isHome) {
+          const slide = heroSlides.length ? heroSlides[newsIdx % heroSlides.length] : null;
+          const openNews = (n: HeroNews) => navigate(`/website/berita/${n.slug}`);
           return (
-            <header className={`${INK} relative overflow-hidden text-white px-4 pt-4 pb-24`}>
-              {schoolSetting?.logo_url && (
-                <img src={schoolSetting.logo_url} alt="" aria-hidden className="pointer-events-none absolute -right-8 top-16 h-56 w-56 object-contain opacity-15" />
+            <header
+              className={`${INK} relative overflow-hidden text-white px-4 pt-4 pb-24 min-h-[23rem] flex flex-col`}
+              onTouchStart={(e) => { touchX.current = e.touches[0].clientX; }}
+              onTouchEnd={(e) => {
+                if (touchX.current == null || heroSlides.length < 2) return;
+                const dx = e.changedTouches[0].clientX - touchX.current;
+                touchX.current = null;
+                if (Math.abs(dx) > 45) setNewsIdx((i) => (i + (dx < 0 ? 1 : -1) + heroSlides.length) % heroSlides.length);
+              }}
+            >
+              {/* Latar: foto berita bergantian (crossfade) */}
+              {heroSlides.length > 0 ? (
+                <>
+                  {heroSlides.map((n, i) => (
+                    <img
+                      key={n.id}
+                      src={n.cover_image_url!}
+                      alt=""
+                      aria-hidden
+                      loading={i === 0 ? 'eager' : 'lazy'}
+                      className={`pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-[1400ms] ease-in-out motion-safe:transition-[opacity,transform] ${i === newsIdx % heroSlides.length ? 'opacity-100 motion-safe:scale-105' : 'opacity-0 scale-100'}`}
+                      style={{ transitionDuration: '1400ms, 8000ms' }}
+                    />
+                  ))}
+                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#071B45]/95 via-[#0B2A66]/45 to-[#1E6FE0]/55" />
+                </>
+              ) : (
+                schoolSetting?.logo_url && (
+                  <img src={schoolSetting.logo_url} alt="" aria-hidden className="pointer-events-none absolute -right-8 top-16 h-56 w-56 object-contain opacity-15" />
+                )
               )}
+
               <div className="relative flex items-center gap-2">
                 {searchPill}
                 {bellBtn}
                 {logoutBtn}
               </div>
-              <div className="relative mt-6 flex items-center gap-3">
-                <button onClick={() => handleTabChange('profile')} aria-label="Buka profil" className="rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">{avatar}</button>
+
+              <div className="relative mt-5 flex items-center gap-3">
+                <button onClick={() => handleTabChange('profile')} aria-label="Buka profil" className="rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">
+                  {student?.photo_url ? (
+                    <img src={student.photo_url} alt="" className="h-11 w-11 rounded-full object-cover ring-2 ring-white/60" />
+                  ) : (
+                    <div className="h-11 w-11 rounded-full bg-white/20 backdrop-blur flex items-center justify-center text-base font-semibold ring-2 ring-white/60">
+                      {student?.full_name?.charAt(0) || 'S'}
+                    </div>
+                  )}
+                </button>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-white/80">{greetingFor(liveClock)},</p>
-                  <h1 className="text-2xl font-extrabold leading-tight tracking-tight truncate">{student?.full_name?.split(' ')[0] || 'Siswa'}</h1>
-                  <p className="text-sm text-white/80 truncate">
+                  <p className="text-sm text-white/85 truncate">
+                    {greetingFor(liveClock)}, <span className="font-semibold text-white">{student?.full_name?.split(' ')[0] || 'Siswa'}</span>
+                  </p>
+                  <p className="text-xs text-white/70 truncate">
                     {classInfo?.name || 'Kelas belum diatur'}
-                    <span className="mx-1.5 text-white/40">|</span>
+                    <span className="mx-1.5 text-white/40">·</span>
                     <span className="tabular-nums">{format(liveClock, 'HH:mm')}</span>
                   </p>
                 </div>
               </div>
+
+              {/* Sorotan berita */}
+              {slide && (
+                <div className="relative mt-auto pt-6">
+                  <div key={slide.id} className="animate-in fade-in slide-in-from-bottom-2 duration-700">
+                    <div className="flex items-center gap-2 text-[11px] text-white/80">
+                      {slide.website_news_categories?.name && (
+                        <span className="rounded-full bg-white/20 backdrop-blur px-2.5 py-0.5 font-medium text-white">
+                          {slide.website_news_categories.name}
+                        </span>
+                      )}
+                      {slide.published_at && (
+                        <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatDistanceToNow(new Date(slide.published_at), { addSuffix: true, locale: localeId })}</span>
+                      )}
+                    </div>
+                    <h2 className="mt-2 line-clamp-2 text-[19px] font-semibold leading-snug tracking-tight text-white drop-shadow-sm">{slide.title}</h2>
+                    <div className="mt-3 flex items-center justify-between">
+                      <button
+                        onClick={() => openNews(slide)}
+                        className="inline-flex items-center gap-1 rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-[#1E6FE0] shadow-sm transition-transform active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                      >
+                        Selengkapnya <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
+                      {heroSlides.length > 1 && (
+                        <div className="flex items-center gap-1.5" role="tablist" aria-label="Pilih berita">
+                          {heroSlides.map((n, i) => (
+                            <button
+                              key={n.id}
+                              role="tab"
+                              aria-selected={i === newsIdx % heroSlides.length}
+                              aria-label={`Berita ${i + 1}`}
+                              onClick={() => setNewsIdx(i)}
+                              className={`h-1.5 rounded-full transition-all duration-500 ${i === newsIdx % heroSlides.length ? 'w-6 bg-white' : 'w-1.5 bg-white/50'}`}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </header>
           );
         }
