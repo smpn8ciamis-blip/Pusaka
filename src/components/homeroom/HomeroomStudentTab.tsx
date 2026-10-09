@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Users, Plus, Search, MoreHorizontal, Edit2, KeyRound, Trash2, UserCheck, UserX, Zap } from "lucide-react";
+import { Users, Plus, Search, MoreHorizontal, Edit2, KeyRound, Trash2, UserCheck, UserX, Zap, FileDown } from "lucide-react";
 import { toast } from "sonner";
 import {
   useHomeroomStudents,
@@ -17,14 +17,17 @@ import {
 import StudentFormDialog from "./StudentFormDialog";
 import StudentAccountDialog from "./StudentAccountDialog";
 import BulkGenerateAccountsDialog from "./BulkGenerateAccountsDialog";
+import PrintStudentAccountsDialog from "./PrintStudentAccountsDialog";
 
 interface Props {
   classId: string;
   schoolId: string;
   schoolDomain?: string;
+  className?: string;
+  academicYear?: string | null;
 }
 
-export default function HomeroomStudentTab({ classId, schoolId, schoolDomain = "sekolah.sch.id" }: Props) {
+export default function HomeroomStudentTab({ classId, schoolId, schoolDomain: domainProp = "sekolah.sch.id", className = "Kelas", academicYear }: Props) {
   const { data: students = [], isLoading } = useHomeroomStudents(classId);
   const studentIds = useMemo(() => students.map((s) => s.id), [students]);
   const { data: accounts = [] } = useStudentAccounts(studentIds);
@@ -36,6 +39,18 @@ export default function HomeroomStudentTab({ classId, schoolId, schoolDomain = "
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountStudent, setAccountStudent] = useState<Student | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
+
+  // Domain email mengikuti akun yang sudah ada (mis. nedelcis.com) agar akun baru konsisten
+  const schoolDomain = useMemo(() => {
+    const counts = new Map<string, number>();
+    accounts.forEach((a) => {
+      const d = a.email?.split("@")[1];
+      if (d) counts.set(d, (counts.get(d) ?? 0) + 1);
+    });
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    return top ? top[0] : domainProp;
+  }, [accounts, domainProp]);
 
   const accountMap = useMemo(
     () => new Map(accounts.map((a) => [a.student_id, a])),
@@ -91,10 +106,14 @@ export default function HomeroomStudentTab({ classId, schoolId, schoolDomain = "
               Data Siswa Kelas
             </CardTitle>
             <CardDescription>
-              Kelola data & akun login siswa di kelas Anda
+              Kelola data & akun login siswa kelas
             </CardDescription>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => setPrintOpen(true)} className="gap-2">
+              <FileDown className="h-4 w-4" />
+              Cetak PDF Akun
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)} className="gap-2">
               <Zap className="h-4 w-4" />
               Generate Akun Massal
@@ -233,6 +252,15 @@ export default function HomeroomStudentTab({ classId, schoolId, schoolDomain = "
         student={accountStudent}
         account={accountStudent ? accountMap.get(accountStudent.id) ?? null : null}
         schoolDomain={schoolDomain}
+      />
+
+      <PrintStudentAccountsDialog
+        open={printOpen}
+        onOpenChange={setPrintOpen}
+        className={className}
+        academicYear={academicYear}
+        students={students}
+        accounts={accounts}
       />
 
       <BulkGenerateAccountsDialog

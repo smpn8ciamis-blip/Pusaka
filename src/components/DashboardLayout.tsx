@@ -10,7 +10,7 @@ import {
   ChevronUp, AlertTriangle, BarChart3, FolderOpen, MessageSquare, Database,
   Award, FileSignature, Plane, Receipt, FileSpreadsheet, Wallet, FileBarChart,
   Inbox, Send, Hammer, Vote, Upload, Bell, Lock, Landmark, Server, UserMinus,
-  Sparkles, CreditCard, ScanLine, LayoutDashboard, Search, Star, Moon, CalendarDays
+  Sparkles, CreditCard, ScanLine, LayoutDashboard, Search, Star, Moon, CalendarDays, KeyRound
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -427,6 +427,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
 
   const homeroomMenuItem: MenuItem = { icon: UserCheck, label: 'Rekap Absen Wali Kelas', href: '/homeroom-attendance' };
   const homeroomRfidItem: MenuItem = { icon: CreditCard, label: 'Absensi RFID', href: '/rfid-attendance' };
+  const homeroomAccountsItem: MenuItem = { icon: KeyRound, label: 'Akun Siswa', href: '/akun-siswa' };
   const homeroomFileManagementItem: MenuItem = { icon: FolderOpen, label: 'Manajemen Berkas Siswa', href: '/homeroom-upload-management' };
 
   // Guru yang ditugaskan kesiswaan sebagai pembina ekskul
@@ -440,6 +441,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         ...baseTeacherMenuItems.slice(0, 4),
         homeroomMenuItem,
         homeroomRfidItem,
+        homeroomAccountsItem,
         homeroomFileManagementItem,
         ...baseTeacherMenuItems.slice(4),
       ]
@@ -497,6 +499,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: LayoutDashboard, label: 'Dashboard', href: '/kesiswaan-dashboard' },
     { icon: ClipboardList, label: 'Absensi', href: '/attendance' },
     { icon: CreditCard, label: 'Absensi RFID', href: '/rfid-attendance' },
+    { icon: KeyRound, label: 'Akun Siswa', href: '/akun-siswa' },
     { icon: AlertTriangle, label: 'Poin Pelanggaran', href: '/violations' },
     { icon: Award, label: 'Penghargaan & Prestasi', href: '/achievements' },
     { icon: ClipboardList, label: 'Jenis Ekskul', href: '/ekskul-types' },

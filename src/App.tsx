@@ -32,6 +32,7 @@ const VerifyStudent = lazy(() => import("./pages/VerifyStudent"));
 const VerifyReport = lazy(() => import("./pages/VerifyReport"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const HomeroomAttendance = lazy(() => import("./pages/HomeroomAttendance"));
+const ClassStudentAccounts = lazy(() => import("./pages/ClassStudentAccounts"));
 const Announcements = lazy(() => import("./pages/Announcements"));
 const StudentAttendanceReport = lazy(() => import("./pages/StudentAttendanceReport"));
 const ExamAdministration = lazy(() => import("./pages/ExamAdministration"));
@@ -248,6 +249,7 @@ const App = () => (
               <Route path="/elearning" element={<ProtectedRoute allowedRoles={['teacher']}><Elearning /></ProtectedRoute>} />
               <Route path="/repository" element={<ProtectedRoute><Repository /></ProtectedRoute>} />
               <Route path="/homeroom-attendance" element={<ProtectedRoute><HomeroomAttendance /></ProtectedRoute>} />
+              <Route path="/akun-siswa" element={<ProtectedRoute allowedRoles={['teacher', 'admin', 'super_admin', 'kesiswaan']}><ClassStudentAccounts /></ProtectedRoute>} />
               <Route path="/announcements" element={<ProtectedRoute><Announcements /></ProtectedRoute>} />
               <Route path="/student-attendance-report" element={<ProtectedRoute><StudentAttendanceReport /></ProtectedRoute>} />
               <Route path="/exam-administration" element={<ProtectedRoute><ExamAdministration /></ProtectedRoute>} />
