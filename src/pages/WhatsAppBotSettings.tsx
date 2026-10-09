@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -351,6 +352,11 @@ function ReminderTab() {
   const [enabled, setEnabled] = useState(true);
   const [lead, setLead] = useState(10);
   const [follow, setFollow] = useState(15);
+  const [scope, setScope] = useState<'first' | 'all'>('all');
+  const [chkJournal, setChkJournal] = useState(true);
+  const [chkAttendance, setChkAttendance] = useState(true);
+  const [recap, setRecap] = useState(false);
+  const [recapTime, setRecapTime] = useState('06:00');
 
   const { data, isLoading } = useQuery({
     queryKey: ['wa-bot-settings'],
@@ -366,6 +372,11 @@ function ReminderTab() {
       setEnabled(data.teacher_reminder_enabled);
       setLead(data.reminder_lead_min);
       setFollow(data.reminder_followup_min);
+      setScope(data.reminder_scope === 'first' ? 'first' : 'all');
+      setChkJournal(data.followup_journal);
+      setChkAttendance(data.followup_attendance);
+      setRecap(data.daily_recap_enabled);
+      setRecapTime(String(data.daily_recap_time || '06:00').slice(0, 5));
     }
   }, [data]);
 
@@ -375,6 +386,11 @@ function ReminderTab() {
         id: 1, teacher_reminder_enabled: enabled,
         reminder_lead_min: Math.min(120, Math.max(1, lead || 10)),
         reminder_followup_min: Math.min(120, Math.max(1, follow || 15)),
+        reminder_scope: scope,
+        followup_journal: chkJournal,
+        followup_attendance: chkAttendance,
+        daily_recap_enabled: recap,
+        daily_recap_time: /^\d{2}:\d{2}$/.test(recapTime) ? recapTime : '06:00',
         updated_at: new Date().toISOString(), updated_by: user?.id ?? null,
       });
       if (error) throw error;
@@ -404,6 +420,43 @@ function ReminderTab() {
           <Label>Cek absensi/jurnal berapa menit setelah jam mulai</Label>
           <Input type="number" min={1} max={120} value={follow} onChange={(e) => setFollow(parseInt(e.target.value, 10))} />
           <p className="text-xs text-muted-foreground">Jika belum terisi, guru menerima pesan tindak lanjut.</p>
+        </div>
+        <div className="space-y-1">
+          <Label>Pengingat untuk jam mengajar</Label>
+          <Select value={scope} onValueChange={(v) => setScope(v as 'first' | 'all')}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Semua jam mengajar</SelectItem>
+              <SelectItem value="first">Jam pertama saja (jam mengajar paling awal hari itu)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2 rounded-lg border p-3">
+          <Label>Pesan tindak lanjut memeriksa</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="chk-j" className="font-normal">Jurnal mengajar</Label>
+            <Switch id="chk-j" checked={chkJournal} onCheckedChange={setChkJournal} />
+          </div>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="chk-a" className="font-normal">Daftar hadir (absensi) siswa</Label>
+            <Switch id="chk-a" checked={chkAttendance} onCheckedChange={setChkAttendance} />
+          </div>
+          {!chkJournal && !chkAttendance && (
+            <p className="text-xs text-muted-foreground">Keduanya mati: pesan tindak lanjut tidak akan dikirim.</p>
+          )}
+        </div>
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="recap-en">Kirim rekap jadwal harian</Label>
+            <Switch id="recap-en" checked={recap} onCheckedChange={setRecap} />
+          </div>
+          <p className="text-xs text-muted-foreground">Berisi daftar jadwal mengajar guru pada hari itu. Guru yang tidak mengajar hari itu tidak dikirimi.</p>
+          {recap && (
+            <div className="space-y-1">
+              <Label>Jam kirim (WIB)</Label>
+              <Input type="time" value={recapTime} onChange={(e) => setRecapTime(e.target.value)} className="w-32" />
+            </div>
+          )}
         </div>
         <Button onClick={() => save.mutate()} disabled={save.isPending}>
           {save.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />} Simpan
