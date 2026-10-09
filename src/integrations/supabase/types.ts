@@ -5191,6 +5191,60 @@ export type Database = {
         }
         Relationships: []
       }
+      wa_bot_settings: {
+        Row: {
+          id: number
+          reminder_followup_min: number
+          reminder_lead_min: number
+          teacher_reminder_enabled: boolean
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          id?: number
+          reminder_followup_min?: number
+          reminder_lead_min?: number
+          teacher_reminder_enabled?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          id?: number
+          reminder_followup_min?: number
+          reminder_lead_min?: number
+          teacher_reminder_enabled?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
+      wa_message_templates: {
+        Row: {
+          body: string
+          is_enabled: boolean
+          key: string
+          title: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          body: string
+          is_enabled?: boolean
+          key: string
+          title: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          body?: string
+          is_enabled?: boolean
+          key?: string
+          title?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       website_news: {
         Row: {
           author_id: string | null

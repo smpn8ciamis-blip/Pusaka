@@ -31,7 +31,9 @@ const app = express();
 app.use(express.json());
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
 });
 
@@ -103,6 +105,64 @@ function parseInputDate(input) {
     return `${year}-${month}-${day}`;
 }
 
+// --- TEMPLATE PESAN & PENGATURAN BOT (dikelola admin lewat aplikasi Pusaka) ---
+// Placeholder memakai format {{nama_variabel}}. Tabel: wa_message_templates, wa_bot_settings.
+const DEFAULT_TEMPLATES = {
+    parent_presence: `📢 *NOTIFIKASI PRESENSI SISWA*\n\nYth. Bapak/Ibu Orang Tua/Wali,\nMemberitahukan bahwa ananda:\n• Nama: *{{nama_siswa}}*\n• Tanggal: *{{tanggal}}*\n• Waktu: *{{waktu}} WIB*\n• Status: *{{jenis}} - {{status}}*\n\nTerima kasih atas perhatiannya.\n_SMP Negeri 8 Ciamis_`,
+    attendance_batch: `📢 *NOTIFIKASI PRESENSI*\n\nYth. Orang Tua/Wali,\nAnanda *{{nama_siswa}}* pada *{{tanggal}}* pukul *{{waktu}} WIB* statusnya: *{{status}}*.\n\n_SMP Negeri 8 Ciamis_`,
+    teacher_first: `⏰ *PENGINGAT JAM PERTAMA MENGAJAR*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\nHari ini jam pertama mengajar Anda:\n• Kelas: *{{kelas}}*\n• Mapel: *{{mapel}}*\n• Jam: *{{jam}}*\n\nMohon segera masuk kelas, lalu:\n1️⃣ Isi *absensi siswa*\n2️⃣ Isi *jurnal mengajar*\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`,
+    teacher_next: `⏰ *PENGINGAT MENGAJAR*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\nSebentar lagi jadwal mengajar Anda:\n• Kelas: *{{kelas}}*\n• Mapel: *{{mapel}}*\n• Jam: *{{jam}}*\n\nMohon masuk kelas tepat waktu dan jangan lupa mengisi *jurnal mengajar* setelah pembelajaran.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`,
+    teacher_followup: `📝 *PENGINGAT PENGISIAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\nData berikut belum terisi untuk kelas *{{kelas}}* ({{mapel}}, {{jam}}):\n{{belum_terisi}}\n\nMohon segera dilengkapi di aplikasi Pusaka.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`
+};
+
+const DEFAULT_BOT_SETTINGS = { teacher_reminder_enabled: true, reminder_lead_min: 10, reminder_followup_min: 15 };
+
+const CONFIG_TTL_MS = 30 * 1000;
+let templateCache = { at: 0, rows: new Map() };
+let settingsCache = { at: 0, value: { ...DEFAULT_BOT_SETTINGS } };
+
+async function loadTemplates() {
+    if (Date.now() - templateCache.at < CONFIG_TTL_MS) return templateCache.rows;
+    try {
+        const { data, error } = await supabase.from('wa_message_templates').select('key, body, is_enabled');
+        if (error) throw error;
+        templateCache = { at: Date.now(), rows: new Map((data || []).map(r => [r.key, r])) };
+    } catch (e) {
+        console.error('[TEMPLATE] Gagal memuat template (pakai bawaan):', e.message);
+        templateCache.at = Date.now();
+    }
+    return templateCache.rows;
+}
+
+function fillTemplate(body, vars) {
+    return String(body).replace(/\{\{\s*(\w+)\s*\}\}/g, (m, k) => (vars[k] !== undefined && vars[k] !== null ? String(vars[k]) : ''));
+}
+
+// Mengembalikan teks pesan, atau null bila template dinonaktifkan admin
+async function renderMessage(key, vars) {
+    const rows = await loadTemplates();
+    const row = rows.get(key);
+    if (row && row.is_enabled === false) return null;
+    const body = row && row.body && row.body.trim() ? row.body : DEFAULT_TEMPLATES[key];
+    return fillTemplate(body, vars);
+}
+
+async function getBotSettings() {
+    if (Date.now() - settingsCache.at < CONFIG_TTL_MS) return settingsCache.value;
+    try {
+        const { data, error } = await supabase.from('wa_bot_settings').select('*').eq('id', 1).maybeSingle();
+        if (error) throw error;
+        settingsCache = { at: Date.now(), value: { ...DEFAULT_BOT_SETTINGS, ...(data || {}) } };
+    } catch (e) {
+        console.error('[SETTINGS] Gagal memuat pengaturan (pakai bawaan):', e.message);
+        settingsCache.at = Date.now();
+    }
+    return settingsCache.value;
+}
+
+// Status koneksi & pairing (dipakai halaman admin)
+const botState = { pairingCode: null, pairingPhone: null, pairingAt: 0, lastDisconnect: null };
+
 // --- MESIN ANTRIAN CERDAS (SMART QUEUE SYSTEM) ---
 const taskQueue = [];
 let isProcessingQueue = false;
@@ -143,7 +203,11 @@ async function sendSafeMessage(jid, content, options = {}) {
     }
 }
 
+let botStarting = false;
 async function startBot() {
+    if (botStarting) return;
+    botStarting = true;
+    setTimeout(() => { botStarting = false; }, 3000);
     const { state, saveCreds } = await useMultiFileAuthState('baileys_auth');
     const { version, isLatest } = await fetchLatestBaileysVersion();
     console.log(`[INFO] Menggunakan Baileys v${version.join('.')} (Terbaru: ${isLatest})`);
@@ -168,6 +232,7 @@ async function startBot() {
             const reason = new Error(lastDisconnect?.error || 'Unknown').message;
             const statusCode = lastDisconnect?.error?.output?.statusCode || 0;
             
+            botState.lastDisconnect = { reason, statusCode, at: new Date().toISOString() };
             console.log(`[⚠️ KONEKSI TERPUTUS] Alasan: ${reason} | Kode: ${statusCode}`);
 
             // Jangan reconnect jika memang di-logout paksa oleh WhatsApp (401)
@@ -179,9 +244,12 @@ async function startBot() {
             } else {
                 console.log('[❌ LOGOUT] Sesi kedaluwarsa. Hapus folder baileys_auth dan lakukan /pair ulang.');
                 try { fs.rmSync('baileys_auth', { recursive: true, force: true }); } catch (e) {}
+                // Mulai ulang dengan sesi bersih agar admin bisa menautkan lagi dari aplikasi
+                setTimeout(startBot, 3000);
             }
         } else if (connection === 'open') {
             isReady = true;
+            botState.pairingCode = null;
             console.log('[✅ SUCCESS] Bot terhubung ke WhatsApp. Siap menerima pesan.');
         }
     });
@@ -378,8 +446,12 @@ app.post('/send-attendance', async (req, res) => {
         const { phone, student_name, time, status, date } = item;
         if (!phone) continue;
         const targetJid = formatToInternational(phone) + '@s.whatsapp.net';
-        const messageText = `📢 *NOTIFIKASI PRESENSI*\n\nYth. Orang Tua/Wali,\nAnanda *${student_name}* pada *${date || 'Hari ini'}* pukul *${time} WIB* statusnya: *${status}*.\n\n_SMP Negeri 8 Ciamis_`;
-        enqueueTask(async () => await sendSafeMessage(targetJid, { text: messageText }));
+        enqueueTask(async () => {
+            const messageText = await renderMessage('attendance_batch', {
+                nama_siswa: student_name, tanggal: date || 'Hari ini', waktu: time, status
+            });
+            if (messageText) await sendSafeMessage(targetJid, { text: messageText });
+        });
         enqueuedCount++;
     }
     return res.json({ status: 'success', message: `${enqueuedCount} antrian masuk.` });
@@ -422,16 +494,12 @@ app.post('/notify-parent', async (req, res) => {
         const statusText = status === 'terlambat' ? 'Terlambat' : 'Hadir';
 
         const targetJid = formatToInternational(student.parent_phone) + '@s.whatsapp.net';
-        const messageText = `📢 *NOTIFIKASI PRESENSI SISWA*\n\n`
-            + `Yth. Bapak/Ibu Orang Tua/Wali,\n`
-            + `Memberitahukan bahwa ananda:\n`
-            + `• Nama: *${student.full_name}*\n`
-            + `• Tanggal: *${date || 'Hari ini'}*\n`
-            + `• Waktu: *${time || '-'} WIB*\n`
-            + `• Status: *${typeText} - ${statusText}*\n\n`
-            + `Terima kasih atas perhatiannya.\n_SMP Negeri 8 Ciamis_`;
-
         enqueueTask(async () => {
+            const messageText = await renderMessage('parent_presence', {
+                nama_siswa: student.full_name, tanggal: date || 'Hari ini', waktu: time || '-',
+                jenis: typeText, status: statusText
+            });
+            if (!messageText) return;
             console.log(`[QUEUE WA-ORTU] Mengirim ke ${student.parent_phone} (${student.full_name})...`);
             await sendSafeMessage(targetJid, { text: messageText });
         });
@@ -457,11 +525,8 @@ app.get('/pair', async (req, res) => {
 // =====================================================
 // REMINDER WA GURU (jadwal mengajar, absensi & jurnal)
 // =====================================================
-// Env: TEACHER_REMINDER=off untuk mematikan | REMINDER_LEAD_MIN (default 10)
-//      REMINDER_FOLLOWUP_MIN (default 15) | REMINDER_SENT_FILE
-const REMINDER_ENABLED = (process.env.TEACHER_REMINDER || 'on') !== 'off';
-const REMINDER_LEAD_MIN = parseInt(process.env.REMINDER_LEAD_MIN || '10', 10);
-const REMINDER_FOLLOWUP_MIN = parseInt(process.env.REMINDER_FOLLOWUP_MIN || '15', 10);
+// Env opsional: REMINDER_SENT_FILE
+// Pengaturan (aktif/nonaktif, menit) diatur admin di aplikasi: tabel wa_bot_settings
 const REMINDER_SENT_FILE = process.env.REMINDER_SENT_FILE || '/srv/wa-bot/reminders_sent.json';
 
 let reminderSent = new Set();
@@ -506,9 +571,13 @@ function markReminderSent(key) {
 
 let reminderRunning = false;
 async function runTeacherReminders() {
-    if (!REMINDER_ENABLED || !isReady || reminderRunning) return;
+    if (!isReady || reminderRunning) return;
     reminderRunning = true;
     try {
+        const cfg = await getBotSettings();
+        if (!cfg.teacher_reminder_enabled) return;
+        const REMINDER_LEAD_MIN = cfg.reminder_lead_min;
+        const REMINDER_FOLLOWUP_MIN = cfg.reminder_followup_min;
         const now = wibNow();
         if (reminderSentDate !== now.date) loadReminderState(now.date);
         if (now.dow > 6) return; // Minggu libur
@@ -568,10 +637,11 @@ async function runTeacherReminders() {
                 const key = `pre:${s.id}`;
                 if (reminderSent.has(key)) continue;
                 markReminderSent(key);
-                const text = isFirst
-                    ? `⏰ *PENGINGAT JAM PERTAMA MENGAJAR*\n\nYth. Bapak/Ibu *${prof.full_name}*,\nHari ini jam pertama mengajar Anda:\n• Kelas: *${kelas}*\n• Mapel: *${s.subject}*\n• Jam: *${jam}*\n\nMohon segera masuk kelas, lalu:\n1️⃣ Isi *absensi siswa*\n2️⃣ Isi *jurnal mengajar*\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`
-                    : `⏰ *PENGINGAT MENGAJAR*\n\nYth. Bapak/Ibu *${prof.full_name}*,\nSebentar lagi jadwal mengajar Anda:\n• Kelas: *${kelas}*\n• Mapel: *${s.subject}*\n• Jam: *${jam}*\n\nMohon masuk kelas tepat waktu dan jangan lupa mengisi *jurnal mengajar* setelah pembelajaran.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
+                const tplKey = isFirst ? 'teacher_first' : 'teacher_next';
+                const vars = { nama_guru: prof.full_name, kelas, mapel: s.subject, jam };
                 enqueueTask(async () => {
+                    const text = await renderMessage(tplKey, vars);
+                    if (!text) return;
                     console.log(`[REMINDER] ${prof.full_name} - ${kelas} ${jam}`);
                     await sendSafeMessage(jid, { text });
                 });
@@ -593,8 +663,10 @@ async function runTeacherReminders() {
                 const todo = [];
                 if (!attDone) todo.push('*absensi siswa*');
                 if (!journalDone) todo.push('*jurnal mengajar*');
-                const text = `📝 *PENGINGAT PENGISIAN*\n\nYth. Bapak/Ibu *${prof.full_name}*,\nData berikut belum terisi untuk kelas *${kelas}* (${s.subject}, ${jam}):\n• ${todo.join('\n• ')}\n\nMohon segera dilengkapi di aplikasi Pusaka.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
+                const vars = { nama_guru: prof.full_name, kelas, mapel: s.subject, jam, belum_terisi: todo.map(t => '• ' + t).join('\n') };
                 enqueueTask(async () => {
+                    const text = await renderMessage('teacher_followup', vars);
+                    if (!text) return;
                     console.log(`[REMINDER-LANJUT] ${prof.full_name} - ${kelas}`);
                     await sendSafeMessage(jid, { text });
                 });
@@ -612,6 +684,102 @@ app.post('/run-teacher-reminders', async (req, res) => {
     res.json({ status: 'started' });
 });
 
+// =====================================================
+// ENDPOINT ADMIN (dipakai halaman "WhatsApp Bot" di aplikasi Pusaka)
+// Otentikasi: header Authorization: Bearer <JWT login Supabase>, harus role admin/super_admin
+// =====================================================
+async function requireAdmin(req, res, next) {
+    try {
+        const auth = req.headers.authorization || '';
+        const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+        if (!token) return res.status(401).json({ status: 'error', message: 'Token tidak ada.' });
+        const { data: u, error } = await supabase.auth.getUser(token);
+        if (error || !u || !u.user) return res.status(401).json({ status: 'error', message: 'Token tidak valid.' });
+        const { data: roles, error: rErr } = await supabase.from('user_roles').select('role').eq('user_id', u.user.id);
+        if (rErr) throw rErr;
+        if (!(roles || []).some(r => r.role === 'admin' || r.role === 'super_admin')) {
+            return res.status(403).json({ status: 'error', message: 'Hanya admin.' });
+        }
+        req.adminUser = u.user;
+        next();
+    } catch (e) {
+        res.status(500).json({ status: 'error', message: e.message });
+    }
+}
+
+function botPhone() {
+    const id = sock && sock.user && sock.user.id;
+    return id ? String(id).split(':')[0].split('@')[0] : null;
+}
+
+app.get('/admin/status', requireAdmin, (req, res) => {
+    const pairingValid = botState.pairingCode && Date.now() - botState.pairingAt < 2 * 60 * 1000;
+    res.json({
+        status: 'success',
+        connected: isReady,
+        phone: isReady ? botPhone() : null,
+        name: isReady && sock.user ? sock.user.name || null : null,
+        queue_length: taskQueue.length,
+        pairing_code: pairingValid ? botState.pairingCode : null,
+        pairing_phone: pairingValid ? botState.pairingPhone : null,
+        last_disconnect: botState.lastDisconnect
+    });
+});
+
+app.post('/admin/pair', requireAdmin, async (req, res) => {
+    try {
+        if (isReady) return res.status(400).json({ status: 'error', message: 'Bot sudah terhubung. Putuskan dulu bila ingin mengganti nomor.' });
+        const phone = formatToInternational((req.body || {}).phone || '');
+        if (phone.length < 10) return res.status(400).json({ status: 'error', message: 'Nomor WhatsApp tidak valid.' });
+        if (!sock) startBot();
+        await new Promise(r => setTimeout(r, 2500)); // beri waktu soket siap
+        if (sock.authState && sock.authState.creds && sock.authState.creds.registered) {
+            return res.status(400).json({ status: 'error', message: 'Sesi sudah terdaftar. Putuskan tautan lalu coba lagi.' });
+        }
+        const code = await sock.requestPairingCode(phone);
+        botState.pairingCode = code;
+        botState.pairingPhone = phone;
+        botState.pairingAt = Date.now();
+        res.json({ status: 'success', code, phone });
+    } catch (e) {
+        res.status(500).json({ status: 'error', message: e.message });
+    }
+});
+
+app.post('/admin/logout', requireAdmin, async (req, res) => {
+    try {
+        try { if (sock) await sock.logout(); } catch (e) { /* sesi mungkin sudah putus */ }
+        isReady = false;
+        botState.pairingCode = null;
+        try { fs.rmSync('baileys_auth', { recursive: true, force: true }); } catch (e) {}
+        // event 'close' (loggedOut) akan memulai ulang sesi bersih; pastikan tetap berjalan
+        setTimeout(() => { if (!isReady) startBot(); }, 4000);
+        res.json({ status: 'success', message: 'Tautan WhatsApp diputus.' });
+    } catch (e) {
+        res.status(500).json({ status: 'error', message: e.message });
+    }
+});
+
+app.post('/admin/test-send', requireAdmin, async (req, res) => {
+    const { phone, template_key, vars, text } = req.body || {};
+    if (!isReady) return res.status(400).json({ status: 'error', message: 'Bot belum terhubung.' });
+    if (!phone) return res.status(400).json({ status: 'error', message: 'Nomor tujuan wajib diisi.' });
+    let message = text;
+    if (!message && template_key && DEFAULT_TEMPLATES[template_key]) {
+        message = fillTemplate(DEFAULT_TEMPLATES[template_key], vars || {});
+    }
+    if (!message) return res.status(400).json({ status: 'error', message: 'Pesan kosong.' });
+    const jid = formatToInternational(phone) + '@s.whatsapp.net';
+    enqueueTask(async () => { await sendSafeMessage(jid, { text: message }); });
+    res.json({ status: 'success', message: 'Pesan uji masuk antrian.' });
+});
+
+app.post('/admin/reload-config', requireAdmin, (req, res) => {
+    templateCache.at = 0;
+    settingsCache.at = 0;
+    res.json({ status: 'success' });
+});
+
 app.get('/', (req, res) => res.json({
     service: 'Presensi Nedelcis Server',
     status: isReady ? 'Connected' : 'Disconnected',
@@ -622,8 +790,5 @@ const PORT = 3000;
 app.listen(PORT, () => {
     console.log(`Server API berjalan di port ${PORT}`);
     startBot();
-    if (REMINDER_ENABLED) {
-        setInterval(runTeacherReminders, 60 * 1000);
-        console.log(`Reminder WA guru aktif (lead ${REMINDER_LEAD_MIN} menit, tindak lanjut ${REMINDER_FOLLOWUP_MIN} menit)`);
-    }
+    setInterval(runTeacherReminders, 60 * 1000);
 });

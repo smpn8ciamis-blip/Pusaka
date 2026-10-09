@@ -90,6 +90,7 @@ const TaxManagement = lazy(() => import("./pages/TaxManagement"));
 const SuperAdminDashboard = lazy(() => import("./pages/SuperAdminDashboard"));
 const SchoolRegistration = lazy(() => import("./pages/SchoolRegistration"));
 const SystemInfo = lazy(() => import("./pages/SystemInfo"));
+const WhatsAppBotSettings = lazy(() => import("./pages/WhatsAppBotSettings"));
 const BulkPhotoUpload = lazy(() => import("./pages/BulkPhotoUpload"));
 const StudentMutations = lazy(() => import("./pages/StudentMutations"));
 const GuruPiketDashboard = lazy(() => import("./pages/GuruPiketDashboard"));
@@ -325,6 +326,7 @@ const App = () => (
               <Route path="/billing-dashboard" element={<ProtectedRoute allowedRoles={['billing', 'admin']}><BillingDashboard /></ProtectedRoute>} />
               <Route path="/tax-management" element={<ProtectedRoute allowedRoles={['bendahara', 'admin']}><TaxManagement /></ProtectedRoute>} />
               <Route path="/super-admin" element={<ProtectedRoute requireRole="super_admin"><SuperAdminDashboard /></ProtectedRoute>} />
+              <Route path="/whatsapp-bot" element={<ProtectedRoute requireRole="admin"><WhatsAppBotSettings /></ProtectedRoute>} />
               <Route path="/system-info" element={<ProtectedRoute requireRole="admin"><SystemInfo /></ProtectedRoute>} />
               <Route path="/bulk-photo-upload" element={<ProtectedRoute requireRole="admin"><BulkPhotoUpload /></ProtectedRoute>} />
               <Route path="/guru-piket-dashboard" element={<ProtectedRoute allowedRoles={['guru_piket', 'admin']}><GuruPiketDashboard /></ProtectedRoute>} />
