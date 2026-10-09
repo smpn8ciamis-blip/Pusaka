@@ -16,8 +16,10 @@ process.on('uncaughtException', (err) => {
 global.WebSocket = WebSocket;
 
 // --- KONFIGURASI SUPABASE ---
-const SUPABASE_URL = 'https://api.pusaka.smpn8ciamis.sch.id'; 
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJpYXQiOjE3NzQ1ODU1MzgsImV4cCI6MjA4OTk0NTUzOH0.54IUTBkELsSsEpkyzcfsKqZKA4C6xzMECh1WZva5qZA';  
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://api.pusaka.smpn8ciamis.sch.id';
+const SUPABASE_KEY_FALLBACK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJpYXQiOjE3NzQ1ODU1MzgsImV4cCI6MjA4OTk0NTUzOH0.54IUTBkELsSsEpkyzcfsKqZKA4C6xzMECh1WZva5qZA';  
+// Sebaiknya set lewat env SUPABASE_KEY dan ganti (rotate) key lama yang ada di repo.
+const SUPABASE_KEY = process.env.SUPABASE_KEY || SUPABASE_KEY_FALLBACK;
 const ADMIN_PHONE = '6281312760936';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -395,25 +397,8 @@ app.get('/test-db', async (req, res) => {
     } catch (e) { return res.status(500).json({ error: e.message }); }
 });
 
-app.get('/pair', async (req, res) => {
-    if (isReady) return res.send('<h2 style="color:green;text-align:center;">✓ Bot Sudah Terhubung!</h2>');
-    const rawNomor = req.query.nomor;
-    if (!rawNomor) return res.send('<h3>Masukkan nomor pada URL: /pair?nomor=628xxx</h3>');
-    try {
-        const cleanNum = formatToInternational(rawNomor);
-        const code = await sock.requestPairingCode(cleanNum);
-        res.send(`<h1 style="text-align:center;color:#25D366;">Kode Pairing: ${code}</h1>`);
-    } catch (err) { res.status(500).send('Error: ' + err.message); }
-});
-
-app.get('/', (req, res) => res.json({ service: 'Presensi Nedelcis', status: isReady ? 'Connected' : 'Disconnected' }));
-
-const PORT = 3000;
-app.listen(PORT, () => {
-    console.log(`Server API berjalan di port ${PORT}`);
-    startBot();
-});BARU - BYPASS RLS)
-// Bot mencari nomor WA sendiri via service role key
+// =====================================================
+// /notify-parent : notifikasi presensi ke orang tua (bot mencari nomor WA sendiri via service role, bypass RLS)
 // =====================================================
 app.post('/notify-parent', async (req, res) => {
     const { student_id, type, status, time, date } = req.body;
@@ -458,21 +443,6 @@ app.post('/notify-parent', async (req, res) => {
     }
 });
 
-// =====================================================
-// ENDPOINT UTILITAS
-// =====================================================
-app.get('/test-db', async (req, res) => {
-    const { nisn } = req.query;
-    try {
-        if (nisn) {
-            const { data, error } = await supabase.from('students').select('*, classes(name)').eq('nisn', nisn);
-            return res.json({ query_nisn: nisn, error, data });
-        }
-        const { data, error } = await supabase.from('students').select('*, classes(name)').limit(3);
-        return res.json({ status: '3 Sampel Data', error, sample_data: data });
-    } catch (e) { return res.status(500).json({ error: e.message }); }
-});
-
 app.get('/pair', async (req, res) => {
     if (isReady) return res.send('<h2 style="color:green;text-align:center;">✓ Bot Sudah Terhubung!</h2>');
     const rawNomor = req.query.nomor;
@@ -482,6 +452,164 @@ app.get('/pair', async (req, res) => {
         const code = await sock.requestPairingCode(cleanNum);
         res.send(`<h1 style="text-align:center;color:#25D366;">Kode Pairing: ${code}</h1>`);
     } catch (err) { res.status(500).send('Error: ' + err.message); }
+});
+
+// =====================================================
+// REMINDER WA GURU (jadwal mengajar, absensi & jurnal)
+// =====================================================
+// Env: TEACHER_REMINDER=off untuk mematikan | REMINDER_LEAD_MIN (default 10)
+//      REMINDER_FOLLOWUP_MIN (default 15) | REMINDER_SENT_FILE
+const REMINDER_ENABLED = (process.env.TEACHER_REMINDER || 'on') !== 'off';
+const REMINDER_LEAD_MIN = parseInt(process.env.REMINDER_LEAD_MIN || '10', 10);
+const REMINDER_FOLLOWUP_MIN = parseInt(process.env.REMINDER_FOLLOWUP_MIN || '15', 10);
+const REMINDER_SENT_FILE = process.env.REMINDER_SENT_FILE || '/srv/wa-bot/reminders_sent.json';
+
+let reminderSent = new Set();
+let reminderSentDate = '';
+
+function wibNow() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hourCycle: 'h23', weekday: 'short'
+    }).formatToParts(new Date());
+    const g = (t) => parts.find(p => p.type === t).value;
+    const dowMap = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+    return {
+        date: `${g('year')}-${g('month')}-${g('day')}`,
+        minutes: parseInt(g('hour'), 10) * 60 + parseInt(g('minute'), 10),
+        dow: dowMap[g('weekday')]
+    };
+}
+
+function hhmmToMin(t) {
+    const [h, m] = String(t).split(':');
+    return parseInt(h, 10) * 60 + parseInt(m, 10);
+}
+
+function loadReminderState(date) {
+    reminderSentDate = date;
+    reminderSent = new Set();
+    try {
+        if (fs.existsSync(REMINDER_SENT_FILE)) {
+            const d = JSON.parse(fs.readFileSync(REMINDER_SENT_FILE, 'utf-8'));
+            if (d.date === date) reminderSent = new Set(d.keys || []);
+        }
+    } catch (e) {}
+}
+
+function markReminderSent(key) {
+    reminderSent.add(key);
+    try {
+        fs.writeFileSync(REMINDER_SENT_FILE, JSON.stringify({ date: reminderSentDate, keys: Array.from(reminderSent) }));
+    } catch (e) {}
+}
+
+let reminderRunning = false;
+async function runTeacherReminders() {
+    if (!REMINDER_ENABLED || !isReady || reminderRunning) return;
+    reminderRunning = true;
+    try {
+        const now = wibNow();
+        if (reminderSentDate !== now.date) loadReminderState(now.date);
+        if (now.dow > 6) return; // Minggu libur
+
+        // Tahun ajaran & semester aktif
+        const { data: st } = await supabase.from('school_settings')
+            .select('academic_year, active_semester').limit(1).maybeSingle();
+
+        let q = supabase.from('schedules')
+            .select('id, teacher_id, class_id, subject, start_time, end_time, academic_year, semester')
+            .eq('day_of_week', now.dow);
+        if (st && st.academic_year) q = q.eq('academic_year', st.academic_year);
+        if (st && st.active_semester) q = q.eq('semester', st.active_semester);
+        const { data: schedules, error } = await q;
+        if (error) throw error;
+        if (!schedules || schedules.length === 0) return;
+
+        // Hanya proses jadwal yang relevan pada menit ini (pengingat awal / tindak lanjut)
+        const relevant = schedules.filter(s => {
+            const start = hhmmToMin(s.start_time);
+            const remindAt = start - REMINDER_LEAD_MIN;
+            const followAt = start + REMINDER_FOLLOWUP_MIN;
+            return (now.minutes >= remindAt && now.minutes < start + 5) ||
+                   (now.minutes >= followAt && now.minutes < hhmmToMin(s.end_time));
+        });
+        if (relevant.length === 0) return;
+
+        const teacherIds = [...new Set(schedules.map(s => s.teacher_id))];
+        const classIds = [...new Set(relevant.map(s => s.class_id))];
+        const [{ data: teachers }, { data: classes }] = await Promise.all([
+            supabase.from('teachers').select('id, user_id').in('id', teacherIds),
+            supabase.from('classes').select('id, name').in('id', classIds)
+        ]);
+        const userIds = (teachers || []).map(t => t.user_id);
+        const { data: profiles } = await supabase.from('profiles').select('id, full_name, phone').in('id', userIds);
+        const profById = new Map((profiles || []).map(p => [p.id, p]));
+        const teacherById = new Map((teachers || []).map(t => [t.id, profById.get(t.user_id)]));
+        const className = new Map((classes || []).map(c => [c.id, c.name]));
+
+        // Jam pertama = jadwal paling awal milik guru pada hari ini
+        const firstOfTeacher = new Map();
+        for (const s of schedules) {
+            const cur = firstOfTeacher.get(s.teacher_id);
+            if (!cur || hhmmToMin(s.start_time) < hhmmToMin(cur.start_time)) firstOfTeacher.set(s.teacher_id, s);
+        }
+
+        for (const s of relevant) {
+            const prof = teacherById.get(s.teacher_id);
+            if (!prof || !prof.phone) continue;
+            const start = hhmmToMin(s.start_time);
+            const isFirst = firstOfTeacher.get(s.teacher_id).id === s.id;
+            const jam = `${String(s.start_time).slice(0, 5)}–${String(s.end_time).slice(0, 5)} WIB`;
+            const kelas = className.get(s.class_id) || '-';
+            const jid = formatToInternational(prof.phone) + '@s.whatsapp.net';
+
+            if (now.minutes < start + 5) {
+                const key = `pre:${s.id}`;
+                if (reminderSent.has(key)) continue;
+                markReminderSent(key);
+                const text = isFirst
+                    ? `⏰ *PENGINGAT JAM PERTAMA MENGAJAR*\n\nYth. Bapak/Ibu *${prof.full_name}*,\nHari ini jam pertama mengajar Anda:\n• Kelas: *${kelas}*\n• Mapel: *${s.subject}*\n• Jam: *${jam}*\n\nMohon segera masuk kelas, lalu:\n1️⃣ Isi *absensi siswa*\n2️⃣ Isi *jurnal mengajar*\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`
+                    : `⏰ *PENGINGAT MENGAJAR*\n\nYth. Bapak/Ibu *${prof.full_name}*,\nSebentar lagi jadwal mengajar Anda:\n• Kelas: *${kelas}*\n• Mapel: *${s.subject}*\n• Jam: *${jam}*\n\nMohon masuk kelas tepat waktu dan jangan lupa mengisi *jurnal mengajar* setelah pembelajaran.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
+                enqueueTask(async () => {
+                    console.log(`[REMINDER] ${prof.full_name} - ${kelas} ${jam}`);
+                    await sendSafeMessage(jid, { text });
+                });
+            } else {
+                // Tindak lanjut: jurnal (dan absensi jam pertama) belum terisi
+                const key = `post:${s.id}`;
+                if (reminderSent.has(key)) continue;
+                const { data: jr } = await supabase.from('teaching_journals')
+                    .select('id').eq('schedule_id', s.id).eq('date', now.date).limit(1);
+                const journalDone = jr && jr.length > 0;
+                let attDone = true;
+                if (isFirst) {
+                    const { data: at } = await supabase.from('attendance')
+                        .select('id').eq('schedule_id', s.id).eq('date', now.date).limit(1);
+                    attDone = at && at.length > 0;
+                }
+                markReminderSent(key);
+                if (journalDone && attDone) continue;
+                const todo = [];
+                if (!attDone) todo.push('*absensi siswa*');
+                if (!journalDone) todo.push('*jurnal mengajar*');
+                const text = `📝 *PENGINGAT PENGISIAN*\n\nYth. Bapak/Ibu *${prof.full_name}*,\nData berikut belum terisi untuk kelas *${kelas}* (${s.subject}, ${jam}):\n• ${todo.join('\n• ')}\n\nMohon segera dilengkapi di aplikasi Pusaka.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
+                enqueueTask(async () => {
+                    console.log(`[REMINDER-LANJUT] ${prof.full_name} - ${kelas}`);
+                    await sendSafeMessage(jid, { text });
+                });
+            }
+        }
+    } catch (e) {
+        console.error('[TEACHER REMINDER ERROR]:', e.message);
+    } finally {
+        reminderRunning = false;
+    }
+}
+
+app.post('/run-teacher-reminders', async (req, res) => {
+    runTeacherReminders();
+    res.json({ status: 'started' });
 });
 
 app.get('/', (req, res) => res.json({
@@ -494,4 +622,8 @@ const PORT = 3000;
 app.listen(PORT, () => {
     console.log(`Server API berjalan di port ${PORT}`);
     startBot();
+    if (REMINDER_ENABLED) {
+        setInterval(runTeacherReminders, 60 * 1000);
+        console.log(`Reminder WA guru aktif (lead ${REMINDER_LEAD_MIN} menit, tindak lanjut ${REMINDER_FOLLOWUP_MIN} menit)`);
+    }
 });
