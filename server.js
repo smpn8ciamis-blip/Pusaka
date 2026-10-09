@@ -688,19 +688,48 @@ app.post('/run-teacher-reminders', async (req, res) => {
 // ENDPOINT ADMIN (dipakai halaman "WhatsApp Bot" di aplikasi Pusaka)
 // Otentikasi: header Authorization: Bearer <JWT login Supabase>, harus role admin/super_admin
 // =====================================================
+// Verifikasi JWT login. Prioritas: SUPABASE_JWT_SECRET (lokal, HS256) -> GoTrue /auth/v1/user
+const crypto = require('crypto');
+function verifyJwtLocal(token, secret) {
+    const parts = token.split('.');
+    if (parts.length !== 3) throw new Error('format token salah');
+    const expected = crypto.createHmac('sha256', secret).update(parts[0] + '.' + parts[1]).digest('base64url');
+    const a = Buffer.from(expected), b = Buffer.from(parts[2]);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new Error('tanda tangan tidak cocok (JWT secret berbeda)');
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
+    if (payload.exp && payload.exp * 1000 < Date.now()) throw new Error('token kedaluwarsa');
+    if (!payload.sub) throw new Error('token tanpa user');
+    return payload.sub;
+}
+
+async function resolveUserId(token) {
+    if (process.env.SUPABASE_JWT_SECRET) return verifyJwtLocal(token, process.env.SUPABASE_JWT_SECRET);
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token}` }
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok || !body.id) throw new Error(`GoTrue ${r.status}: ${body.msg || body.message || body.error_description || 'ditolak'}`);
+    return body.id;
+}
+
 async function requireAdmin(req, res, next) {
     try {
         const auth = req.headers.authorization || '';
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
         if (!token) return res.status(401).json({ status: 'error', message: 'Token tidak ada.' });
-        const { data: u, error } = await supabase.auth.getUser(token);
-        if (error || !u || !u.user) return res.status(401).json({ status: 'error', message: 'Token tidak valid.' });
-        const { data: roles, error: rErr } = await supabase.from('user_roles').select('role').eq('user_id', u.user.id);
+        let userId;
+        try {
+            userId = await resolveUserId(token);
+        } catch (e) {
+            console.error('[ADMIN AUTH] Token ditolak:', e.message);
+            return res.status(401).json({ status: 'error', message: `Token tidak valid (${e.message}).` });
+        }
+        const { data: roles, error: rErr } = await supabase.from('user_roles').select('role').eq('user_id', userId);
         if (rErr) throw rErr;
         if (!(roles || []).some(r => r.role === 'admin' || r.role === 'super_admin')) {
             return res.status(403).json({ status: 'error', message: 'Hanya admin.' });
         }
-        req.adminUser = u.user;
+        req.adminUserId = userId;
         next();
     } catch (e) {
         res.status(500).json({ status: 'error', message: e.message });
@@ -786,7 +815,7 @@ app.get('/', (req, res) => res.json({
     queue_length: taskQueue.length
 }));
 
-const PORT = 3000;
+const PORT = parseInt(process.env.PORT || '3000', 10);
 app.listen(PORT, () => {
     console.log(`Server API berjalan di port ${PORT}`);
     startBot();

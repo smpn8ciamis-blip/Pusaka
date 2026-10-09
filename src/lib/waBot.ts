@@ -19,6 +19,12 @@ export async function waAdminFetch<T = any>(path: string, init: { method?: 'GET'
     throw new Error('Server bot tidak dapat dihubungi. Pastikan bot berjalan dan versi terbaru server.js sudah terpasang.');
   }
   const json = await res.json().catch(() => ({}));
+  if ([502, 503, 504].includes(res.status)) {
+    throw new Error('Bot WhatsApp tidak berjalan (HTTP ' + res.status + '). Jalankan/restart server.js di server, lalu klik Muat ulang.');
+  }
+  if (res.status === 404) {
+    throw new Error('Endpoint bot belum ada (HTTP 404). Pasang server.js versi terbaru lalu restart bot.');
+  }
   if (!res.ok) throw new Error(json.message || `Bot membalas error ${res.status}`);
   return json as T;
 }
