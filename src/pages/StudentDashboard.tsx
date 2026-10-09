@@ -92,7 +92,7 @@ const calcPercent = (value: number, total: number): number => {
 const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
 // Palet: biru tinta seragam + kuning kapur sebagai satu-satunya aksen
-const INK = 'bg-[#1B2A5E]';
+const INK = 'bg-gradient-to-br from-[#1E6FE0] via-[#2F7FE8] to-[#4F97F2]';
 const FONT_STACK = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
 const toMinutes = (t?: string | null): number | null => {
@@ -149,50 +149,67 @@ const EmptyState = memo(({ icon: Icon, title, subtitle }: { icon: any; title: st
 ));
 EmptyState.displayName = 'EmptyState';
 
-/** Kartu utama beranda: pelajaran yang sedang berlangsung, dengan batang waktu berjalan. */
-const CurrentLessonCard = memo(({ state, onOpenSchedule }: { state: LessonState; onOpenSchedule: () => void }) => {
+/** Kartu melayang di bawah hero: pelajaran berlangsung/berikutnya + tiga aksi cepat. */
+const CurrentLessonCard = memo(({ state, onOpenSchedule, actions }: {
+  state: LessonState;
+  onOpenSchedule: () => void;
+  actions: { label: string; icon: any; onClick: () => void }[];
+}) => {
   const teacher = (l: any) => l?.teachers?.profiles?.full_name || '';
   let label = 'Jadwal hari ini';
-  let title = 'Tidak ada pelajaran hari ini';
+  let title = 'Tidak ada pelajaran';
   let meta = 'Nikmati harimu.';
   let progress: number | null = null;
-  let range = '';
 
   if (state.kind === 'now') {
     label = 'Sedang berlangsung';
     title = state.lesson.subject;
     meta = [teacher(state.lesson), `sisa ${humanMinutes(state.minsLeft)}`].filter(Boolean).join(' · ');
     progress = Math.min(100, Math.max(0, (state.elapsed / state.total) * 100));
-    range = `${state.lesson.start_time?.slice(0, 5)} – ${state.lesson.end_time?.slice(0, 5)}`;
   } else if (state.kind === 'next') {
-    label = 'Pelajaran berikutnya';
+    label = 'Berikutnya';
     title = state.lesson.subject;
-    meta = [teacher(state.lesson), `mulai ${humanMinutes(state.minsUntil)} lagi`].filter(Boolean).join(' · ');
-    range = `${state.lesson.start_time?.slice(0, 5)} – ${state.lesson.end_time?.slice(0, 5)}`;
+    meta = [`${state.lesson.start_time?.slice(0, 5)}`, `mulai ${humanMinutes(state.minsUntil)} lagi`].join(' · ');
   } else if (state.kind === 'done') {
-    label = 'Jadwal hari ini';
     title = 'Semua pelajaran selesai';
     meta = `${state.count} mapel hari ini sudah dilewati.`;
   }
 
   return (
-    <button
-      onClick={onOpenSchedule}
-      className={`${INK} w-full text-left rounded-3xl p-5 text-white relative overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FFC93C]`}
-    >
-      <div className="flex items-center gap-2 text-xs font-medium text-[#FFC93C]">
-        {state.kind === 'now' && <span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full rounded-full bg-[#FFC93C] opacity-60 motion-safe:animate-ping" /><span className="relative inline-flex h-2 w-2 rounded-full bg-[#FFC93C]" /></span>}
-        {label}
+    <div className="relative z-10 -mt-16 rounded-3xl bg-white dark:bg-slate-900 p-4 shadow-[0_10px_30px_-12px_rgba(30,111,224,0.45)] border border-slate-100 dark:border-slate-800">
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onOpenSchedule}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1E6FE0]"
+        >
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#E1F0FF] text-[#1E6FE0]">
+            <Clock className="h-6 w-6" />
+          </span>
+          <span className="min-w-0">
+            <span className="flex items-center gap-1.5 text-[11px] font-semibold text-[#1E6FE0]">
+              {state.kind === 'now' && <span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full rounded-full bg-[#1E6FE0] opacity-60 motion-safe:animate-ping" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#1E6FE0]" /></span>}
+              {label}
+            </span>
+            <span className="block truncate text-base font-bold text-slate-900 dark:text-white leading-tight">{title}</span>
+            <span className="block truncate text-xs text-slate-500">{meta}</span>
+          </span>
+        </button>
+        <div className="flex shrink-0 items-start gap-3">
+          {actions.map((ac) => (
+            <button key={ac.label} onClick={ac.onClick}
+              className="flex flex-col items-center gap-1 text-[#1E6FE0] rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1E6FE0]">
+              <ac.icon className="h-6 w-6" />
+              <span className="text-[11px] font-bold text-slate-800 dark:text-slate-100">{ac.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
-      <p className="mt-2 text-2xl font-extrabold leading-tight tracking-tight">{title}</p>
-      <p className="mt-1 text-sm text-white/70">{meta}</p>
-      {range && <p className="mt-4 text-sm font-semibold tabular-nums text-white/90">{range}</p>}
       {progress !== null && (
-        <div className="mt-2 h-1.5 rounded-full bg-white/15 overflow-hidden" role="progressbar" aria-valuenow={Math.round(progress)} aria-valuemin={0} aria-valuemax={100}>
-          <div className="h-full rounded-full bg-[#FFC93C] transition-[width] duration-1000" style={{ width: `${progress}%` }} />
+        <div className="mt-3 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden" role="progressbar" aria-valuenow={Math.round(progress)} aria-valuemin={0} aria-valuemax={100}>
+          <div className="h-full rounded-full bg-[#1E6FE0] transition-[width] duration-1000" style={{ width: `${progress}%` }} />
         </div>
       )}
-    </button>
+    </div>
   );
 });
 CurrentLessonCard.displayName = 'CurrentLessonCard';
@@ -345,6 +362,7 @@ const StudentDashboardPage = () => {
   const liveClock = useLiveClock();
 
   const [showData, setShowData] = useState(true);
+  const [showAllMenu, setShowAllMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
@@ -778,7 +796,7 @@ const StudentDashboardPage = () => {
   // ─── Loading state ─────────────────────────────────────────────────────
   if (accountLoading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-[#1B2A5E]">
+      <div className="flex items-center justify-center h-screen bg-[#1E6FE0]">
         <div className="flex flex-col items-center gap-4 text-white">
           <Loader2 className="h-10 w-10 animate-spin" />
           <span className="text-base">Memuat data...</span>
@@ -796,58 +814,144 @@ const StudentDashboardPage = () => {
   const renderOverview = () => {
     const lesson = resolveLesson(todaySchedules, liveClock);
     const nowMin = liveClock.getHours() * 60 + liveClock.getMinutes();
+
+    // Warna pastel per menu + lencana angka (sesuai data yang sudah ada)
+    const PASTEL: Record<string, { tile: string; icon: string }> = {
+      schedule: { tile: 'bg-[#E1F0FF]', icon: 'text-[#1E6FE0]' },
+      grades: { tile: 'bg-[#E3F6E8]', icon: 'text-emerald-600' },
+      elearning: { tile: 'bg-[#E0F4FA]', icon: 'text-cyan-600' },
+      attendance: { tile: 'bg-[#FFF3D1]', icon: 'text-amber-600' },
+      violations: { tile: 'bg-[#FDE7EA]', icon: 'text-rose-600' },
+      achievements: { tile: 'bg-[#EEE5FA]', icon: 'text-violet-600' },
+      announcements: { tile: 'bg-[#E4E8FB]', icon: 'text-indigo-600' },
+      dispensasi: { tile: 'bg-[#DDF3F1]', icon: 'text-teal-600' },
+      uploads: { tile: 'bg-[#E3F6E8]', icon: 'text-emerald-600' },
+      settings: { tile: 'bg-[#EFEFF2]', icon: 'text-slate-600' },
+      profile: { tile: 'bg-[#FCE6F1]', icon: 'text-pink-600' },
+    };
+    const badgeFor = (m: any): string | null => {
+      if (!showData) return null;
+      switch (m.tab) {
+        case 'schedule': return `${todaySchedules?.length || 0} Mapel`;
+        case 'grades': return `${grades?.length || 0} Nilai`;
+        case 'attendance': return `${attendancePercentage}%`;
+        case 'violations': return `${totalViolationPoints} Poin`;
+        case 'achievements': return `${achievements?.length || 0} Prestasi`;
+        default: return null;
+      }
+    };
+    const FALLBACK = { tile: 'bg-[#E1F0FF]', icon: 'text-[#1E6FE0]' };
+    const VISIBLE = 7;
+    const menusShown = showAllMenu ? shortcutMenus : shortcutMenus.slice(0, VISIBLE);
+
     const stats = [
-      { label: 'Kehadiran', value: showData ? `${attendancePercentage}%` : '•••', sub: showData ? `${attendanceSummary?.hadir || 0} dari ${attendanceSummary?.total || 0} hari` : '•••', tab: 'attendance', tone: 'text-emerald-600' },
-      { label: 'Rata-rata nilai', value: showData ? (averageGrade ?? '-') : '•••', sub: showData ? `${grades?.length || 0} mapel` : '•••', tab: 'grades', tone: 'text-[#1B2A5E] dark:text-blue-300' },
-      { label: 'Poin pelanggaran', value: showData ? totalViolationPoints : '•••', sub: showData ? `${violations?.length || 0} catatan` : '•••', tab: 'violations', tone: totalViolationPoints > 0 ? 'text-red-600' : 'text-emerald-600' },
-      { label: 'Prestasi', value: showData ? (achievements?.length || 0) : '•••', sub: 'penghargaan', tab: 'achievements', tone: 'text-amber-600' },
+      { label: 'Kehadiran', value: showData ? `${attendancePercentage}%` : '•••', unit: 'Hari ini ' + (showData ? `${attendanceSummary?.hadir || 0}/${attendanceSummary?.total || 0}` : '•••'), tab: 'attendance', icon: CalendarCheck, grad: 'from-[#CFE6FF] to-[#E9F3FF]' },
+      { label: 'Rata-rata Nilai', value: showData ? (averageGrade ?? '-') : '•••', unit: showData ? `${grades?.length || 0} Mapel` : '•••', tab: 'grades', icon: BookOpen, grad: 'from-[#CDEFD6] to-[#E8F7EC]' },
+      { label: 'Poin Pelanggaran', value: showData ? totalViolationPoints : '•••', unit: showData ? `${violations?.length || 0} Catatan` : '•••', tab: 'violations', icon: AlertTriangle, grad: 'from-[#FFE2C2] to-[#FFF1E0]' },
+      { label: 'Prestasi', value: showData ? (achievements?.length || 0) : '•••', unit: 'Penghargaan', tab: 'achievements', icon: Trophy, grad: 'from-[#E4D6F8] to-[#F2EBFC]' },
     ];
-    const quick = shortcutMenus.filter((m) => !['schedule', 'grades', 'profile'].includes(m.tab as string));
 
     return (
-      <div className="space-y-5 p-4">
-        <CurrentLessonCard state={lesson} onOpenSchedule={() => handleTabChange('schedule')} />
+      <div className="space-y-6 px-4 pb-4">
+        <CurrentLessonCard
+          state={lesson}
+          onOpenSchedule={() => handleTabChange('schedule')}
+          actions={[
+            { label: 'Jadwal', icon: Calendar, onClick: () => handleTabChange('schedule') },
+            { label: 'Nilai', icon: BookOpen, onClick: () => handleTabChange('grades') },
+            { label: 'Belajar', icon: GraduationCap, onClick: () => handleTabChange('elearning') },
+          ]}
+        />
 
-        {/* Ringkasan: satu panel, empat angka */}
-        <section aria-label="Ringkasan">
-          <div className="flex items-center justify-between mb-2 px-1">
-            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Ringkasan semester</h3>
+        {/* Layanan Cepat */}
+        <section aria-label="Layanan cepat">
+          <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white mb-4">Layanan Cepat</h2>
+          <div className="grid grid-cols-4 gap-x-3 gap-y-5">
+            {menusShown.map((menu: any) => {
+              const pal = PASTEL[menu.tab as string] ?? FALLBACK;
+              const badge = badgeFor(menu);
+              return (
+                <button
+                  key={menu.label}
+                  onClick={() => menu.isExternal ? (window.location.href = menu.url!) : handleTabChange(menu.tab!)}
+                  className="group flex flex-col items-center gap-2 rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1E6FE0] active:scale-95 transition-transform"
+                >
+                  <span className={`relative flex aspect-square w-full items-center justify-center rounded-[1.6rem] ${pal.tile}`}>
+                    {badge && (
+                      <span className="absolute -top-1.5 -left-1.5 max-w-[calc(100%+0.5rem)] truncate rounded-lg bg-slate-700 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                        {badge}
+                      </span>
+                    )}
+                    <menu.icon className={`h-8 w-8 ${pal.icon}`} strokeWidth={1.75} />
+                  </span>
+                  <span className="text-[13px] font-medium leading-tight text-slate-800 dark:text-slate-200 text-center">{menu.label}</span>
+                </button>
+              );
+            })}
+            {!showAllMenu && shortcutMenus.length > VISIBLE && (
+              <button
+                onClick={() => setShowAllMenu(true)}
+                className="flex flex-col items-center gap-2 rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1E6FE0] active:scale-95 transition-transform"
+              >
+                <span className="relative flex aspect-square w-full items-center justify-center rounded-[1.6rem] bg-[#EFEFF2] dark:bg-slate-800">
+                  <span className="absolute -top-1.5 -left-1.5 rounded-lg bg-slate-700 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                    {shortcutMenus.length - VISIBLE} lagi
+                  </span>
+                  <Grid3X3 className="h-8 w-8 text-slate-500" strokeWidth={1.75} />
+                </span>
+                <span className="text-[13px] font-medium leading-tight text-slate-800 dark:text-slate-200">Semua</span>
+              </button>
+            )}
+          </div>
+          {showAllMenu && (
+            <button onClick={() => setShowAllMenu(false)} className="mt-4 mx-auto block text-xs font-semibold text-[#1E6FE0]">
+              Tampilkan lebih sedikit
+            </button>
+          )}
+        </section>
+
+        {/* Statistik */}
+        <section aria-label="Statistik saya">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Statistik Saya</h2>
             <button
               onClick={() => setShowData((v) => !v)}
-              className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 rounded-md px-1.5 py-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1B2A5E]"
+              className="flex items-center gap-1.5 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1E6FE0]"
               aria-label={showData ? 'Sembunyikan angka' : 'Tampilkan angka'}
             >
               {showData ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
               {showData ? 'Sembunyikan' : 'Tampilkan'}
             </button>
           </div>
-          <div className="mb-2"><AcademicYearSelector /></div>
-          <div className="grid grid-cols-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden">
-            {stats.map((st, i) => (
+          <div className="mb-3"><AcademicYearSelector /></div>
+          <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {stats.map((st) => (
               <button
                 key={st.label}
                 onClick={() => handleTabChange(st.tab)}
-                className={`text-left p-4 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#1B2A5E] ${i % 2 === 0 ? 'border-r' : ''} ${i < 2 ? 'border-b' : ''} border-slate-200/80 dark:border-slate-800`}
+                className={`snap-start shrink-0 w-[9.5rem] rounded-3xl bg-gradient-to-br ${st.grad} p-4 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1E6FE0] active:scale-[0.98] transition-transform`}
               >
-                <p className="text-xs text-slate-500">{st.label}</p>
-                <p className={`text-3xl font-extrabold tabular-nums tracking-tight mt-1 ${st.tone}`}>{st.value}</p>
-                <p className="text-xs text-slate-400 mt-0.5">{st.sub}</p>
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white shadow-sm">
+                  <st.icon className="h-5 w-5 text-slate-600" />
+                </span>
+                <p className="mt-6 text-3xl font-bold tabular-nums text-slate-900">{st.value}</p>
+                <p className="text-sm text-slate-600">{st.label}</p>
+                <p className="mt-0.5 text-xs text-slate-500">{st.unit}</p>
               </button>
             ))}
           </div>
         </section>
 
-        {/* Jadwal hari ini sebagai garis waktu */}
+        {/* Jadwal hari ini */}
         <section aria-label="Jadwal hari ini">
-          <div className="flex items-center justify-between mb-2 px-1">
-            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
-              {DAY_NAMES[liveClock.getDay()]}, {safeFormatDate(liveClock, 'd MMMM')}
-            </h3>
-            <button onClick={() => handleTabChange('schedule')} className="text-xs font-semibold text-[#1B2A5E] dark:text-blue-300 flex items-center gap-0.5">
-              Lihat semua <ChevronRight className="h-3.5 w-3.5" />
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Jadwal Hari Ini</h2>
+            <button onClick={() => handleTabChange('schedule')} className="text-sm font-semibold text-[#1E6FE0] flex items-center gap-0.5">
+              Lihat semua <ChevronRight className="h-4 w-4" />
             </button>
           </div>
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 p-4 shadow-sm">
+            <p className="mb-3 text-xs text-slate-500">{DAY_NAMES[liveClock.getDay()]}, {safeFormatDate(liveClock, 'd MMMM yyyy')}</p>
             {schedulesLoading ? <LoadingState /> : todaySchedules && todaySchedules.length > 0 ? (
               <ol className="relative">
                 {todaySchedules.map((sc: any, idx: number) => {
@@ -863,12 +967,12 @@ const StudentDashboardPage = () => {
                         <p className={`text-sm font-bold ${isPast ? 'text-slate-400' : 'text-slate-800 dark:text-slate-100'}`}>{sc.start_time?.slice(0, 5)}</p>
                         <p className="text-xs text-slate-400">{sc.end_time?.slice(0, 5)}</p>
                       </div>
-                      <span className={`relative z-10 mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full border-2 ${isNow ? 'bg-[#FFC93C] border-[#FFC93C]' : isPast ? 'bg-slate-200 border-slate-200 dark:bg-slate-700 dark:border-slate-700' : 'bg-white border-[#1B2A5E] dark:bg-slate-900 dark:border-blue-300'}`} />
+                      <span className={`relative z-10 mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full border-2 ${isNow ? 'bg-[#1E6FE0] border-[#1E6FE0]' : isPast ? 'bg-slate-200 border-slate-200 dark:bg-slate-700 dark:border-slate-700' : 'bg-white border-[#1E6FE0] dark:bg-slate-900'}`} />
                       <div className={`min-w-0 flex-1 ${isPast ? 'opacity-50' : ''}`}>
                         <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{sc.subject}</p>
                         <p className="text-xs text-slate-500 truncate">{sc.teachers?.profiles?.full_name}</p>
                       </div>
-                      {isNow && <span className="self-start rounded-full bg-[#FFC93C]/25 px-2 py-0.5 text-[11px] font-semibold text-[#7a5b00] dark:text-[#FFC93C]">Sekarang</span>}
+                      {isNow && <span className="self-start rounded-full bg-[#E1F0FF] px-2 py-0.5 text-[11px] font-semibold text-[#1E6FE0]">Sekarang</span>}
                     </li>
                   );
                 })}
@@ -879,35 +983,16 @@ const StudentDashboardPage = () => {
           </div>
         </section>
 
-        {/* Menu cepat: satu warna, ikon konsisten */}
-        <section aria-label="Menu">
-          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2 px-1">Menu</h3>
-          <div className="grid grid-cols-4 gap-x-2 gap-y-4">
-            {quick.map((menu) => (
-              <button
-                key={menu.label}
-                onClick={() => (menu as any).isExternal ? (window.location.href = (menu as any).url!) : handleTabChange((menu as any).tab!)}
-                className="flex flex-col items-center gap-1.5 rounded-xl p-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1B2A5E] active:scale-95 transition-transform"
-              >
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#E6ECFF] text-[#1B2A5E] dark:bg-slate-800 dark:text-blue-300">
-                  <menu.icon className="h-5 w-5" />
-                </span>
-                <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 text-center leading-tight">{menu.label}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-4">
+        <section className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 p-4 shadow-sm">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Kehadiran</h3>
+            <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">Kehadiran</h3>
             <Badge variant="outline" className="text-[10px]">RFID + Manual</Badge>
           </div>
           {attendanceLoading ? <LoadingState /> : <AttendanceBar summary={attendanceSummary || null} />}
         </section>
 
-        <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-4">
-          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-1">Riwayat absensi terbaru</h3>
+        <section className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 p-4 shadow-sm">
+          <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 mb-1">Riwayat absensi terbaru</h3>
           <AttendanceLogList
             logs={attendanceLogs}
             loading={logsLoading}
@@ -937,7 +1022,7 @@ const StudentDashboardPage = () => {
 
     return (
       <div className="space-y-4 p-4">
-        <div className="bg-[#1B2A5E] rounded-2xl p-5 text-white shadow-sm">
+        <div className="bg-[#1E6FE0] rounded-2xl p-5 text-white shadow-sm">
           <div className="flex items-center gap-4">
             {student?.photo_url ? (
               <img src={student.photo_url} alt="Foto" className="w-16 h-16 rounded-full object-cover border-4 border-white/30" />
@@ -991,7 +1076,7 @@ const StudentDashboardPage = () => {
               return (
                 <div key={s.id} className={`rounded-2xl p-4 flex items-center gap-4 border ${isNow ? 'bg-[#FFC93C]/15 border-[#FFC93C]' : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'} ${isPast ? 'opacity-55' : ''}`}>
                   <div className="w-14 shrink-0 text-center tabular-nums">
-                    <p className="text-sm font-bold text-[#1B2A5E] dark:text-blue-300">{s.start_time?.slice(0, 5)}</p>
+                    <p className="text-sm font-bold text-[#1E6FE0] dark:text-blue-300">{s.start_time?.slice(0, 5)}</p>
                     <p className="text-xs text-slate-400">{s.end_time?.slice(0, 5)}</p>
                   </div>
                   <div className="flex-1 min-w-0">
@@ -1017,7 +1102,7 @@ const StudentDashboardPage = () => {
       <AcademicYearSelector />
       <p className="text-[11px] text-gray-400">Nilai mapel yang disembunyikan oleh guru tidak ditampilkan.</p>
       <div className="grid grid-cols-2 gap-3">
-        <div className="bg-[#1B2A5E] rounded-2xl p-4 text-white shadow-sm">
+        <div className="bg-[#1E6FE0] rounded-2xl p-4 text-white shadow-sm">
           <p className="text-blue-100 text-xs">Rata-rata</p>
           <p className="text-3xl font-extrabold">{averageGrade ?? '-'}</p>
         </div>
@@ -1261,62 +1346,102 @@ const StudentDashboardPage = () => {
   // ═════════════════════════════════════════════════════════════════════════
 
   return (
-    <div className="min-h-screen bg-[#F5F6FA] dark:bg-slate-950 pb-28" style={{ fontFamily: FONT_STACK }}>
+    <div className="min-h-screen bg-[#F1F6FD] dark:bg-slate-950 pb-28" style={{ fontFamily: FONT_STACK }}>
       {/* HEADER */}
-      <header className={`${INK} text-white px-4 pt-4 pb-4`}>
-        <div className="flex items-center gap-3">
-          {student?.photo_url ? (
-            <img src={student.photo_url} alt="" className="h-11 w-11 rounded-full object-cover ring-2 ring-white/30" />
-          ) : (
-            <div className="h-11 w-11 rounded-full bg-white/15 flex items-center justify-center text-lg font-bold ring-2 ring-white/30">
-              {student?.full_name?.charAt(0) || 'S'}
-            </div>
-          )}
-          <div className="flex-1 min-w-0">
-            <p className="text-xs text-white/65">{greetingFor(liveClock)}</p>
-            <h1 className="text-base font-bold leading-tight truncate">{student?.full_name || 'Siswa'}</h1>
-            <p className="text-xs text-white/65 truncate">
-              {classInfo?.name || 'Kelas belum diatur'}
-              <span className="mx-1.5 text-white/30">|</span>
-              <span className="tabular-nums">{format(liveClock, 'HH:mm')}</span>
-            </p>
-          </div>
+      {(() => {
+        const isHome = activeTab === 'overview' || !['schedule', 'grades', 'elearning', 'profile', 'attendance', 'violations', 'achievements', 'announcements', 'dispensasi', 'uploads', 'settings'].includes(activeTab);
+        const bellBtn = (
           <button
             data-notif-btn
             onClick={() => setShowNotifications((v) => !v)}
             aria-label="Notifikasi"
-            className="relative h-10 w-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FFC93C]"
+            className="relative h-11 w-11 shrink-0 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
           >
             <Bell className="h-5 w-5" />
             {unreadCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#FFC93C] text-[#1B2A5E] text-[10px] font-extrabold flex items-center justify-center">
+              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#FFC93C] text-[#1E6FE0] text-[10px] font-extrabold flex items-center justify-center">
                 {unreadCount > 99 ? '99+' : unreadCount}
               </span>
             )}
           </button>
+        );
+        const logoutBtn = (
           <button
             onClick={() => setShowLogoutModal(true)}
             aria-label="Keluar"
-            className="h-10 w-10 rounded-full bg-white/10 hover:bg-red-500/70 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FFC93C]"
+            className="h-11 w-11 shrink-0 rounded-full bg-white/20 hover:bg-red-500/80 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
           >
             <LogOut className="h-5 w-5" />
           </button>
-        </div>
+        );
+        const searchPill = (
+          <div className="flex h-12 flex-1 min-w-0 items-center gap-2 rounded-full bg-white px-4 shadow-[0_6px_18px_-8px_rgba(0,0,0,0.35)] focus-within:ring-2 focus-within:ring-white/70">
+            <input
+              data-search-input
+              type="text"
+              placeholder="Cari menu…"
+              aria-label="Cari menu"
+              className="bg-transparent outline-none text-[15px] text-slate-800 placeholder:text-slate-400 flex-1 min-w-0"
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setShowSearchSuggestions(true); }}
+              onFocus={() => setShowSearchSuggestions(true)}
+            />
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#E1F0FF] text-[#1E6FE0]"><Search className="h-4 w-4" /></span>
+          </div>
+        );
+        const avatar = student?.photo_url ? (
+          <img src={student.photo_url} alt="" className="h-14 w-14 rounded-full object-cover ring-2 ring-white/60" />
+        ) : (
+          <div className="h-14 w-14 rounded-full bg-white/20 flex items-center justify-center text-xl font-bold ring-2 ring-white/60">
+            {student?.full_name?.charAt(0) || 'S'}
+          </div>
+        );
 
-        <div className="mt-4 flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2.5 focus-within:bg-white/15">
-          <Search className="h-4 w-4 text-white/60 shrink-0" />
-          <input
-            data-search-input
-            type="text"
-            placeholder="Cari menu (min. 3 huruf)"
-            aria-label="Cari menu"
-            className="bg-transparent outline-none text-sm text-white placeholder:text-white/50 flex-1 min-w-0"
-            value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value); setShowSearchSuggestions(true); }}
-            onFocus={() => setShowSearchSuggestions(true)}
-          />
-        </div>
-      </header>
+        if (isHome) {
+          return (
+            <header className={`${INK} relative overflow-hidden text-white px-4 pt-4 pb-24`}>
+              {schoolSetting?.logo_url && (
+                <img src={schoolSetting.logo_url} alt="" aria-hidden className="pointer-events-none absolute -right-8 top-16 h-56 w-56 object-contain opacity-15" />
+              )}
+              <div className="relative flex items-center gap-2">
+                {searchPill}
+                {bellBtn}
+                {logoutBtn}
+              </div>
+              <div className="relative mt-6 flex items-center gap-3">
+                <button onClick={() => handleTabChange('profile')} aria-label="Buka profil" className="rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">{avatar}</button>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-white/80">{greetingFor(liveClock)},</p>
+                  <h1 className="text-2xl font-extrabold leading-tight tracking-tight truncate">{student?.full_name?.split(' ')[0] || 'Siswa'}</h1>
+                  <p className="text-sm text-white/80 truncate">
+                    {classInfo?.name || 'Kelas belum diatur'}
+                    <span className="mx-1.5 text-white/40">|</span>
+                    <span className="tabular-nums">{format(liveClock, 'HH:mm')}</span>
+                  </p>
+                </div>
+              </div>
+            </header>
+          );
+        }
+        return (
+          <header className={`${INK} text-white px-4 pt-4 pb-5 rounded-b-[2rem]`}>
+            <div className="flex items-center gap-2">
+              {searchPill}
+              {bellBtn}
+              {logoutBtn}
+            </div>
+            <div className="mt-4 flex items-center gap-3">
+              <div className="h-10 w-10 shrink-0 rounded-full overflow-hidden bg-white/20 flex items-center justify-center font-bold ring-2 ring-white/50">
+                {student?.photo_url ? <img src={student.photo_url} alt="" className="h-full w-full object-cover" /> : (student?.full_name?.charAt(0) || 'S')}
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-base font-bold leading-tight truncate">{student?.full_name || 'Siswa'}</h1>
+                <p className="text-xs text-white/80 truncate">{classInfo?.name || 'Kelas belum diatur'}</p>
+              </div>
+            </div>
+          </header>
+        );
+      })()}
 
       {/* NOTIFICATIONS PANEL */}
       {showNotifications && (
@@ -1380,7 +1505,7 @@ const StudentDashboardPage = () => {
       {/* SEARCH SUGGESTIONS */}
       {showSearchSuggestions && searchQuery.length >= 3 && (
         <div data-search-panel
-          className="fixed top-[8.25rem] left-4 right-4 bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-100 dark:border-gray-800 z-[999] overflow-hidden">
+          className="fixed top-[4.75rem] left-4 right-4 bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-100 dark:border-gray-800 z-[999] overflow-hidden">
           {filteredSuggestions.length > 0 ? filteredSuggestions.map((menu) => (
             <button key={menu.label}
               onClick={() => {
@@ -1406,7 +1531,7 @@ const StudentDashboardPage = () => {
 
       {/* BOTTOM NAV */}
       <nav aria-label="Navigasi utama" className="fixed bottom-3 left-3 right-3 z-50 mx-auto max-w-md">
-        <div className="grid grid-cols-5 gap-1 rounded-2xl bg-white/95 dark:bg-slate-900/95 backdrop-blur border border-slate-200 dark:border-slate-800 p-1.5 shadow-[0_8px_24px_-8px_rgba(27,42,94,0.35)]">
+        <div className="grid grid-cols-5 gap-1 rounded-2xl bg-white/95 dark:bg-slate-900/95 backdrop-blur border border-slate-200 dark:border-slate-800 p-1.5 shadow-[0_8px_24px_-8px_rgba(30,111,224,0.4)]">
           {[
             { tab: 'overview', label: 'Beranda', icon: Home },
             { tab: 'schedule', label: 'Jadwal', icon: Calendar },
@@ -1420,8 +1545,8 @@ const StudentDashboardPage = () => {
                 key={item.tab}
                 onClick={() => handleTabChange(item.tab)}
                 aria-current={isActive ? 'page' : undefined}
-                className={`flex flex-col items-center justify-center gap-0.5 rounded-xl py-2 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1B2A5E] ${
-                  isActive ? 'bg-[#1B2A5E] text-white' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+                className={`flex flex-col items-center justify-center gap-0.5 rounded-xl py-2 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1E6FE0] ${
+                  isActive ? 'bg-[#E1F0FF] text-[#1E6FE0] dark:bg-slate-800' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
                 }`}
               >
                 <item.icon className="h-5 w-5" />
