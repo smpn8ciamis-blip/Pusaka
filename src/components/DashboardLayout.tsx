@@ -354,6 +354,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         { icon: Upload, label: 'Upload Foto Massal', href: '/bulk-photo-upload' },
         { icon: Upload, label: 'Manajemen Upload Berkas', href: '/file-upload-management' },
         { icon: Bell, label: 'Billing Dashboard', href: '/billing-dashboard' },
+        { icon: Send, label: 'WhatsApp Bot', href: '/whatsapp-bot' },
         { icon: Server, label: 'Sistem Informasi', href: '/system-info' },
         { icon: Settings, label: 'Pengaturan', href: '/settings' },
       ],
