@@ -695,10 +695,8 @@ export default function PaymentReceipts() {
       doc.setFont("helvetica", "normal");
       doc.text("Banyaknya Uang", leftMargin, yPos);
       doc.text(":", colonX, yPos);
-      doc.setFont("helvetica", "bolditalic");
-      const amountTextLines = doc.splitTextToSize(receipt.amount_text, pageWidth - valueX - 15);
-      doc.text(amountTextLines, valueX, yPos);
-      yPos += (amountTextLines.length - 1) * 5;
+      doc.setFont("helvetica", "bold");
+      doc.text(`Rp ${Number(receipt.amount).toLocaleString('id-ID')},00`, valueX, yPos);
 
       yPos += 8;
       doc.setFont("helvetica", "normal");
@@ -716,15 +714,16 @@ export default function PaymentReceipts() {
 
       const boxX = valueX;
       const boxWidth = pageWidth - valueX - 15;
-      const boxHeight = 10;
+      // Terbilang = jumlah uang dalam huruf, mis. "Dua puluh lima ribu rupiah"
+      const words = receipt.amount_text || formatAmountToWords(Number(receipt.amount) || 0);
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "bolditalic");
+      const wordLines: string[] = doc.splitTextToSize(words, boxWidth - 8);
+      const boxHeight = Math.max(10, wordLines.length * 5 + 5);
       doc.setDrawColor(0);
       doc.setLineWidth(0.3);
       doc.rect(boxX, yPos, boxWidth, boxHeight);
-
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "normal");
-      doc.text("Rp", boxX + 3, yPos + 6);
-      doc.text(`${Number(receipt.amount).toLocaleString('id-ID')},00`, boxX + boxWidth - 5, yPos + 6, { align: "right" });
+      doc.text(wordLines, boxX + 4, yPos + 6.5);
 
       yPos += boxHeight + 8;
       doc.setFontSize(9);
