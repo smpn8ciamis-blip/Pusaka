@@ -9,6 +9,7 @@ import { id as idLocale } from "date-fns/locale";
 import jsPDF from "jspdf";
 import { addLetterheadToPDF } from "@/lib/pdfLetterhead";
 import { toTitleCase } from "@/lib/utils";
+import { drawCollectiveTable, resolveLineItems } from "@/lib/collectiveReceiptTable";
 import { toast } from "sonner";
 
 // Helper function to convert number to Indonesian words
@@ -141,127 +142,19 @@ export function ReceiptPreviewDialog({
       doc.text(descLines, valueX, yPos);
       yPos += (descLines.length - 1) * 4;
 
-      // Table
+      // Table (snapshot tarif saat kwitansi dibuat; kwitansi lama dihitung dari tarif saat ini)
       yPos += 10;
-      const colNo = leftMargin;
-      const colName = leftMargin + 8;
-      const colNIP = leftMargin + 58;
-      const colJabatan = leftMargin + 90;
-      const colKelas = leftMargin + 110;
-      const colHarga = leftMargin + 125;
-      const colHari = leftMargin + 142;
-      const colAmount = leftMargin + 155;
-      const colTTD = pageWidth - pdfSettings.marginRight;
-      
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(pdfSettings.tableFontSize);
-      
-      doc.setDrawColor(0);
-      doc.setLineWidth(pdfSettings.tableLineWidth);
-      doc.line(leftMargin, yPos - 3, pageWidth - pdfSettings.marginRight, yPos - 3);
-      
-      doc.text("No", colNo, yPos);
-      doc.text("Nama", colName, yPos);
-      doc.text("NIP/NIS", colNIP, yPos);
-      doc.text("Jabatan", colJabatan, yPos);
-      doc.text("Kelas", colKelas, yPos);
-      doc.text("Satuan", colHarga, yPos);
-      doc.text("Hari", colHari, yPos);
-      doc.text("Jumlah (Rp)", colAmount, yPos);
-      doc.text("TTD", colTTD, yPos, { align: "right" });
-      
-      yPos += 2;
-      doc.line(leftMargin, yPos, pageWidth - pdfSettings.marginRight, yPos);
-      
-      // Table content
-      doc.setFont("helvetica", "normal");
-      
-      let totalAmount = 0;
-      let rowNumber = 0;
-      
-      const nameMaxWidth = colNIP - colName - 2;
-      
-      // Helper function to render name with word wrap
-      const renderNameWithWrap = (name: string, maxWidth: number) => {
-        const lines = doc.splitTextToSize(name || "-", maxWidth);
-        return lines;
-      };
-      
-      // Teachers
-      teachers.forEach((teacher) => {
-        const jabatan = teacher.jabatan || "Guru";
-        const rate = travelRates?.find(r => r.position_type === jabatan);
-        let dailyRate = 0;
-        if (rate) {
-          switch (receipt.payment_type) {
-            case "transport": dailyRate = Number(rate.transport_rate); break;
-            case "accommodation": dailyRate = Number(rate.accommodation_rate); break;
-            case "meals": dailyRate = Number(rate.daily_rate); break;
-          }
-        }
-        const amount = dailyRate * travelDays;
-        
-        rowNumber++;
-        const nameLines = renderNameWithWrap(toTitleCase(teacher.full_name) || "-", nameMaxWidth);
-        const rowHeight = Math.max(pdfSettings.tableRowHeight, nameLines.length * 3.5);
-        yPos += rowHeight;
-        
-        doc.text(`${rowNumber}`, colNo, yPos - (nameLines.length > 1 ? (nameLines.length - 1) * 1.75 : 0));
-        nameLines.forEach((line: string, idx: number) => {
-          doc.text(line, colName, yPos - (nameLines.length - 1 - idx) * 3.5);
-        });
-        doc.text(teacher.nip || "-", colNIP, yPos);
-        doc.text(jabatan, colJabatan, yPos);
-        doc.text("-", colKelas, yPos);
-        doc.text(dailyRate.toLocaleString("id-ID"), colHarga, yPos);
-        doc.text(`${travelDays}`, colHari, yPos);
-        doc.text(amount.toLocaleString("id-ID"), colAmount, yPos);
-        doc.rect(colTTD - 18, yPos - 5, 18, 6);
-        totalAmount += amount;
+      const items = resolveLineItems(receipt, teachers, students, travelRates, travelDays);
+      const table = drawCollectiveTable(doc, items, {
+        leftMargin,
+        rightEdge: pageWidth - pdfSettings.marginRight,
+        startY: yPos,
+        fontSize: pdfSettings.tableFontSize,
+        minRowHeight: pdfSettings.tableRowHeight,
+        lineWidth: pdfSettings.tableLineWidth,
       });
-      
-      // Students
-      students.forEach((student) => {
-        const rate = travelRates?.find(r => r.position_type === "Siswa");
-        let dailyRate = 0;
-        if (rate) {
-          switch (receipt.payment_type) {
-            case "transport": dailyRate = Number(rate.transport_rate); break;
-            case "accommodation": dailyRate = Number(rate.accommodation_rate); break;
-            case "meals": dailyRate = Number(rate.daily_rate); break;
-          }
-        }
-        const amount = dailyRate * travelDays;
-        
-        rowNumber++;
-        const nameLines = renderNameWithWrap(toTitleCase(student.full_name) || "-", nameMaxWidth);
-        const rowHeight = Math.max(pdfSettings.tableRowHeight, nameLines.length * 3.5);
-        yPos += rowHeight;
-        
-        doc.text(`${rowNumber}`, colNo, yPos - (nameLines.length > 1 ? (nameLines.length - 1) * 1.75 : 0));
-        nameLines.forEach((line: string, idx: number) => {
-          doc.text(line, colName, yPos - (nameLines.length - 1 - idx) * 3.5);
-        });
-        doc.text(student.nis || "-", colNIP, yPos);
-        doc.text("Siswa", colJabatan, yPos);
-        doc.text(student.class_name || "-", colKelas, yPos);
-        doc.text(dailyRate.toLocaleString("id-ID"), colHarga, yPos);
-        doc.text(`${travelDays}`, colHari, yPos);
-        doc.text(amount.toLocaleString("id-ID"), colAmount, yPos);
-        doc.rect(colTTD - 18, yPos - 5, 18, 6);
-        totalAmount += amount;
-      });
-      
-      // Total line
-      yPos += 3;
-      doc.line(leftMargin, yPos, pageWidth - pdfSettings.marginRight, yPos);
-      yPos += 5;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(pdfSettings.tableFontSize + 1);
-      doc.text("TOTAL", colJabatan, yPos);
-      doc.text(totalAmount.toLocaleString("id-ID"), colAmount, yPos);
-      yPos += 2;
-      doc.line(leftMargin, yPos, pageWidth - pdfSettings.marginRight, yPos);
+      yPos = table.y;
+      const totalAmount = table.total;
 
       // Terbilang
       yPos += 8;
