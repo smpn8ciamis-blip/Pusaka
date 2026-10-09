@@ -14,7 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, Receipt, Trash2, Search, FileDown, Pencil, Settings, Save, Eye, Calendar as CalendarIcon, X, Wallet, TrendingUp, TrendingDown, CheckCircle2 } from "lucide-react";
+import { Plus, Receipt, Trash2, Search, FileDown, Download, Pencil, Settings, Save, Eye, Calendar as CalendarIcon, X, Wallet, TrendingUp, TrendingDown, CheckCircle2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { cn, toTitleCase } from "@/lib/utils";
@@ -104,6 +104,12 @@ export default function PaymentReceipts() {
   const [editingRates, setEditingRates] = useState<Record<string, TravelRate>>({});
 
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  // Preview kwitansi biasa (1 orang)
+  const [singlePreview, setSinglePreview] = useState<{ url: string; number: string } | null>(null);
+  const closeSinglePreview = () => {
+    if (singlePreview) URL.revokeObjectURL(singlePreview.url);
+    setSinglePreview(null);
+  };
   const [previewReceipt, setPreviewReceipt] = useState<any>(null);
   const [previewTeachers, setPreviewTeachers] = useState<any[]>([]);
   const [previewStudents, setPreviewStudents] = useState<any[]>([]);
@@ -648,7 +654,7 @@ export default function PaymentReceipts() {
     }
   };
 
-  const exportPDF = async (receipt: any) => {
+  const exportPDF = async (receipt: any, mode: 'save' | 'preview' = 'save') => {
     try {
       const { data: settings } = await supabase.from("school_settings").select("*").maybeSingle();
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -789,6 +795,10 @@ export default function PaymentReceipts() {
       doc.text(settings?.bendahara_nip ? `NIP. ${settings.bendahara_nip}` : "NIP. .........................", col2X, yPos, { align: "center" });
       if (receipt.recipient_nip) doc.text(`NIP. ${receipt.recipient_nip}`, col3X, yPos, { align: "center" });
 
+      if (mode === 'preview') {
+        setSinglePreview({ url: URL.createObjectURL(doc.output('blob')), number: receipt.receipt_number });
+        return;
+      }
       doc.save(`Kwitansi-${receipt.receipt_number}.pdf`);
       toast.success("PDF berhasil diunduh");
     } catch (error) {
@@ -946,21 +956,19 @@ export default function PaymentReceipts() {
     }
   };
 
+  // Kwitansi kolektif hanya untuk lebih dari 1 orang; 1 orang memakai kwitansi biasa.
+  const recipientCount = (receipt: any): number =>
+    Array.isArray(receipt.line_items) && receipt.line_items.length > 0
+      ? receipt.line_items.length
+      : (receipt.sppd_teacher_count || 0) + (receipt.sppd_student_count || 0);
+
   const handlePreviewPDF = (receipt: any) => {
-    const totalCount = (receipt.sppd_teacher_count || 0) + (receipt.sppd_student_count || 0);
-    if (totalCount > 1) previewCollectivePDF(receipt);
-    else {
-      setPreviewReceipt(receipt);
-      setPreviewTeachers([]);
-      setPreviewStudents([]);
-      setPreviewTravelDays(1);
-      setIsPreviewOpen(true);
-    }
+    if (recipientCount(receipt) > 1) previewCollectivePDF(receipt);
+    else exportPDF(receipt, 'preview');
   };
 
   const handleExportPDF = (receipt: any) => {
-    const totalCount = (receipt.sppd_teacher_count || 0) + (receipt.sppd_student_count || 0);
-    if (totalCount > 1) exportCollectivePDF(receipt);
+    if (recipientCount(receipt) > 1) exportCollectivePDF(receipt);
     else exportPDF(receipt);
   };
 
@@ -1286,7 +1294,7 @@ export default function PaymentReceipts() {
                                     <Badge variant="secondary" className="text-xs">
                                       {getPaymentTypeLabel(receipt.payment_type)}
                                     </Badge>
-                                    {receipt.sppd_teacher_count > 1 && (
+                                    {recipientCount(receipt) > 1 && (
                                       <Badge variant="default" className="text-xs ml-1">
                                         Kolektif
                                       </Badge>
@@ -1530,6 +1538,23 @@ export default function PaymentReceipts() {
             </TabsContent>
           </Tabs>
         </div>
+
+        <Dialog open={!!singlePreview} onOpenChange={(o) => { if (!o) closeSinglePreview(); }}>
+          <DialogContent className="max-w-4xl w-full h-[90vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle>Preview Kwitansi</DialogTitle>
+              <DialogDescription>No. {singlePreview?.number}</DialogDescription>
+            </DialogHeader>
+            {singlePreview && (
+              <iframe src={singlePreview.url} title="Preview Kwitansi" className="flex-1 w-full rounded-md border bg-white" />
+            )}
+            <div className="flex justify-end">
+              <Button onClick={() => { const r = receipts?.find((x: any) => x.receipt_number === singlePreview?.number); if (r) exportPDF(r); }}>
+                <Download className="h-4 w-4 mr-2" /> Download PDF
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <ReceiptPreviewDialog
           open={isPreviewOpen}
