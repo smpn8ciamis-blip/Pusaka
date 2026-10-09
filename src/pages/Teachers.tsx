@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { cleanPhoneNumber, isValidPhoneNumber } from '@/lib/phone';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { Button } from '@/components/ui/button';
@@ -33,6 +34,7 @@ function TeachersPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [isHomeroomTeacher, setIsHomeroomTeacher] = useState(false);
   const [editingTeacher, setEditingTeacher] = useState<any>(null);
+  const [editPhone, setEditPhone] = useState('');
   const [selectedClassId, setSelectedClassId] = useState<string>('');
   const [currentPage, setCurrentPage] = useState(1);
   const [sortField, setSortField] = useState<'name' | 'email' | 'subject' | 'nip'>('name');
@@ -71,7 +73,7 @@ function TeachersPage() {
       const teachersWithDetails = await Promise.all(
         data.map(async (teacher) => {
           const [profileRes, roleRes, classRes] = await Promise.all([
-            supabase.from('profiles').select('full_name, email').eq('id', teacher.user_id).single(),
+            supabase.from('profiles').select('full_name, email, phone').eq('id', teacher.user_id).single(),
             supabase.from('user_roles').select('role').eq('user_id', teacher.user_id).single(),
             supabase.from('classes').select('id, name, grade, academic_year').eq('homeroom_teacher_id', teacher.id).maybeSingle()
           ]);
@@ -147,6 +149,7 @@ function TeachersPage() {
         .from('profiles')
         .update({
           full_name: values.fullName,
+          phone: values.phone || null,
         })
         .eq('id', values.userId);
 
@@ -211,8 +214,14 @@ function TeachersPage() {
     try {
       if (editingTeacher) {
         // Update existing teacher
+        const phone = cleanPhoneNumber(editPhone);
+        if (!isValidPhoneNumber(phone)) {
+          toast.error('No. HP tidak valid (harus 9-15 digit angka).');
+          return;
+        }
         const values = {
           userId: editingTeacher.user_id,
+          phone,
           fullName: formData.get('fullName') as string,
           nip: formData.get('nip') as string,
           subject: formData.get('subject') as string,
@@ -254,12 +263,14 @@ function TeachersPage() {
     if (!open) {
       setIsHomeroomTeacher(false);
       setEditingTeacher(null);
+      setEditPhone('');
       setSelectedClassId('none');
     }
   };
 
   const handleEditClick = (teacher: any) => {
     setEditingTeacher(teacher);
+    setEditPhone(cleanPhoneNumber(teacher.profile?.phone || ''));
     setSelectedClassId(teacher.homeroom_class?.id || 'none');
     setIsDialogOpen(true);
   };
@@ -355,6 +366,23 @@ function TeachersPage() {
                     required 
                   />
                 </div>
+                {editingTeacher && (
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">No. HP / WhatsApp</Label>
+                    <Input
+                      id="phone"
+                      name="phone"
+                      inputMode="tel"
+                      autoComplete="off"
+                      placeholder="Contoh: 6281234567890"
+                      value={editPhone}
+                      onChange={(e) => setEditPhone(cleanPhoneNumber(e.target.value))}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Dipakai untuk notifikasi WhatsApp. Tanda +, -, dan spasi dihapus otomatis saat ditempel.
+                    </p>
+                  </div>
+                )}
                 {!editingTeacher && (
                   <>
                     <div className="space-y-2">
