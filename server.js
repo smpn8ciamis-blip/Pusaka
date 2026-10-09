@@ -535,6 +535,55 @@ app.post('/admin/test-send', requireAdmin, async (req, res) => {
     res.json({ status: 'success', message: 'Pesan uji masuk antrian.' });
 });
 
+async function loadTeacherContacts() {
+    const { data: teachers, error } = await supabase.from('teachers').select('id, user_id');
+    if (error) throw error;
+    const userIds = (teachers || []).map(t => t.user_id).filter(Boolean);
+    if (userIds.length === 0) return { total: 0, contacts: [] };
+    const { data: profiles, error: pErr } = await supabase.from('profiles').select('id, full_name, phone').in('id', userIds);
+    if (pErr) throw pErr;
+    const seen = new Set();
+    const contacts = [];
+    for (const p of (profiles || [])) {
+        if (!p.phone) continue;
+        const num = formatToInternational(p.phone);
+        if (!num || num.length < 10 || seen.has(num)) continue;
+        seen.add(num);
+        contacts.push({ name: p.full_name, phone: num });
+    }
+    return { total: userIds.length, contacts };
+}
+
+app.get('/admin/teacher-contacts', requireAdmin, async (req, res) => {
+    try {
+        const { total, contacts } = await loadTeacherContacts();
+        res.json({ status: 'success', total, with_phone: contacts.length, without_phone: total - contacts.length });
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
+});
+
+// Kirim pesan "test_connection" (template dari tabel wa_message_templates) ke semua guru yang punya nomor WA
+app.post('/admin/test-connection-teachers', requireAdmin, async (req, res) => {
+    try {
+        if (!isReady) return res.status(400).json({ status: 'error', message: 'Bot belum terhubung.' });
+        templateCache.at = 0; // pakai isi template terbaru
+        const probe = await renderMessage('test_connection', { nama_guru: 'Bapak/Ibu' });
+        if (!probe) return res.status(400).json({ status: 'error', message: 'Template tes koneksi dinonaktifkan.' });
+        const { total, contacts } = await loadTeacherContacts();
+        if (contacts.length === 0) return res.status(400).json({ status: 'error', message: 'Tidak ada guru dengan nomor WhatsApp.' });
+        for (const c of contacts) {
+            const jid = c.phone + '@s.whatsapp.net';
+            enqueueTask(async () => {
+                const text = await renderMessage('test_connection', { nama_guru: c.name || 'Bapak/Ibu' });
+                if (!text) return;
+                console.log('[TES KONEKSI] ' + c.name + ' (' + c.phone + ')');
+                await sendSafeMessage(jid, { text });
+            });
+        }
+        res.json({ status: 'success', queued: contacts.length, skipped_no_phone: total - contacts.length,
+            message: contacts.length + ' pesan masuk antrian (jeda 3-6 detik per pesan).' });
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
+});
+
 app.post('/admin/reload-config', requireAdmin, (req, res) => {
     templateCache.at = 0;
     settingsCache.at = 0;
