@@ -54,7 +54,6 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ImportAttendance } from '@/components/ImportAttendance';
 import { useAttendanceDaySettings, isAttendanceAllowedForDate, getActiveDayNames } from '@/hooks/useAttendanceDaySettings';
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear } from 'date-fns';
-import HomeroomStudentTab from '@/components/homeroom/HomeroomStudentTab';
 
 const COLORS = {
   hadir: '#10b981',
@@ -905,19 +904,8 @@ const HomeroomAttendance = () => {
           </div>
         </div>
 
-        {/* TABS: Absensi & Data Siswa */}
+        {/* Data siswa & akun dipindah ke menu Akun Siswa (/akun-siswa) */}
         <Tabs defaultValue="attendance" className="space-y-4">
-          <TabsList className="flex-wrap">
-            <TabsTrigger value="attendance" className="gap-2">
-              <ClipboardCheck className="h-4 w-4" />
-              Absensi
-            </TabsTrigger>
-            <TabsTrigger value="students" className="gap-2">
-              <Users className="h-4 w-4" />
-              Data Siswa
-            </TabsTrigger>
-          </TabsList>
-
           {/* ============ TAB ABSENSI ============ */}
           <TabsContent value="attendance" className="space-y-4 md:space-y-6">
             {/* Filter Section */}
@@ -1164,23 +1152,6 @@ const HomeroomAttendance = () => {
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
-
-          {/* ============ TAB DATA SISWA ============ */}
-          <TabsContent value="students">
-            {homeroomClass?.id && teacherInfo?.school_id ? (
-              <HomeroomStudentTab
-                classId={homeroomClass.id}
-                schoolId={teacherInfo.school_id}
-                schoolDomain="sekolah.sch.id"
-              />
-            ) : (
-              <Card>
-                <CardContent className="py-10 text-center text-muted-foreground">
-                  Memuat data kelas...
-                </CardContent>
-              </Card>
-            )}
           </TabsContent>
         </Tabs>
       </div>
