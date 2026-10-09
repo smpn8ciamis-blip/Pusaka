@@ -104,6 +104,19 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     defaultBody: `📝 *PENGINGAT PENGISIAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\nData berikut belum terisi untuk kelas *{{kelas}}* ({{mapel}}, {{jam}}):\n{{belum_terisi}}\n\nMohon segera dilengkapi di aplikasi Pusaka.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`,
   },
   {
+    key: 'teacher_daily_recap',
+    title: 'Rekap Jadwal Harian Guru',
+    description: 'Dikirim pagi hari (jam diatur di tab Pengingat Guru) berisi jadwal mengajar guru hari itu.',
+    variables: [
+      { name: 'nama_guru', sample: 'Budi Santoso, S.Pd', hint: 'Nama guru' },
+      { name: 'hari', sample: 'Senin', hint: 'Nama hari' },
+      { name: 'tanggal', sample: '12/10/2026', hint: 'Tanggal' },
+      { name: 'jumlah_jam', sample: '3', hint: 'Jumlah sesi mengajar' },
+      { name: 'rekap', sample: '1. 07:00-08:20 | VIII A | Matematika\n2. 09:00-10:20 | VII B | Matematika', hint: 'Daftar jadwal' },
+    ],
+    defaultBody: `📅 *REKAP JADWAL MENGAJAR*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\nJadwal mengajar Anda hari *{{hari}}, {{tanggal}}* ({{jumlah_jam}} sesi):\n\n{{rekap}}\n\nJangan lupa mengisi *absensi* dan *jurnal mengajar*.\n_Pusaka - SMP Negeri 8 Ciamis_`,
+  },
+  {
     key: 'test_connection',
     title: 'Tes Koneksi ke Guru',
     description: 'Dikirim lewat tombol "Kirim Tes Koneksi ke Semua Guru" di tab Koneksi, agar guru menyimpan nomor bot.',

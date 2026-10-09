@@ -84,9 +84,17 @@ const DEFAULT_TEMPLATES = {
     teacher_first: `⏰ *PENGINGAT JAM PERTAMA MENGAJAR*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\nHari ini jam pertama mengajar Anda:\n• Kelas: *{{kelas}}*\n• Mapel: *{{mapel}}*\n• Jam: *{{jam}}*\n\nMohon segera masuk kelas, lalu:\n1️⃣ Isi *absensi siswa*\n2️⃣ Isi *jurnal mengajar*\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`,
     teacher_next: `⏰ *PENGINGAT MENGAJAR*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\nSebentar lagi jadwal mengajar Anda:\n• Kelas: *{{kelas}}*\n• Mapel: *{{mapel}}*\n• Jam: *{{jam}}*\n\nMohon masuk kelas tepat waktu dan jangan lupa mengisi *jurnal mengajar* setelah pembelajaran.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`,
     teacher_followup: `📝 *PENGINGAT PENGISIAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\nData berikut belum terisi untuk kelas *{{kelas}}* ({{mapel}}, {{jam}}):\n{{belum_terisi}}\n\nMohon segera dilengkapi di aplikasi Pusaka.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`,
+    teacher_daily_recap: `📅 *REKAP JADWAL MENGAJAR*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\nJadwal mengajar Anda hari *{{hari}}, {{tanggal}}* ({{jumlah_jam}} sesi):\n\n{{rekap}}\n\nJangan lupa mengisi *absensi* dan *jurnal mengajar*.\n_Pusaka - SMP Negeri 8 Ciamis_`,
     test_connection: `✅ *TES KONEKSI BERHASIL*\n\nHalo Bapak/Ibu,\n\nNomor WhatsApp ini adalah *Akun Resmi SMP Negeri 8 Ciamis* yang digunakan untuk mengirimkan:\n\n📅 *Notifikasi Jadwal Pelajaran*\n📢 *Notifikasi Presensi Siswa*\n🔔 *Pengingat Mengajar*\n📝 *Pengingat Pengisian Jurnal*\n\n━━━━━━━━━━━━━━━━━━\n\n⚠️ *PENTING:*\nSilakan *SIMPAN NOMOR INI* ke kontak WhatsApp Bapak/Ibu.\n\nJika nomor ini *TIDAK disimpan*, WhatsApp akan memblokir pesan dari nomor yang tidak dikenal, sehingga Bapak/Ibu *tidak akan menerima notifikasi* penting dari sekolah.\n\n━━━━━━━━━━━━━━━━━━\n\nTerima kasih atas perhatiannya.\n_SMP Negeri 8 Ciamis_`
 };
-const DEFAULT_BOT_SETTINGS = { teacher_reminder_enabled: true, reminder_lead_min: 10, reminder_followup_min: 15 };
+const DEFAULT_BOT_SETTINGS = {
+    teacher_reminder_enabled: true, reminder_lead_min: 10, reminder_followup_min: 15,
+    reminder_scope: 'all',            // 'first' = jam pertama saja, 'all' = semua jam mengajar
+    followup_journal: true,           // cek & ingatkan jurnal yang belum terisi
+    followup_attendance: true,        // cek & ingatkan daftar hadir yang belum terisi
+    daily_recap_enabled: false,       // kirim rekap jadwal harian ke guru
+    daily_recap_time: '06:00'         // jam kirim rekap (WIB)
+};
 const CONFIG_TTL_MS = 30 * 1000;
 let templateCache = { at: 0, rows: new Map() };
 let settingsCache = { at: 0, value: Object.assign({}, DEFAULT_BOT_SETTINGS) };
@@ -375,13 +383,20 @@ async function runTeacherReminders() {
         const res = await q;
         const schedules = res.data, error = res.error;
         if (error || !schedules || schedules.length === 0) return;
-        const relevant = schedules.filter(function(s) {
+        const recapMin = hhmmToMin(cfg.daily_recap_time || '06:00');
+        const lastEnd = Math.max.apply(null, schedules.map(function(s) { return hhmmToMin(s.end_time); }));
+        const needRecap = cfg.daily_recap_enabled && now.minutes >= recapMin && now.minutes < lastEnd && !reminderSent.has('recap:done');
+        let relevant = schedules.filter(function(s) {
             const start = hhmmToMin(s.start_time);
             return (now.minutes >= start - cfg.reminder_lead_min && now.minutes < start + 5) || (now.minutes >= start + cfg.reminder_followup_min && now.minutes < hhmmToMin(s.end_time));
         });
-        if (relevant.length === 0) return;
+        // Cakupan: hanya jam pertama guru, atau semua jam
+        const firstOfTeacher = new Map();
+        for (const s of schedules) { const cur = firstOfTeacher.get(s.teacher_id); if (!cur || hhmmToMin(s.start_time) < hhmmToMin(cur.start_time)) firstOfTeacher.set(s.teacher_id, s); }
+        if (cfg.reminder_scope === 'first') relevant = relevant.filter(function(s) { return firstOfTeacher.get(s.teacher_id).id === s.id; });
+        if (relevant.length === 0 && !needRecap) return;
         const teacherIds = Array.from(new Set(schedules.map(function(s){ return s.teacher_id; })));
-        const classIds = Array.from(new Set(relevant.map(function(s){ return s.class_id; })));
+        const classIds = Array.from(new Set((needRecap ? schedules : relevant).map(function(s){ return s.class_id; })));
         const prom = await Promise.all([
             supabase.from('teachers').select('id, user_id').in('id', teacherIds),
             supabase.from('classes').select('id, name').in('id', classIds)
@@ -393,8 +408,23 @@ async function runTeacherReminders() {
         const profById = new Map((profiles || []).map(function(p){ return [p.id, p]; }));
         const teacherById = new Map((teachers || []).map(function(t){ return [t.id, profById.get(t.user_id)]; }));
         const className = new Map((classes || []).map(function(c){ return [c.id, c.name]; }));
-        const firstOfTeacher = new Map();
-        for (const s of schedules) { const cur = firstOfTeacher.get(s.teacher_id); if (!cur || hhmmToMin(s.start_time) < hhmmToMin(cur.start_time)) firstOfTeacher.set(s.teacher_id, s); }
+        if (needRecap) {
+            const HARI = ['', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+            const byTeacher = new Map();
+            for (const s of schedules) { if (!byTeacher.has(s.teacher_id)) byTeacher.set(s.teacher_id, []); byTeacher.get(s.teacher_id).push(s); }
+            const tgl = now.date.split('-').reverse().join('/');
+            for (const [tid, list] of byTeacher) {
+                const prof = teacherById.get(tid);
+                if (!prof || !prof.phone) continue;
+                const key = 'recap:' + tid; if (reminderSent.has(key)) continue; markReminderSent(key);
+                list.sort(function(x, y) { return hhmmToMin(x.start_time) - hhmmToMin(y.start_time); });
+                const rekap = list.map(function(x, i) { return (i + 1) + '. ' + String(x.start_time).slice(0, 5) + '-' + String(x.end_time).slice(0, 5) + ' | ' + (className.get(x.class_id) || '-') + ' | ' + x.subject; }).join('\n');
+                const vars = { nama_guru: prof.full_name, hari: HARI[now.dow], tanggal: tgl, jumlah_jam: list.length, rekap: rekap };
+                const jid = formatToInternational(prof.phone) + '@s.whatsapp.net';
+                enqueueTask(async () => { const text = await renderMessage('teacher_daily_recap', vars); if (text) await sendSafeMessage(jid, { text: text }); });
+            }
+            markReminderSent('recap:done');
+        }
         for (const s of relevant) {
             const prof = teacherById.get(s.teacher_id);
             if (!prof || !prof.phone) continue;
@@ -410,11 +440,9 @@ async function runTeacherReminders() {
                 enqueueTask(async () => { const text = await renderMessage(tplKey, vars); if (text) await sendSafeMessage(jid, { text: text }); });
             } else {
                 const key = 'post:' + s.id; if (reminderSent.has(key)) continue;
-                const jrRes = await supabase.from('teaching_journals').select('id').eq('schedule_id', s.id).eq('date', now.date).limit(1);
-                const jr = jrRes.data;
-                const journalDone = jr && jr.length > 0;
-                let attDone = true;
-                if (isFirst) { const atRes = await supabase.from('attendance').select('id').eq('schedule_id', s.id).eq('date', now.date).limit(1); const at = atRes.data; attDone = at && at.length > 0; }
+                let journalDone = true, attDone = true;
+                if (cfg.followup_journal) { const jrRes = await supabase.from('teaching_journals').select('id').eq('schedule_id', s.id).eq('date', now.date).limit(1); journalDone = !!(jrRes.data && jrRes.data.length > 0); }
+                if (cfg.followup_attendance) { const atRes = await supabase.from('attendance').select('id').eq('schedule_id', s.id).eq('date', now.date).limit(1); attDone = !!(atRes.data && atRes.data.length > 0); }
                 markReminderSent(key);
                 if (journalDone && attDone) continue;
                 const todo = []; if (!attDone) todo.push('*absensi siswa*'); if (!journalDone) todo.push('*jurnal mengajar*');

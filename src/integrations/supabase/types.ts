@@ -5193,6 +5193,11 @@ export type Database = {
       }
       wa_bot_settings: {
         Row: {
+          daily_recap_enabled: boolean
+          daily_recap_time: string
+          followup_attendance: boolean
+          followup_journal: boolean
+          reminder_scope: string
           id: number
           reminder_followup_min: number
           reminder_lead_min: number
@@ -5201,6 +5206,11 @@ export type Database = {
           updated_by: string | null
         }
         Insert: {
+          daily_recap_enabled?: boolean
+          daily_recap_time?: string
+          followup_attendance?: boolean
+          followup_journal?: boolean
+          reminder_scope?: string
           id?: number
           reminder_followup_min?: number
           reminder_lead_min?: number
@@ -5209,6 +5219,11 @@ export type Database = {
           updated_by?: string | null
         }
         Update: {
+          daily_recap_enabled?: boolean
+          daily_recap_time?: string
+          followup_attendance?: boolean
+          followup_journal?: boolean
+          reminder_scope?: string
           id?: number
           reminder_followup_min?: number
           reminder_lead_min?: number
