@@ -12,7 +12,7 @@ import { Info, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
-import { useCreateStudentAccount, type Student } from "@/hooks/useHomeroomStudents";
+import { useCreateStudentAccount, edgeErrorMessage, type Student } from "@/hooks/useHomeroomStudents";
 
 interface Props {
   open: boolean;
@@ -54,6 +54,7 @@ export default function BulkGenerateAccountsDialog({
     setRunning(true);
     let ok = 0;
     let fail = 0;
+    let firstError = "";
 
     for (const sid of ids) {
       const s = students.find((x) => x.id === sid)!;
@@ -65,20 +66,25 @@ export default function BulkGenerateAccountsDialog({
             password: buildPassword(s.nis),
             full_name: s.full_name,
           },
-        }).then(({ error, data }) => {
-          if (error) throw new Error(error.message);
+        }).then(async ({ error, data }) => {
+          if (error) throw new Error(await edgeErrorMessage(error));
           if ((data as any)?.error) throw new Error((data as any).error);
         });
         ok++;
       } catch (e) {
         fail++;
+        if (!firstError) firstError = (e as Error).message;
         console.error("Bulk fail", s.nis, e);
       }
     }
 
     setRunning(false);
     qc.invalidateQueries({ queryKey: ["student-accounts"] });
-    toast.success(`Selesai: ${ok} berhasil, ${fail} gagal`);
+    if (fail > 0) {
+      toast.error(`${ok} berhasil, ${fail} gagal. Penyebab: ${firstError}`);
+    } else {
+      toast.success(`Selesai: ${ok} akun berhasil dibuat`);
+    }
     if (ok > 0) onOpenChange(false);
   };
 

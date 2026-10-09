@@ -13,7 +13,7 @@ import { Loader2, FileDown, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { addLetterheadToPDF } from "@/lib/pdfLetterhead";
-import type { Student, StudentAccountInfo } from "@/hooks/useHomeroomStudents";
+import { edgeErrorMessage, type Student, type StudentAccountInfo } from "@/hooks/useHomeroomStudents";
 
 interface Props {
   open: boolean;
@@ -64,6 +64,7 @@ export default function PrintStudentAccountsDialog({
     try {
       const printRows: { s: Student; username: string; password: string }[] = [];
       let failed = 0;
+      let firstError = "";
 
       for (let i = 0; i < rows.length; i++) {
         const s = rows[i];
@@ -76,12 +77,16 @@ export default function PrintStudentAccountsDialog({
           const { data, error } = await supabase.functions.invoke("update-student-account", {
             body: { student_id: s.id, password, full_name: s.full_name },
           });
-          if (error || (data as any)?.error) { failed++; continue; }
+          if (error || (data as any)?.error) {
+            failed++;
+            if (!firstError) firstError = error ? await edgeErrorMessage(error) : (data as any).error;
+            continue;
+          }
         }
         printRows.push({ s, username: acc.email ?? "-", password });
       }
 
-      if (printRows.length === 0) throw new Error("Tidak ada akun yang bisa dicetak");
+      if (printRows.length === 0) throw new Error(firstError || "Tidak ada akun yang bisa dicetak");
 
       setProgress("Membuat PDF...");
       const doc = new jsPDF("p", "mm", "a4");
