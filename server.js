@@ -40,6 +40,7 @@ let botStarting = false;
 const regSessions = new Map();
 const cooldowns = new Map();
 const COOLDOWN_TIME = 5 * 60 * 1000;
+const REG_SESSION_TTL = 15 * 60 * 1000; // sesi pendaftaran kedaluwarsa setelah 15 menit tanpa selesai
 const botState = { pairingCode: null, pairingPhone: null, pairingAt: 0, lastDisconnect: null };
 
 const KNOWN_USERS_FILE = '/srv/wa-bot/known_users.json';
@@ -208,7 +209,7 @@ async function startBot() {
             const senderPhone = getSenderPhoneNumber(msg);
             await sock.readMessages([msg.key]).catch(() => {});
             if (cleanText.startsWith('cek ') || cleanText.startsWith('info ')) {
-                if (senderPhone !== ADMIN_PHONE) { enqueueTask(() => sendSafeMessage(from, { text: 'Anda tidak memiliki akses.' }, { quoted: msg })); continue; }
+                if (senderPhone !== ADMIN_PHONE) continue; // bukan admin: abaikan tanpa membalas
                 const targetNisn = cleanText.replace(/^(cek|info)\s+/, '').replace(/\D/g, '');
                 if (!targetNisn) { enqueueTask(() => sendSafeMessage(from, { text: 'Format: cek NISN' }, { quoted: msg })); continue; }
                 enqueueTask(async () => {
@@ -246,7 +247,8 @@ async function startBot() {
                 });
                 continue;
             }
-            if (cleanText === 'batal') { regSessions.delete(from); enqueueTask(() => sendSafeMessage(from, { text: 'Pendaftaran dibatalkan.' }, { quoted: msg })); continue; }
+            if (cleanText === 'batal') { if (regSessions.has(from)) { regSessions.delete(from); enqueueTask(() => sendSafeMessage(from, { text: 'Pendaftaran dibatalkan.' }, { quoted: msg })); } continue; }
+            if (regSessions.has(from) && Date.now() - (regSessions.get(from).at || 0) > REG_SESSION_TTL) regSessions.delete(from);
             if (regSessions.has(from)) {
                 const session = regSessions.get(from);
                 if (session.step === 'WAIT_NISN') {
@@ -285,12 +287,8 @@ async function startBot() {
                     continue;
                 }
             }
-            if (cleanText === 'daftar') { regSessions.set(from, { step: 'WAIT_NISN' }); enqueueTask(() => sendSafeMessage(from, { text: 'PENDAFTARAN PRESENSI\n\nMasukkan NISN:\n\n(Ketik BATAL untuk batal)' }, { quoted: msg })); continue; }
-            const lastMsgTime = cooldowns.get(from) || 0;
-            if (Date.now() - lastMsgTime < COOLDOWN_TIME) continue;
-            cooldowns.set(from, Date.now());
-            if (knownUsers.has(from)) enqueueTask(() => sendSafeMessage(from, { text: 'Kamu sudah terhubung dengan Layanan Presensi Nedelcis' }, { quoted: msg }));
-            else enqueueTask(() => sendSafeMessage(from, { text: 'LAYANAN PRESENSI NEDELCIS\n\nHalo! Ketik DAFTAR untuk menghubungkan nomor WA.' }, { quoted: msg }));
+            if (cleanText === 'daftar') { regSessions.set(from, { step: 'WAIT_NISN', at: Date.now() }); enqueueTask(() => sendSafeMessage(from, { text: 'PENDAFTARAN PRESENSI\n\nMasukkan NISN:\n\n(Ketik BATAL untuk batal)' }, { quoted: msg })); continue; }
+            // Pesan lain di luar perintah yang ditentukan (daftar, batal, cek/info/hapus/reset/unreg khusus admin, dan alur pendaftaran) diabaikan: bot tidak membalas.
         }
     });
 }
