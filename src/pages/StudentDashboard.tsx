@@ -373,6 +373,7 @@ const StudentDashboardPage = () => {
 
   const [showData, setShowData] = useState(true);
   const [showAllMenu, setShowAllMenu] = useState(false);
+  const [scheduleDay, setScheduleDay] = useState<number | 'all'>('all');
   const navigate = useNavigate();
   const [newsIdx, setNewsIdx] = useState(0);
   const touchX = useRef<number | null>(null);
@@ -484,26 +485,30 @@ const StudentDashboardPage = () => {
     staleTime: 10 * 60 * 1000,
   });
 
-  const { data: todaySchedules, isLoading: schedulesLoading } = useQuery({
-    queryKey: ['student-schedules-today', classId, selectedYear, selectedSemester],
+  // Jadwal seluruh hari (jadwal aktif kelas). Jadwal hari ini diturunkan dari data yang sama.
+  const { data: weekSchedules, isLoading: schedulesLoading } = useQuery({
+    queryKey: ['student-schedules-week', classId, selectedYear, selectedSemester],
     queryFn: async () => {
-      // Di tabel jadwal Minggu = 7 (getDay() mengembalikan 0)
-      const jsDay = new Date().getDay();
-      const today = jsDay === 0 ? 7 : jsDay;
       let q = supabase
         .from('schedules')
         .select('*, teachers(*, profiles:profiles_public(full_name))')
         .eq('class_id', classId!)
-        .eq('is_active', true)
-        .eq('day_of_week', today);
+        .eq('is_active', true);
       if (selectedYear) q = q.eq('academic_year', selectedYear).eq('semester', selectedSemester);
-      const { data, error } = await q.order('start_time');
+      const { data, error } = await q.order('day_of_week').order('start_time');
       if (error) throw error;
       return data || [];
     },
     enabled: !!classId && !!selectedYear,
     staleTime: 2 * 60 * 1000,
   });
+
+  const todaySchedules = useMemo(() => {
+    // Di tabel jadwal Minggu = 7 (getDay() mengembalikan 0)
+    const jsDay = new Date().getDay();
+    const today = jsDay === 0 ? 7 : jsDay;
+    return (weekSchedules || []).filter((s: any) => s.day_of_week === today);
+  }, [weekSchedules]);
 
   // ─── UNIFIED attendance summary (RFID + Manual) ───────────────────────
   const { data: attendanceSummary, isLoading: attendanceLoading } = useQuery({
@@ -1138,37 +1143,108 @@ const StudentDashboardPage = () => {
 
   const renderScheduleTab = () => {
     const nowMin = liveClock.getHours() * 60 + liveClock.getMinutes();
+    const jsDay = liveClock.getDay();
+    const todayNo = jsDay === 0 ? 7 : jsDay;
+    const SHORT = ['', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+    const FULL = ['', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+    const byDay = new Map<number, any[]>();
+    (weekSchedules || []).forEach((s: any) => {
+      if (!byDay.has(s.day_of_week)) byDay.set(s.day_of_week, []);
+      byDay.get(s.day_of_week)!.push(s);
+    });
+    const days = [1, 2, 3, 4, 5, 6, 7].filter((d) => d <= 6 || byDay.has(d));
+    const visibleDays = scheduleDay === 'all' ? days : days.filter((d) => d === scheduleDay);
+    const totalWeek = weekSchedules?.length || 0;
+
     return (
       <div className="p-4 space-y-4">
         <div>
-          <h2 className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-white">Jadwal hari ini</h2>
+          <h2 className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-white">Jadwal Pelajaran</h2>
           <p className="text-sm text-slate-500">
-            {DAY_NAMES[liveClock.getDay()]}, {safeFormatDate(liveClock, 'd MMMM yyyy')} · {todaySchedules?.length || 0} mapel
+            {classInfo?.name ? `Kelas ${classInfo.name} · ` : ''}{totalWeek} sesi per pekan
           </p>
         </div>
-        <div className="space-y-2">
-          {schedulesLoading ? <LoadingState label="Memuat jadwal..." /> :
-            todaySchedules && todaySchedules.length > 0 ? todaySchedules.map((s: any) => {
-              const st = toMinutes(s.start_time);
-              const en = toMinutes(s.end_time);
-              const isNow = st != null && en != null && nowMin >= st && nowMin < en;
-              const isPast = en != null && nowMin >= en;
+
+        <div className="-mx-4 px-4 overflow-x-auto">
+          <div className="flex gap-2 pb-1 w-max">
+            {([['all', 'Semua'] as const, ...days.map((d) => [d, SHORT[d]] as const)]).map(([key, label]) => {
+              const active = scheduleDay === key;
+              const isToday = key === todayNo;
               return (
-                <div key={s.id} className={`rounded-2xl p-4 flex items-center gap-4 border ${isNow ? 'bg-[#FFC93C]/15 border-[#FFC93C]' : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'} ${isPast ? 'opacity-55' : ''}`}>
-                  <div className="w-14 shrink-0 text-center tabular-nums">
-                    <p className="text-sm font-bold text-[#1E6FE0] dark:text-blue-300">{s.start_time?.slice(0, 5)}</p>
-                    <p className="text-xs text-slate-400">{s.end_time?.slice(0, 5)}</p>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-sm text-slate-800 dark:text-slate-100 truncate">{s.subject}</p>
-                    <p className="text-xs text-slate-500 truncate">{s.teachers?.profiles?.full_name}</p>
-                  </div>
-                  {isNow && <span className="rounded-full bg-[#FFC93C] px-2 py-0.5 text-[11px] font-bold text-[#4a3700]">Sekarang</span>}
-                </div>
+                <button
+                  key={String(key)}
+                  onClick={() => setScheduleDay(key as number | 'all')}
+                  className={`relative rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
+                    active
+                      ? 'bg-[#1E6FE0] text-white shadow-sm'
+                      : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  {label}
+                  {isToday && (
+                    <span className={`absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-white dark:border-slate-950 ${active ? 'bg-[#FFC93C]' : 'bg-[#1E6FE0]'}`} aria-label="hari ini" />
+                  )}
+                </button>
               );
-            }) : <EmptyState icon={Calendar} title="Tidak ada jadwal hari ini" subtitle="Cek lagi besok atau ganti tahun pelajaran di Beranda." />
-          }
+            })}
+          </div>
         </div>
+
+        {schedulesLoading ? (
+          <LoadingState label="Memuat jadwal..." />
+        ) : totalWeek === 0 ? (
+          <EmptyState icon={Calendar} title="Belum ada jadwal" subtitle="Jadwal kelas belum diatur atau coba ganti tahun pelajaran di Beranda." />
+        ) : (
+          <div className="space-y-4">
+            {visibleDays.map((d) => {
+              const list = byDay.get(d) || [];
+              const isToday = d === todayNo;
+              return (
+                <section
+                  key={d}
+                  aria-label={`Jadwal ${FULL[d]}`}
+                  className={`rounded-3xl border bg-white dark:bg-slate-900 p-4 shadow-sm ${isToday ? 'border-[#1E6FE0]/40 ring-1 ring-[#1E6FE0]/20' : 'border-slate-100 dark:border-slate-800'}`}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">{FULL[d]}</h3>
+                    <div className="flex items-center gap-2">
+                      {isToday && <span className="rounded-full bg-[#E1F0FF] px-2 py-0.5 text-[11px] font-semibold text-[#1E6FE0]">Hari ini</span>}
+                      <span className="text-xs text-slate-400">{list.length} mapel</span>
+                    </div>
+                  </div>
+                  {list.length === 0 ? (
+                    <p className="text-sm text-slate-400 py-2">Tidak ada jadwal.</p>
+                  ) : (
+                    <ol className="relative">
+                      {list.map((sc: any, idx: number) => {
+                        const st = toMinutes(sc.start_time);
+                        const en = toMinutes(sc.end_time);
+                        const isNow = isToday && st != null && en != null && nowMin >= st && nowMin < en;
+                        const isPast = isToday && en != null && nowMin >= en;
+                        const last = idx === list.length - 1;
+                        return (
+                          <li key={sc.id} className="relative flex gap-3 pb-4 last:pb-0">
+                            {!last && <span className="absolute left-[4.6rem] top-4 bottom-0 w-px bg-slate-200 dark:bg-slate-700" aria-hidden />}
+                            <div className="w-14 shrink-0 text-right tabular-nums">
+                              <p className={`text-sm font-bold ${isPast ? 'text-slate-400' : 'text-slate-800 dark:text-slate-100'}`}>{sc.start_time?.slice(0, 5)}</p>
+                              <p className="text-xs text-slate-400">{sc.end_time?.slice(0, 5)}</p>
+                            </div>
+                            <span className={`relative z-10 mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full border-2 ${isNow ? 'bg-[#1E6FE0] border-[#1E6FE0]' : isPast ? 'bg-slate-200 border-slate-200 dark:bg-slate-700 dark:border-slate-700' : 'bg-white border-[#1E6FE0] dark:bg-slate-900'}`} />
+                            <div className={`min-w-0 flex-1 ${isPast ? 'opacity-50' : ''}`}>
+                              <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{sc.subject}</p>
+                              <p className="text-xs text-slate-500 truncate">{sc.teachers?.profiles?.full_name}</p>
+                            </div>
+                            {isNow && <span className="self-start rounded-full bg-[#FFC93C] px-2 py-0.5 text-[11px] font-bold text-[#4a3700]">Sekarang</span>}
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   };
