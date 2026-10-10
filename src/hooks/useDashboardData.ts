@@ -52,13 +52,13 @@ export const useTodaySchedules = (userId: string | null, userRole: string | null
       const today = new Date().getDay();
       if (userRole === 'admin') {
         const { data } = await supabase.from('schedules').select(`*, classes(id, name, grade)`)
-          .eq('day_of_week', today).eq('academic_year', selectedYear).eq('semester', selectedSemester).order('start_time');
+          .eq('is_active', true).eq('day_of_week', today).eq('academic_year', selectedYear).eq('semester', selectedSemester).order('start_time');
         return data || [];
       } else {
         const { data: teacher } = await supabase.from('teachers').select('id').eq('user_id', userId).maybeSingle();
         if (!teacher) return [];
         const { data } = await supabase.from('schedules').select(`*, classes(id, name, grade)`)
-          .eq('day_of_week', today).eq('teacher_id', teacher.id).eq('academic_year', selectedYear).eq('semester', selectedSemester).order('start_time');
+          .eq('is_active', true).eq('day_of_week', today).eq('teacher_id', teacher.id).eq('academic_year', selectedYear).eq('semester', selectedSemester).order('start_time');
         return data || [];
       }
     },

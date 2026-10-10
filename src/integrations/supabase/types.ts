@@ -3383,6 +3383,7 @@ export type Database = {
           subject: string
           teacher_id: string
           updated_at: string | null
+          is_active: boolean
         }
         Insert: {
           academic_year: string
@@ -3397,6 +3398,7 @@ export type Database = {
           subject: string
           teacher_id: string
           updated_at?: string | null
+          is_active?: boolean
         }
         Update: {
           academic_year?: string
@@ -3411,6 +3413,7 @@ export type Database = {
           subject?: string
           teacher_id?: string
           updated_at?: string | null
+          is_active?: boolean
         }
         Relationships: [
           {

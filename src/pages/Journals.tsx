@@ -48,6 +48,7 @@ const Journals = () => {
         const { data, error } = await supabase
           .from('schedules')
           .select('*, classes(id, name, grade)')
+          .eq('is_active', true)
           .order('day_of_week');
         if (error) throw error;
         return data;
@@ -65,6 +66,7 @@ const Journals = () => {
           .from('schedules')
           .select('*, classes(id, name, grade)')
           .eq('teacher_id', teacher.id)
+          .eq('is_active', true)
           .order('day_of_week');
         
         if (error) throw error;
