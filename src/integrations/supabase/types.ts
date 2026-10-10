@@ -441,10 +441,18 @@ export type Database = {
           date: string
           id: string
           notes: string | null
-          schedule_id: string
+          schedule_id: string | null
           school_id: string | null
           status: string
           student_id: string
+          sched_academic_year: string | null
+          sched_class_id: string | null
+          sched_day_of_week: number | null
+          sched_end_time: string | null
+          sched_semester: number | null
+          sched_start_time: string | null
+          sched_subject: string | null
+          sched_teacher_id: string | null
         }
         Insert: {
           created_at?: string | null
@@ -456,6 +464,14 @@ export type Database = {
           school_id?: string | null
           status: string
           student_id: string
+          sched_academic_year?: string | null
+          sched_class_id?: string | null
+          sched_day_of_week?: number | null
+          sched_end_time?: string | null
+          sched_semester?: number | null
+          sched_start_time?: string | null
+          sched_subject?: string | null
+          sched_teacher_id?: string | null
         }
         Update: {
           created_at?: string | null
@@ -467,6 +483,14 @@ export type Database = {
           school_id?: string | null
           status?: string
           student_id?: string
+          sched_academic_year?: string | null
+          sched_class_id?: string | null
+          sched_day_of_week?: number | null
+          sched_end_time?: string | null
+          sched_semester?: number | null
+          sched_start_time?: string | null
+          sched_subject?: string | null
+          sched_teacher_id?: string | null
         }
         Relationships: [
           {
@@ -1534,13 +1558,21 @@ export type Database = {
           id: string
           kuis: number | null
           praktik: number | null
-          schedule_id: string
+          schedule_id: string | null
           school_id: string | null
           student_id: string
           tugas: number | null
           uas: number | null
           updated_at: string
           uts: number | null
+          sched_academic_year: string | null
+          sched_class_id: string | null
+          sched_day_of_week: number | null
+          sched_end_time: string | null
+          sched_semester: number | null
+          sched_start_time: string | null
+          sched_subject: string | null
+          sched_teacher_id: string | null
         }
         Insert: {
           created_at?: string
@@ -1556,6 +1588,14 @@ export type Database = {
           uas?: number | null
           updated_at?: string
           uts?: number | null
+          sched_academic_year?: string | null
+          sched_class_id?: string | null
+          sched_day_of_week?: number | null
+          sched_end_time?: string | null
+          sched_semester?: number | null
+          sched_start_time?: string | null
+          sched_subject?: string | null
+          sched_teacher_id?: string | null
         }
         Update: {
           created_at?: string
@@ -1571,6 +1611,14 @@ export type Database = {
           uas?: number | null
           updated_at?: string
           uts?: number | null
+          sched_academic_year?: string | null
+          sched_class_id?: string | null
+          sched_day_of_week?: number | null
+          sched_end_time?: string | null
+          sched_semester?: number | null
+          sched_start_time?: string | null
+          sched_subject?: string | null
+          sched_teacher_id?: string | null
         }
         Relationships: [
           {
@@ -4746,11 +4794,19 @@ export type Database = {
           id: string
           material: string
           notes: string | null
-          schedule_id: string
+          schedule_id: string | null
           school_id: string | null
           students_absent: number | null
           students_present: number | null
           updated_at: string | null
+          sched_academic_year: string | null
+          sched_class_id: string | null
+          sched_day_of_week: number | null
+          sched_end_time: string | null
+          sched_semester: number | null
+          sched_start_time: string | null
+          sched_subject: string | null
+          sched_teacher_id: string | null
         }
         Insert: {
           activity?: string | null
@@ -4765,6 +4821,14 @@ export type Database = {
           students_absent?: number | null
           students_present?: number | null
           updated_at?: string | null
+          sched_academic_year?: string | null
+          sched_class_id?: string | null
+          sched_day_of_week?: number | null
+          sched_end_time?: string | null
+          sched_semester?: number | null
+          sched_start_time?: string | null
+          sched_subject?: string | null
+          sched_teacher_id?: string | null
         }
         Update: {
           activity?: string | null
@@ -4779,6 +4843,14 @@ export type Database = {
           students_absent?: number | null
           students_present?: number | null
           updated_at?: string | null
+          sched_academic_year?: string | null
+          sched_class_id?: string | null
+          sched_day_of_week?: number | null
+          sched_end_time?: string | null
+          sched_semester?: number | null
+          sched_start_time?: string | null
+          sched_subject?: string | null
+          sched_teacher_id?: string | null
         }
         Relationships: [
           {

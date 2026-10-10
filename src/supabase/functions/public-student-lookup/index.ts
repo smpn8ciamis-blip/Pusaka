@@ -113,6 +113,8 @@ serve(async (req) => {
         status,
         notes,
         schedule_id,
+        sched_subject,
+        sched_teacher_id,
         schedules:schedule_id (
           subject,
           teacher_id
@@ -125,7 +127,7 @@ serve(async (req) => {
     const teacherIds = Array.from(
       new Set(
         attendanceData
-          ?.map((record: any) => record.schedules?.teacher_id)
+          ?.map((record: any) => record.schedules?.teacher_id || record.sched_teacher_id)
           .filter(Boolean) || []
       )
     );
@@ -159,8 +161,8 @@ serve(async (req) => {
       date: record.date,
       status: record.status,
       notes: record.notes,
-      subject: record.schedules?.subject || "-",
-      teacher_name: teacherMap.get(record.schedules?.teacher_id) || "-",
+      subject: record.schedules?.subject || record.sched_subject || "-",
+      teacher_name: teacherMap.get(record.schedules?.teacher_id || record.sched_teacher_id) || "-",
     })) || [];
 
     // Calculate attendance stats

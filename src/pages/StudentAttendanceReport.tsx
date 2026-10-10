@@ -95,13 +95,11 @@ export default function StudentAttendanceReport() {
     setLoading(true);
     const { data, error } = await supabase
       .from("attendance")
-      .select(`
-        status,
-        schedules!inner(academic_year, semester)
-      `)
+      .select("status")
       .eq("student_id", studentId)
-      .eq("schedules.academic_year", selectedYear)
-      .eq("schedules.semester", parseInt(selectedSemesterFilter));
+      // snapshot jadwal di baris absensi: tetap terhitung walau jadwalnya sudah dihapus
+      .eq("sched_academic_year", selectedYear)
+      .eq("sched_semester", parseInt(selectedSemesterFilter));
 
     if (error) {
       toast.error("Gagal memuat data absensi");

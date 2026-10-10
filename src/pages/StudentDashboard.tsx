@@ -1198,7 +1198,7 @@ const StudentDashboardPage = () => {
             return (
               <div key={grade.id} className="bg-white dark:bg-gray-900 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-800">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="font-semibold text-sm text-gray-800 dark:text-gray-100 truncate flex-1">{grade.schedules?.subject}</p>
+                  <p className="font-semibold text-sm text-gray-800 dark:text-gray-100 truncate flex-1">{grade.schedules?.subject || grade.sched_subject}</p>
                   <span className={`text-lg font-bold ${color}`}>{typeof grade.final_grade === 'number' ? grade.final_grade.toFixed(1) : '-'}</span>
                 </div>
                 <div className="grid grid-cols-5 gap-1 text-center">
