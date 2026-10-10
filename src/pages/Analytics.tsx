@@ -83,7 +83,7 @@ const Analytics = () => {
 
       // Filter by teacher's schedules if user is a teacher
       if (userRole === 'teacher' && scheduleIds.length > 0) {
-        query = query.in('schedule_id', scheduleIds);
+        query = query.or(`schedule_id.in.(${scheduleIds.join(',')}),and(schedule_id.is.null,sched_teacher_id.eq.${user?.id})`);
       }
 
       if (selectedClass !== 'all') {

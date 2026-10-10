@@ -627,12 +627,12 @@ const Attendance = () => {
         .select(`*, students!inner(id, full_name, nis, class_id, status, classes(name)), schedules(subject)`)
         .gte('date', filterStartDate).lte('date', filterEndDate).eq('students.status', 'aktif');
 
-      if (userRole === 'teacher' && scheduleIds.length > 0) query = query.in('schedule_id', scheduleIds);
+      if (userRole === 'teacher' && scheduleIds.length > 0) query = query.or(`schedule_id.in.(${scheduleIds.join(',')}),and(schedule_id.is.null,sched_teacher_id.eq.${user?.id})`);
       if (studentIds) query = query.in('student_id', studentIds);
       const { data, error } = await query.order('date', { ascending: false });
       if (error) throw error;
 
-      if (filterSubject !== 'all' && data) return data.filter((r) => r.schedules?.subject === filterSubject);
+      if (filterSubject !== 'all' && data) return data.filter((r) => (r.schedules?.subject || (r as any).sched_subject) === filterSubject);
       return data;
     },
     enabled: !!userRole && (isFullAccessRole || !!user?.id),
@@ -2415,7 +2415,7 @@ const Attendance = () => {
                           <TableCell>{record.students?.nis}</TableCell>
                           <TableCell className="font-medium">{toTitleCase(record.students?.full_name || '')}</TableCell>
                           <TableCell>{shortClass(record.students?.classes?.name)}</TableCell>
-                          <TableCell className="text-sm text-muted-foreground">{record.schedules?.subject || '-'}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">{record.schedules?.subject || record.sched_subject || '-'}</TableCell>
                           <TableCell>
                             <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${getStatusBadgeClass(record.status)}`}>
                               {getStatusLabel(record.status)}

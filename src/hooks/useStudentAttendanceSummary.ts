@@ -63,10 +63,11 @@ export const useStudentAttendanceSummary = (studentId?: string, period?: Attenda
       const [{ data: manual }, { data: rfid }] = await Promise.all([
         supabase
           .from("attendance")
-          .select("status, date, schedules!inner(academic_year, semester)")
+          .select("status, date")
           .eq("student_id", studentId)
-          .eq("schedules.academic_year", period.year)
-          .eq("schedules.semester", period.semester),
+          // snapshot jadwal di baris absensi: tetap terhitung walau jadwalnya sudah dihapus
+          .eq("sched_academic_year", period.year)
+          .eq("sched_semester", period.semester),
         supabase
           .from("rfid_attendance")
           .select("status, date")

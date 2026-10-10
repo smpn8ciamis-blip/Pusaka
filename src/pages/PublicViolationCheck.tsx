@@ -326,7 +326,7 @@ export default function PublicViolationCheck() {
                         <TableCell>
                           {format(new Date(record.date), 'dd MMM yyyy', { locale: idLocale })}
                         </TableCell>
-                        <TableCell>{record.schedules?.subject || '-'}</TableCell>
+                        <TableCell>{record.schedules?.subject || record.sched_subject || '-'}</TableCell>
                         <TableCell>
                           <Badge variant={getStatusColor(record.status)}>
                             {record.status}
