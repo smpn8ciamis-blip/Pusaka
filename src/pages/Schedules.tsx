@@ -20,6 +20,8 @@ import { ImportSchedules } from '@/components/ImportSchedules';
 import { CopySchedulesDialog } from '@/components/CopySchedulesDialog';
 import { WeeklyScheduleCalendar } from '@/components/WeeklyScheduleCalendar';
 import { AcademicYearSelector } from '@/components/AcademicYearSelector';
+import { DataPagination } from '@/components/ui/data-pagination';
+import { usePagination } from '@/hooks/usePagination';
 
 const DAYS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -303,6 +305,21 @@ const Schedules = () => {
     return true;
   });
 
+  const {
+    currentPage,
+    setCurrentPage,
+    pageSize,
+    setPageSize,
+    totalPages,
+    totalItems,
+    paginatedItems,
+  } = usePagination(filteredSchedules, 25);
+
+  // Kembali ke halaman 1 saat filter berubah
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterClass, filterTeacher, filterDay, selectedYear, selectedSemester]);
+
   if (isLoading) {
     return (
       <DashboardLayout>
@@ -558,12 +575,12 @@ const Schedules = () => {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredSchedules && filteredSchedules.length > 0 ? (
-                        filteredSchedules.map((schedule, index) => {
+                      {paginatedItems.length > 0 ? (
+                        paginatedItems.map((schedule, index) => {
                           const canEdit = userRole === 'admin' || (userRole === 'teacher' && schedule.teacher_id === currentTeacherId);
                           return (
                             <TableRow key={schedule.id} className={(schedule as any).is_active === false ? 'opacity-60' : ''}>
-                              <TableCell>{index + 1}</TableCell>
+                              <TableCell>{(currentPage - 1) * pageSize + index + 1}</TableCell>
                               <TableCell>{DAYS[schedule.day_of_week - 1] || '-'}</TableCell>
                               <TableCell>
                                 {schedule.start_time} - {schedule.end_time}
@@ -614,6 +631,14 @@ const Schedules = () => {
                     </TableBody>
                   </Table>
                 </div>
+                <DataPagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  totalItems={totalItems}
+                  pageSize={pageSize}
+                  onPageChange={setCurrentPage}
+                  onPageSizeChange={setPageSize}
+                />
               </CardContent>
             </Card>
           </TabsContent>
