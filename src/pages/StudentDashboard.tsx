@@ -33,6 +33,7 @@ import { getMessagingInstance, getToken, onMessage } from "@/integrations/fireba
 import StudentUploadTab from "@/components/dashboard/StudentUploadTab";
 import StudentElearningTab from "@/components/dashboard/StudentElearningTab";
 import AttendanceTrendChart from "@/components/dashboard/AttendanceTrendChart";
+import StudentIdCardTab from "@/components/dashboard/StudentIdCardTab";
 import AttendanceLogList from "@/components/dashboard/AttendanceLogList";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -826,6 +827,7 @@ const StudentDashboardPage = () => {
   // ─── Shortcut menus ────────────────────────────────────────────────────
   const shortcutMenus = useMemo(() => [
     { tab: 'schedule', label: 'Jadwal', icon: Calendar, color: 'bg-blue-500' },
+    { tab: 'idcard', label: 'Kartu OSIS', icon: IdCard, color: 'bg-rose-500' },
     { tab: 'grades', label: 'Nilai', icon: BookOpen, color: 'bg-emerald-500' },
     { tab: 'elearning', label: 'E-Learning', icon: GraduationCap, color: 'bg-sky-500' },
     { tab: 'attendance', label: 'Absensi', icon: CalendarCheck, color: 'bg-amber-500' },
@@ -871,6 +873,7 @@ const StudentDashboardPage = () => {
     // Warna pastel per menu + lencana angka (sesuai data yang sudah ada)
     const PASTEL: Record<string, { tile: string; icon: string }> = {
       schedule: { tile: 'bg-[#E1F0FF]', icon: 'text-[#1E6FE0]' },
+      idcard: { tile: 'bg-[#FDE7EA]', icon: 'text-rose-600' },
       grades: { tile: 'bg-[#E3F6E8]', icon: 'text-emerald-600' },
       elearning: { tile: 'bg-[#E0F4FA]', icon: 'text-cyan-600' },
       attendance: { tile: 'bg-[#FFF3D1]', icon: 'text-amber-600' },
@@ -1482,6 +1485,10 @@ const StudentDashboardPage = () => {
     switch (activeTab) {
       case 'profile': return renderProfileTab();
       case 'schedule': return renderScheduleTab();
+      case 'idcard':
+        return studentAccount?.students
+          ? <StudentIdCardTab student={studentAccount.students} className={classInfo?.name} school={schoolSetting} />
+          : <LoadingState />;
       case 'grades': return renderGradesTab();
       case 'attendance': return renderAttendanceTab();
       case 'violations': return renderViolationsTab();
@@ -1505,7 +1512,7 @@ const StudentDashboardPage = () => {
     <div className="min-h-screen bg-[#F1F6FD] dark:bg-slate-950 pb-28" style={{ fontFamily: FONT_STACK }}>
       {/* HEADER */}
       {(() => {
-        const isHome = activeTab === 'overview' || !['schedule', 'grades', 'elearning', 'profile', 'attendance', 'violations', 'achievements', 'announcements', 'dispensasi', 'uploads', 'settings'].includes(activeTab);
+        const isHome = activeTab === 'overview' || !['schedule', 'idcard', 'grades', 'elearning', 'profile', 'attendance', 'violations', 'achievements', 'announcements', 'dispensasi', 'uploads', 'settings'].includes(activeTab);
         const bellBtn = (
           <button
             data-notif-btn
