@@ -3,12 +3,13 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Upload, Download, Loader2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAcademicYear } from '@/contexts/AcademicYearContext';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 
 interface ImportSchedulesProps {
-  academicYear: string; // dari filter aktif di halaman
-  semester: number; // dari filter aktif di halaman
+  academicYear?: string; // opsional, default dari filter aktif (context)
+  semester?: number; // opsional, default dari filter aktif (context)
   onSuccess?: () => void;
 }
 
@@ -124,7 +125,15 @@ const addSlot = (map: Map<string, Slot[]>, key: string, slot: Slot) => {
 };
 
 // ---------- component ----------
-export const ImportSchedules = ({ academicYear, semester, onSuccess }: ImportSchedulesProps) => {
+export const ImportSchedules = ({
+  academicYear: academicYearProp,
+  semester: semesterProp,
+  onSuccess,
+}: ImportSchedulesProps) => {
+  const { selectedYear, activeYear, selectedSemester } = useAcademicYear();
+  const academicYear = academicYearProp || selectedYear || activeYear?.year || '';
+  const semester = Number(semesterProp ?? selectedSemester ?? 1);
+
   const [isOpen, setIsOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -435,6 +444,12 @@ export const ImportSchedules = ({ academicYear, semester, onSuccess }: ImportSch
             <span className="font-medium text-foreground">{semesterLabel}</span> (mengikuti filter di halaman).
           </p>
 
+          {!academicYear && (
+            <p className="text-sm text-destructive">
+              Tahun ajaran belum terpilih. Pilih tahun ajaran di halaman ini terlebih dahulu.
+            </p>
+          )}
+
           {!preview && (
             <>
               <Button variant="outline" onClick={downloadTemplate} className="w-full gap-2" disabled={isProcessing}>
@@ -447,7 +462,7 @@ export const ImportSchedules = ({ academicYear, semester, onSuccess }: ImportSch
                   type="file"
                   accept=".xlsx,.xls"
                   onChange={handleFileUpload}
-                  disabled={isProcessing || !academicYear}
+                  disabled={isProcessing}
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
                 />
                 {isProcessing && (
