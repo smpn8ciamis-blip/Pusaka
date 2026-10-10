@@ -5270,6 +5270,9 @@ export type Database = {
         Row: {
           daily_recap_enabled: boolean
           daily_recap_time: string
+          class_recap_enabled: boolean
+          class_recap_group_jid: string | null
+          class_recap_group_name: string | null
           followup_attendance: boolean
           followup_journal: boolean
           reminder_scope: string
@@ -5283,6 +5286,9 @@ export type Database = {
         Insert: {
           daily_recap_enabled?: boolean
           daily_recap_time?: string
+          class_recap_enabled?: boolean
+          class_recap_group_jid?: string | null
+          class_recap_group_name?: string | null
           followup_attendance?: boolean
           followup_journal?: boolean
           reminder_scope?: string
@@ -5296,6 +5302,9 @@ export type Database = {
         Update: {
           daily_recap_enabled?: boolean
           daily_recap_time?: string
+          class_recap_enabled?: boolean
+          class_recap_group_jid?: string | null
+          class_recap_group_name?: string | null
           followup_attendance?: boolean
           followup_journal?: boolean
           reminder_scope?: string

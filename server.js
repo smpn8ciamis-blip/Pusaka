@@ -85,7 +85,8 @@ const DEFAULT_TEMPLATES = {
     teacher_next: `⏰ *PENGINGAT MENGAJAR*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\nSebentar lagi jadwal mengajar Anda:\n• Kelas: *{{kelas}}*\n• Mapel: *{{mapel}}*\n• Jam: *{{jam}}*\n\nMohon masuk kelas tepat waktu dan jangan lupa mengisi *jurnal mengajar* setelah pembelajaran.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`,
     teacher_followup: `📝 *PENGINGAT PENGISIAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\nData berikut belum terisi untuk kelas *{{kelas}}* ({{mapel}}, {{jam}}):\n{{belum_terisi}}\n\nMohon segera dilengkapi di aplikasi Pusaka.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`,
     teacher_daily_recap: `📅 *REKAP JADWAL MENGAJAR*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\nJadwal mengajar Anda hari *{{hari}}, {{tanggal}}* ({{jumlah_jam}} sesi):\n\n{{rekap}}\n\nJangan lupa mengisi *absensi* dan *jurnal mengajar*.\n_Pusaka - SMP Negeri 8 Ciamis_`,
-    test_connection: `✅ *TES KONEKSI BERHASIL*\n\nHalo Bapak/Ibu,\n\nNomor WhatsApp ini adalah *Akun Resmi SMP Negeri 8 Ciamis* yang digunakan untuk mengirimkan:\n\n📅 *Notifikasi Jadwal Pelajaran*\n📢 *Notifikasi Presensi Siswa*\n🔔 *Pengingat Mengajar*\n📝 *Pengingat Pengisian Jurnal*\n\n━━━━━━━━━━━━━━━━━━\n\n⚠️ *PENTING:*\nSilakan *SIMPAN NOMOR INI* ke kontak WhatsApp Bapak/Ibu.\n\nJika nomor ini *TIDAK disimpan*, WhatsApp akan memblokir pesan dari nomor yang tidak dikenal, sehingga Bapak/Ibu *tidak akan menerima notifikasi* penting dari sekolah.\n\n━━━━━━━━━━━━━━━━━━\n\nTerima kasih atas perhatiannya.\n_SMP Negeri 8 Ciamis_`
+    test_connection: `✅ *TES KONEKSI BERHASIL*\n\nHalo Bapak/Ibu,\n\nNomor WhatsApp ini adalah *Akun Resmi SMP Negeri 8 Ciamis* yang digunakan untuk mengirimkan:\n\n📅 *Notifikasi Jadwal Pelajaran*\n📢 *Notifikasi Presensi Siswa*\n🔔 *Pengingat Mengajar*\n📝 *Pengingat Pengisian Jurnal*\n\n━━━━━━━━━━━━━━━━━━\n\n⚠️ *PENTING:*\nSilakan *SIMPAN NOMOR INI* ke kontak WhatsApp Bapak/Ibu.\n\nJika nomor ini *TIDAK disimpan*, WhatsApp akan memblokir pesan dari nomor yang tidak dikenal, sehingga Bapak/Ibu *tidak akan menerima notifikasi* penting dari sekolah.\n\n━━━━━━━━━━━━━━━━━━\n\nTerima kasih atas perhatiannya.\n_SMP Negeri 8 Ciamis_`,
+    class_attendance_recap: `📊 *REKAP ABSENSI SISWA PER KELAS*\n{{hari}}, {{tanggal}}\n\n{{rekap_kelas}}\n\n*Total:* {{total_hadir}} hadir dari {{total_siswa}} siswa ({{jumlah_kelas}} kelas)\nKeterangan: H=Hadir, S=Sakit, I=Izin, A=Alpa\n\n_Pusaka - SMP Negeri 8 Ciamis_`
 };
 const DEFAULT_BOT_SETTINGS = {
     teacher_reminder_enabled: true, reminder_lead_min: 10, reminder_followup_min: 15,
@@ -93,7 +94,9 @@ const DEFAULT_BOT_SETTINGS = {
     followup_journal: true,           // cek & ingatkan jurnal yang belum terisi
     followup_attendance: true,        // cek & ingatkan daftar hadir yang belum terisi
     daily_recap_enabled: false,       // kirim rekap jadwal harian ke guru
-    daily_recap_time: '06:00'         // jam kirim rekap (WIB)
+    daily_recap_time: '06:00',        // jam kirim rekap (WIB)
+    class_recap_enabled: false,       // kirim rekap absensi per kelas ke grup saat semua kelas sudah terabsen
+    class_recap_group_jid: ''         // JID grup tujuan (xxx@g.us)
 };
 const CONFIG_TTL_MS = 30 * 1000;
 let templateCache = { at: 0, rows: new Map() };
@@ -499,6 +502,17 @@ async function requireAdmin(req, res, next) {
     }
 }
 
+async function requireUser(req, res, next) {
+    try {
+        const auth = req.headers.authorization || '';
+        const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+        if (!token) return res.status(401).json({ status: 'error', message: 'Token tidak ada.' });
+        try { req.userId = await resolveUserId(token); }
+        catch (e) { return res.status(401).json({ status: 'error', message: 'Token tidak valid (' + e.message + ').' }); }
+        next();
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
+}
+
 function botPhone() {
     const id = sock && sock.user && sock.user.id;
     return id ? String(id).split(':')[0].split('@')[0] : null;
@@ -609,6 +623,84 @@ app.post('/admin/test-connection-teachers', requireAdmin, async (req, res) => {
         }
         res.json({ status: 'success', queued: contacts.length, skipped_no_phone: total - contacts.length,
             message: contacts.length + ' pesan masuk antrian (jeda 3-6 detik per pesan).' });
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
+});
+
+// ===== Rekap absensi per kelas ke grup (dipicu frontend, bot TIDAK polling) =====
+const CLASS_RECAP_FILE = process.env.CLASS_RECAP_FILE || '/srv/wa-bot/class_recap_sent.json';
+const DAY_NAMES = ['', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+function classRecapSentFor(date) {
+    try { if (fs.existsSync(CLASS_RECAP_FILE)) { const d = JSON.parse(fs.readFileSync(CLASS_RECAP_FILE, 'utf-8')); return d.date === date; } } catch (e) {}
+    return false;
+}
+function markClassRecapSent(date) { try { fs.writeFileSync(CLASS_RECAP_FILE, JSON.stringify({ date: date })); } catch (e) {} }
+function dateIdn(iso) { const p = iso.split('-'); return p[2] + '/' + p[1] + '/' + p[0]; }
+function dowOfIso(iso) { const d = new Date(iso + 'T00:00:00Z').getUTCDay(); return d === 0 ? 7 : d; }
+
+async function loadClassCompletion(date) {
+    const r = await supabase.rpc('get_class_attendance_completion', { p_date: date });
+    if (r.error) throw r.error;
+    return r.data || [];
+}
+function buildClassRecapVars(rows, date) {
+    let totalH = 0, totalS = 0;
+    const lines = rows.map(function(c) {
+        totalH += c.hadir; totalS += c.total_students;
+        return '• *' + c.class_name + '*: H ' + c.hadir + ' | S ' + c.sakit + ' | I ' + c.izin + ' | A ' + c.alpa;
+    });
+    return { hari: DAY_NAMES[dowOfIso(date)], tanggal: dateIdn(date), rekap_kelas: lines.join('\n'),
+        total_hadir: totalH, total_siswa: totalS, jumlah_kelas: rows.length };
+}
+async function queueClassRecap(rows, date, jid) {
+    const text = await renderMessage('class_attendance_recap', buildClassRecapVars(rows, date));
+    if (!text) return false;
+    enqueueTask(async () => { console.log('[REKAP KELAS] kirim ke grup ' + jid); await sendSafeMessage(jid, { text: text }); });
+    return true;
+}
+
+// Dipanggil frontend setelah absen disimpan. Bot cek SEKALI (bukan terus-menerus); kirim hanya jika semua kelas sudah terisi.
+app.post('/attendance-complete', requireUser, async (req, res) => {
+    try {
+        const cfg = await getBotSettings();
+        if (!cfg.class_recap_enabled || !cfg.class_recap_group_jid) return res.json({ status: 'disabled' });
+        const date = wibNow().date; // selalu hari ini (WIB), abaikan tanggal dari klien
+        if (classRecapSentFor(date)) return res.json({ status: 'already_sent' });
+        if (!isReady) return res.status(503).json({ status: 'error', message: 'Bot belum terhubung.' });
+        const rows = await loadClassCompletion(date);
+        if (rows.length === 0 || rows.some(function(c) { return !c.filled; })) {
+            return res.json({ status: 'not_complete', filled: rows.filter(function(c) { return c.filled; }).length, total: rows.length });
+        }
+        if (classRecapSentFor(date)) return res.json({ status: 'already_sent' });
+        markClassRecapSent(date); // tandai dulu supaya request bersamaan tidak mengirim dobel
+        const ok = await queueClassRecap(rows, date, cfg.class_recap_group_jid);
+        res.json({ status: ok ? 'queued' : 'template_disabled', total: rows.length });
+    } catch (e) { console.error('[REKAP KELAS ERROR]:', e.message); res.status(500).json({ status: 'error', message: e.message }); }
+});
+
+app.get('/admin/groups', requireAdmin, async (req, res) => {
+    try {
+        if (!isReady) return res.status(400).json({ status: 'error', message: 'Bot belum terhubung.' });
+        const all = await sock.groupFetchAllParticipating();
+        const groups = Object.values(all || {}).map(function(g) { return { id: g.id, name: g.subject, size: (g.participants || []).length }; })
+            .sort(function(a, b) { return String(a.name).localeCompare(String(b.name)); });
+        res.json({ status: 'success', groups: groups });
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
+});
+
+// Admin: kirim rekap saat ini ke grup secara manual (walau belum lengkap)
+app.post('/admin/send-class-recap', requireAdmin, async (req, res) => {
+    try {
+        if (!isReady) return res.status(400).json({ status: 'error', message: 'Bot belum terhubung.' });
+        settingsCache.at = 0;
+        const cfg = await getBotSettings();
+        if (!cfg.class_recap_group_jid) return res.status(400).json({ status: 'error', message: 'Grup tujuan belum dipilih.' });
+        const date = wibNow().date;
+        const rows = await loadClassCompletion(date);
+        if (rows.length === 0) return res.status(400).json({ status: 'error', message: 'Tidak ada kelas dengan jadwal aktif hari ini.' });
+        const ok = await queueClassRecap(rows, date, cfg.class_recap_group_jid);
+        if (!ok) return res.status(400).json({ status: 'error', message: 'Template rekap dinonaktifkan.' });
+        const belum = rows.filter(function(c) { return !c.filled; }).length;
+        res.json({ status: 'success', message: 'Rekap masuk antrian.' + (belum ? ' (' + belum + ' kelas belum terabsen)' : '') });
     } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
 });
 

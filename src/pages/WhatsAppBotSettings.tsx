@@ -466,6 +466,124 @@ function ReminderTab() {
   );
 }
 
+/* ------------------------------ Rekap Grup ------------------------------ */
+interface WaGroup { id: string; name: string; size: number }
+
+function GroupRecapTab() {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  const [enabled, setEnabled] = useState(false);
+  const [jid, setJid] = useState('');
+  const [groupName, setGroupName] = useState('');
+  const [groups, setGroups] = useState<WaGroup[]>([]);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['wa-bot-settings'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('wa_bot_settings').select('*').eq('id', 1).maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  useEffect(() => {
+    if (data) {
+      setEnabled(!!data.class_recap_enabled);
+      setJid(data.class_recap_group_jid || '');
+      setGroupName(data.class_recap_group_name || '');
+    }
+  }, [data]);
+
+  const loadGroups = useMutation({
+    mutationFn: () => waAdminFetch<{ groups: WaGroup[] }>('/admin/groups'),
+    onSuccess: (r) => { setGroups(r.groups); toast.success(`${r.groups.length} grup ditemukan`); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const save = useMutation({
+    mutationFn: async () => {
+      if (enabled && !jid) throw new Error('Pilih grup tujuan terlebih dahulu.');
+      const { error } = await supabase.from('wa_bot_settings').upsert({
+        id: 1,
+        class_recap_enabled: enabled,
+        class_recap_group_jid: jid || null,
+        class_recap_group_name: groupName || null,
+        updated_at: new Date().toISOString(), updated_by: user?.id ?? null,
+      });
+      if (error) throw error;
+      waAdminFetch('/admin/reload-config', { method: 'POST' }).catch(() => {});
+    },
+    onSuccess: () => { toast.success('Pengaturan disimpan'); qc.invalidateQueries({ queryKey: ['wa-bot-settings'] }); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const sendNow = useMutation({
+    mutationFn: () => waAdminFetch<{ message: string }>('/admin/send-class-recap', { method: 'POST' }),
+    onSuccess: (r) => toast.success(r.message),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (isLoading) return <Loader2 className="h-5 w-5 animate-spin" />;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Rekap Absensi Per Kelas ke Grup</CardTitle>
+        <CardDescription>
+          Rekap dikirim ke grup WhatsApp otomatis setelah absen jam pertama <b>semua kelas</b> yang punya jadwal aktif hari itu terisi.
+          Aplikasi yang memberi tahu bot saat absen sudah lengkap, bot tidak mengecek terus-menerus. Jika belum lengkap, rekap tidak dikirim.
+          Dikirim satu kali per hari.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 max-w-md">
+        <div className="flex items-center justify-between">
+          <Label htmlFor="grp-en">Aktifkan rekap ke grup</Label>
+          <Switch id="grp-en" checked={enabled} onCheckedChange={setEnabled} />
+        </div>
+        <div className="space-y-2">
+          <Label>Grup tujuan</Label>
+          {jid ? (
+            <div className="rounded-md border p-2 text-sm">
+              <div className="font-medium">{groupName || 'Grup terpilih'}</div>
+              <div className="text-xs text-muted-foreground break-all">{jid}</div>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">Belum ada grup dipilih.</p>
+          )}
+          <Button type="button" variant="outline" size="sm" onClick={() => loadGroups.mutate()} disabled={loadGroups.isPending}>
+            {loadGroups.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />} Ambil daftar grup dari bot
+          </Button>
+          {groups.length > 0 && (
+            <Select
+              value={jid}
+              onValueChange={(v) => { setJid(v); setGroupName(groups.find((g) => g.id === v)?.name || ''); }}
+            >
+              <SelectTrigger><SelectValue placeholder="Pilih grup" /></SelectTrigger>
+              <SelectContent>
+                {groups.map((g) => (
+                  <SelectItem key={g.id} value={g.id}>{g.name} ({g.size})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <p className="text-xs text-muted-foreground">Nomor bot harus sudah menjadi anggota grup tujuan.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => save.mutate()} disabled={save.isPending}>
+            {save.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />} Simpan
+          </Button>
+          <Button variant="outline" onClick={() => sendNow.mutate()} disabled={sendNow.isPending || !jid}>
+            {sendNow.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />} Kirim rekap hari ini sekarang
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          &quot;Kirim sekarang&quot; mengirim rekap kondisi saat ini ke grup tanpa menunggu semua kelas lengkap (simpan pengaturan dulu bila baru memilih grup).
+          Isi pesan dapat diubah di tab Template Pesan.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function WhatsAppBotSettings() {
   return (
     <DashboardLayout>
@@ -479,10 +597,12 @@ export default function WhatsAppBotSettings() {
             <TabsTrigger value="connection">Koneksi</TabsTrigger>
             <TabsTrigger value="templates">Template Pesan</TabsTrigger>
             <TabsTrigger value="reminder">Pengingat Guru</TabsTrigger>
+            <TabsTrigger value="group-recap">Rekap Grup</TabsTrigger>
           </TabsList>
           <TabsContent value="connection"><ConnectionTab /></TabsContent>
           <TabsContent value="templates"><TemplatesTab /></TabsContent>
           <TabsContent value="reminder"><ReminderTab /></TabsContent>
+          <TabsContent value="group-recap"><GroupRecapTab /></TabsContent>
         </Tabs>
       </div>
     </DashboardLayout>

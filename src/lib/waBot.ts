@@ -125,7 +125,49 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     ],
     defaultBody: `✅ *TES KONEKSI BERHASIL*\n\nHalo Bapak/Ibu,\n\nNomor WhatsApp ini adalah *Akun Resmi SMP Negeri 8 Ciamis* yang digunakan untuk mengirimkan:\n\n📅 *Notifikasi Jadwal Pelajaran*\n📢 *Notifikasi Presensi Siswa*\n🔔 *Pengingat Mengajar*\n📝 *Pengingat Pengisian Jurnal*\n\n━━━━━━━━━━━━━━━━━━\n\n⚠️ *PENTING:*\nSilakan *SIMPAN NOMOR INI* ke kontak WhatsApp Bapak/Ibu.\n\nJika nomor ini *TIDAK disimpan*, WhatsApp akan memblokir pesan dari nomor yang tidak dikenal, sehingga Bapak/Ibu *tidak akan menerima notifikasi* penting dari sekolah.\n\n━━━━━━━━━━━━━━━━━━\n\nTerima kasih atas perhatiannya.\n_SMP Negeri 8 Ciamis_`,
   },
+  {
+    key: 'class_attendance_recap',
+    title: 'Rekap Absensi Per Kelas (ke Grup)',
+    description: 'Dikirim ke grup WhatsApp otomatis setelah absen jam pertama SEMUA kelas hari itu terisi (diatur di tab Rekap Grup).',
+    variables: [
+      { name: 'hari', sample: 'Senin', hint: 'Nama hari' },
+      { name: 'tanggal', sample: '12/10/2026', hint: 'Tanggal' },
+      { name: 'rekap_kelas', sample: '• *VII A*: H 30 | S 1 | I 0 | A 1\n• *VII B*: H 28 | S 2 | I 1 | A 0', hint: 'Satu baris per kelas' },
+      { name: 'total_hadir', sample: '58', hint: 'Total siswa hadir' },
+      { name: 'total_siswa', sample: '62', hint: 'Total siswa seluruh kelas' },
+      { name: 'jumlah_kelas', sample: '2', hint: 'Jumlah kelas' },
+    ],
+    defaultBody: `📊 *REKAP ABSENSI SISWA PER KELAS*\n{{hari}}, {{tanggal}}\n\n{{rekap_kelas}}\n\n*Total:* {{total_hadir}} hadir dari {{total_siswa}} siswa ({{jumlah_kelas}} kelas)\nKeterangan: H=Hadir, S=Sakit, I=Izin, A=Alpa\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
+  },
 ];
+
+/** Tanggal hari ini (WIB) format YYYY-MM-DD */
+export function wibToday(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+
+/**
+ * Dipanggil setelah absensi disimpan. Frontend memeriksa (1 query ringan) apakah absen jam pertama
+ * SEMUA kelas hari ini sudah terisi; hanya jika sudah lengkap bot WA diberi tahu untuk mengirim rekap ke grup.
+ * Bot tidak melakukan pengecekan berulang. Gagal diam-diam agar tidak mengganggu proses simpan absen.
+ */
+export async function notifyBotIfAttendanceComplete(savedDate?: string): Promise<void> {
+  try {
+    const today = wibToday();
+    if (savedDate && savedDate !== today) return;
+    const key = `wa-class-recap-notified-${today}`;
+    try { if (sessionStorage.getItem(key)) return; } catch { /* abaikan */ }
+    const { data, error } = await (supabase as any).rpc('get_class_attendance_completion', { p_date: today });
+    if (error || !Array.isArray(data) || data.length === 0) return;
+    if (data.some((c: { filled: boolean }) => !c.filled)) return; // belum lengkap: jangan beri tahu bot
+    const res = await waAdminFetch<{ status: string }>('/attendance-complete', { method: 'POST', body: { date: today } });
+    if (['queued', 'already_sent', 'disabled'].includes(res.status)) {
+      try { sessionStorage.setItem(key, '1'); } catch { /* abaikan */ }
+    }
+  } catch {
+    /* bot tidak aktif / belum diatur: abaikan */
+  }
+}
 
 export function fillWaTemplate(body: string, vars: Record<string, string>) {
   return body.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, k) => vars[k] ?? '');

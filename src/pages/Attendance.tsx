@@ -34,6 +34,7 @@ import {
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { addLetterheadToPDF, addSignatureToPDF } from '@/lib/pdfLetterhead';
+import { notifyBotIfAttendanceComplete } from '@/lib/waBot';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
 import {
   generateSecureToken,
@@ -823,6 +824,7 @@ const Attendance = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['attendance-records'] });
       toast.success('✓ Absensi berhasil disimpan');
+      notifyBotIfAttendanceComplete();
       setIsDialogOpen(false);
       setAttendanceData({});
       setSelectedSchedule('');
