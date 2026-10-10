@@ -238,6 +238,9 @@ function StudentsPage() {
       try {
         const p = JSON.parse(schoolSettings.card_layout);
         setLayout({ f: { ...DEFAULT_LAYOUT.f, ...(p.f || {}) }, b: { ...DEFAULT_LAYOUT.b, ...(p.b || {}) } });
+        if (p.theme) setCardTheme(p.theme);
+        if (p.customColor) setCustomColor(p.customColor);
+        if (p.size === 'standard' || p.size === 'large') setCardSize(p.size);
       } catch { }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -479,7 +482,7 @@ function StudentsPage() {
       const { data: existing } = await supabase.from('school_settings').select('id').limit(1).maybeSingle();
       if (!existing) throw new Error('school_settings belum ada');
       const { error } = await supabase.from('school_settings').update({
-        card_layout: JSON.stringify(layout),
+        card_layout: JSON.stringify({ ...layout, theme: cardTheme, customColor, size: cardSize }),
         card_validity_text: validityText,
         card_print_date_text: printDateText,
       }).eq('id', existing.id);
