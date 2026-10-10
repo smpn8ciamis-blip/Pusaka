@@ -377,7 +377,7 @@ async function runTeacherReminders() {
         if (now.dow > 6) return;
         const stRes = await supabase.from('school_settings').select('academic_year, active_semester').limit(1).maybeSingle();
         const st = stRes.data;
-        let q = supabase.from('schedules').select('id, teacher_id, class_id, subject, start_time, end_time, academic_year, semester').eq('day_of_week', now.dow);
+        let q = supabase.from('schedules').select('id, teacher_id, class_id, subject, start_time, end_time, academic_year, semester').eq('is_active', true).eq('day_of_week', now.dow);
         if (st && st.academic_year) q = q.eq('academic_year', st.academic_year);
         if (st && st.active_semester) q = q.eq('semester', st.active_semester);
         const res = await q;

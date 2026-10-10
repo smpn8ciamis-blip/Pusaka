@@ -11,7 +11,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Plus, Pencil, Trash2, Calendar } from 'lucide-react';
+import { Plus, Pencil, Calendar } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
 import { useState, useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { ImportSchedules } from '@/components/ImportSchedules';
@@ -171,17 +173,17 @@ const Schedules = () => {
     },
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from('schedules').delete().eq('id', id);
+  const toggleActiveMutation = useMutation({
+    mutationFn: async ({ id, is_active }: { id: string; is_active: boolean }) => {
+      const { error } = await supabase.from('schedules').update({ is_active } as any).eq('id', id);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: (_d, vars) => {
       queryClient.invalidateQueries({ queryKey: ['schedules'] });
-      toast({ title: 'Jadwal berhasil dihapus' });
+      toast({ title: vars.is_active ? 'Jadwal diaktifkan' : 'Jadwal dinonaktifkan' });
     },
     onError: () => {
-      toast({ title: 'Gagal menghapus jadwal', variant: 'destructive' });
+      toast({ title: 'Gagal mengubah status jadwal', variant: 'destructive' });
     },
   });
 
@@ -551,6 +553,7 @@ const Schedules = () => {
                         <TableHead>Mata Pelajaran</TableHead>
                         <TableHead>Guru</TableHead>
                         <TableHead>Semester</TableHead>
+                        <TableHead>Status</TableHead>
                         <TableHead>Aksi</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -559,7 +562,7 @@ const Schedules = () => {
                         filteredSchedules.map((schedule, index) => {
                           const canEdit = userRole === 'admin' || (userRole === 'teacher' && schedule.teacher_id === currentTeacherId);
                           return (
-                            <TableRow key={schedule.id}>
+                            <TableRow key={schedule.id} className={(schedule as any).is_active === false ? 'opacity-60' : ''}>
                               <TableCell>{index + 1}</TableCell>
                               <TableCell>{DAYS[schedule.day_of_week - 1] || '-'}</TableCell>
                               <TableCell>
@@ -575,18 +578,24 @@ const Schedules = () => {
                               <TableCell>{getTeacherName(schedule)}</TableCell>
                               <TableCell>Semester {schedule.semester}</TableCell>
                               <TableCell>
+                                {(schedule as any).is_active === false ? (
+                                  <Badge variant="secondary">Nonaktif</Badge>
+                                ) : (
+                                  <Badge>Aktif</Badge>
+                                )}
+                              </TableCell>
+                              <TableCell>
                                 {canEdit ? (
                                   <div className="flex gap-2">
                                     <Button variant="ghost" size="sm" onClick={() => handleEdit(schedule)}>
                                       <Pencil className="h-4 w-4" />
                                     </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => deleteMutation.mutate(schedule.id)}
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
+                                    <Switch
+                                      checked={(schedule as any).is_active !== false}
+                                      disabled={toggleActiveMutation.isPending}
+                                      onCheckedChange={(checked) => toggleActiveMutation.mutate({ id: schedule.id, is_active: checked })}
+                                      aria-label="Aktifkan jadwal"
+                                    />
                                   </div>
                                 ) : (
                                   <span className="text-muted-foreground text-sm">-</span>
@@ -597,7 +606,7 @@ const Schedules = () => {
                         })
                       ) : (
                         <TableRow>
-                          <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                          <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
                             Tidak ada jadwal yang sesuai dengan filter
                           </TableCell>
                         </TableRow>

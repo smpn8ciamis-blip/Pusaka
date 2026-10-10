@@ -511,6 +511,7 @@ const Attendance = () => {
           .from('schedules')
           .select(`*, classes(id, name), teachers!inner(id, user_id)`)
           .eq('academic_year', selectedYear)
+          .eq('is_active', true)
           .or(semesterFilter)
           .order('day_of_week');
         if (error) throw error;
@@ -525,6 +526,7 @@ const Attendance = () => {
         .select(`*, classes(id, name), teachers!inner(id, user_id)`)
         .eq('teacher_id', teacher.id)
         .eq('academic_year', selectedYear)
+        .eq('is_active', true)
         .or(semesterFilter)
         .order('day_of_week');
       if (error) throw error;

@@ -494,6 +494,7 @@ const StudentDashboardPage = () => {
         .from('schedules')
         .select('*, teachers(*, profiles:profiles_public(full_name))')
         .eq('class_id', classId!)
+        .eq('is_active', true)
         .eq('day_of_week', today);
       if (selectedYear) q = q.eq('academic_year', selectedYear).eq('semester', selectedSemester);
       const { data, error } = await q.order('start_time');
