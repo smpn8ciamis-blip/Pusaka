@@ -43,6 +43,7 @@ import { Button } from '@/components/ui/button';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { addLetterheadToPDF } from '@/lib/pdfLetterhead';
+import { notifyBotIfAttendanceComplete } from '@/lib/waBot';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -639,6 +640,7 @@ const HomeroomAttendance = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['homeroom-attendance'] });
       toast.success('✓ Absensi berhasil disimpan dan notifikasi dikirim ke guru mapel');
+      notifyBotIfAttendanceComplete(selectedDate);
       setIsDialogOpen(false);
       setAttendanceData({});
     },
@@ -680,6 +682,7 @@ const HomeroomAttendance = () => {
         .from('schedules')
         .select('id, start_time, subject')
         .eq('class_id', homeroomClass.id)
+        .eq('is_active', true)
         .eq('day_of_week', selectedDayOfWeek)
         .order('start_time', { ascending: true })
         .limit(1)
