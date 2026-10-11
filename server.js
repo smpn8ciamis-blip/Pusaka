@@ -716,13 +716,18 @@ app.post('/admin/send-class-recap', requireAdmin, async (req, res) => {
         settingsCache.at = 0;
         const cfg = await getBotSettings();
         if (!cfg.class_recap_group_jid) return res.status(400).json({ status: 'error', message: 'Grup tujuan belum dipilih.' });
-        const date = wibNow().date;
-        const rows = await loadClassCompletion(date);
-        if (rows.length === 0) return res.status(400).json({ status: 'error', message: 'Tidak ada kelas dengan jadwal aktif hari ini.' });
+        // Uji coba: pakai data absensi TERAKHIR yang tercatat (tidak perlu jadwal aktif / hari ini)
+        const r = await supabase.rpc('get_last_class_attendance_recap');
+        if (r.error) {
+            const hint = /get_last_class_attendance_recap/.test(r.error.message || '') ? ' Jalankan migrasi 20261011190000_wa_last_attendance_recap.sql dulu.' : '';
+            return res.status(500).json({ status: 'error', message: r.error.message + hint });
+        }
+        const rows = r.data || [];
+        if (rows.length === 0) return res.status(400).json({ status: 'error', message: 'Belum ada data absensi sama sekali.' });
+        const date = String(rows[0].recap_date).slice(0, 10);
         const ok = await queueClassRecap(rows, date, cfg.class_recap_group_jid);
         if (!ok) return res.status(400).json({ status: 'error', message: 'Template rekap dinonaktifkan.' });
-        const belum = rows.filter(function(c) { return !c.filled; }).length;
-        res.json({ status: 'success', message: 'Rekap masuk antrian.' + (belum ? ' (' + belum + ' kelas belum terabsen)' : '') });
+        res.json({ status: 'success', message: 'Rekap uji coba (data absensi ' + dateIdn(date) + ') masuk antrian.' });
     } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
 });
 
