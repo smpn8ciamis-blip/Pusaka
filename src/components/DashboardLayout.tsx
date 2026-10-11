@@ -10,7 +10,7 @@ import {
   ChevronUp, AlertTriangle, BarChart3, FolderOpen, MessageSquare, Database,
   Award, FileSignature, Plane, Receipt, FileSpreadsheet, Wallet, FileBarChart,
   Inbox, Send, Hammer, Vote, Upload, Bell, Lock, Landmark, Server, UserMinus,
-  Sparkles, CreditCard, ScanLine, LayoutDashboard, Search, Star, Moon, CalendarDays, KeyRound
+  Sparkles, CreditCard, ScanLine, LayoutDashboard, Search, Star, Moon, CalendarDays, KeyRound, Fingerprint
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -355,6 +355,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         { icon: Upload, label: 'Manajemen Upload Berkas', href: '/file-upload-management' },
         { icon: Bell, label: 'Billing Dashboard', href: '/billing-dashboard' },
         { icon: Send, label: 'WhatsApp Bot', href: '/whatsapp-bot' },
+        { icon: Fingerprint, label: 'Mesin Fingerprint', href: '/fingerprint' },
         { icon: Server, label: 'Sistem Informasi', href: '/system-info' },
         { icon: Settings, label: 'Pengaturan', href: '/settings' },
       ],
