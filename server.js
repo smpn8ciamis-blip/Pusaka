@@ -87,7 +87,7 @@ const DEFAULT_TEMPLATES = {
     teacher_followup: `📝 *PENGINGAT PENGISIAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\nData berikut belum terisi untuk kelas *{{kelas}}* ({{mapel}}, {{jam}}):\n{{belum_terisi}}\n\nMohon segera dilengkapi di aplikasi Pusaka.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`,
     teacher_daily_recap: `📅 *REKAP JADWAL MENGAJAR*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\nJadwal mengajar Anda hari *{{hari}}, {{tanggal}}* ({{jumlah_jam}} sesi):\n\n{{rekap}}\n\nJangan lupa mengisi *absensi* dan *jurnal mengajar*.\n_Pusaka - SMP Negeri 8 Ciamis_`,
     test_connection: `✅ *TES KONEKSI BERHASIL*\n\nHalo Bapak/Ibu,\n\nNomor WhatsApp ini adalah *Akun Resmi SMP Negeri 8 Ciamis* yang digunakan untuk mengirimkan:\n\n📅 *Notifikasi Jadwal Pelajaran*\n📢 *Notifikasi Presensi Siswa*\n🔔 *Pengingat Mengajar*\n📝 *Pengingat Pengisian Jurnal*\n\n━━━━━━━━━━━━━━━━━━\n\n⚠️ *PENTING:*\nSilakan *SIMPAN NOMOR INI* ke kontak WhatsApp Bapak/Ibu.\n\nJika nomor ini *TIDAK disimpan*, WhatsApp akan memblokir pesan dari nomor yang tidak dikenal, sehingga Bapak/Ibu *tidak akan menerima notifikasi* penting dari sekolah.\n\n━━━━━━━━━━━━━━━━━━\n\nTerima kasih atas perhatiannya.\n_SMP Negeri 8 Ciamis_`,
-    class_attendance_recap: `📊 *REKAP ABSENSI SISWA PER KELAS*\n{{hari}}, {{tanggal}}\n\n{{rekap_kelas}}\n\n*Total:* {{total_hadir}} hadir dari {{total_siswa}} siswa ({{jumlah_kelas}} kelas)\nKeterangan: H=Hadir, S=Sakit, I=Izin, A=Alpa\n\n_Pusaka - SMP Negeri 8 Ciamis_`
+    class_attendance_recap: `📊 *REKAP ABSENSI SISWA PER KELAS*\n{{hari}}, {{tanggal}}\n\n{{tabel_rekap}}\nKet: H=Hadir, S=Sakit, I=Izin, A=Alfa, Jml=Jumlah tidak sekolah\n\n*REKAP SEMUA KELAS* ({{jumlah_kelas}} kelas, {{total_siswa}} siswa)\n• Hadir: *{{total_hadir}}* ({{persen_hadir}}%)\n• Sakit: *{{total_sakit}}*\n• Izin: *{{total_izin}}*\n• Alfa: *{{total_alfa}}*\n• Jml tidak hadir: *{{total_tidak_hadir}}*\n\n_Pusaka - SMP Negeri 8 Ciamis_`
 };
 const DEFAULT_BOT_SETTINGS = {
     teacher_reminder_enabled: true, reminder_lead_min: 10, reminder_followup_min: 15,
@@ -641,13 +641,29 @@ async function loadClassCompletion(date) {
     return r.data || [];
 }
 function buildClassRecapVars(rows, date) {
-    let totalH = 0, totalS = 0;
-    const lines = rows.map(function(c) {
-        totalH += c.hadir; totalS += c.total_students;
-        return '• *' + c.class_name + '*: H ' + c.hadir + ' | S ' + c.sakit + ' | I ' + c.izin + ' | A ' + c.alpa;
+    const num = function(v) { return Number(v) || 0; };
+    const tot = { siswa: 0, hadir: 0, sakit: 0, izin: 0, alpa: 0 };
+    const wKelas = Math.max(5, rows.reduce(function(m, c) { return Math.max(m, String(c.class_name).length); }, 0));
+    const L = function(v, w) { return String(v).padEnd(w); };
+    const R = function(v, w) { return String(v).padStart(w); };
+    // Tabel monospace (dalam blok ``` agar kolom rata di WhatsApp)
+    const head = R('No', 2) + ' ' + L('Kelas', wKelas) + ' ' + R('Siswa', 5) + ' ' + R('H', 3) + ' ' + R('S', 3) + ' ' + R('I', 3) + ' ' + R('A', 3) + ' ' + R('Jml', 3);
+    const line = '-'.repeat(head.length);
+    const body = rows.map(function(c, i) {
+        const h = num(c.hadir), sk = num(c.sakit), iz = num(c.izin), al = num(c.alpa), sw = num(c.total_students);
+        tot.siswa += sw; tot.hadir += h; tot.sakit += sk; tot.izin += iz; tot.alpa += al;
+        return R(i + 1, 2) + ' ' + L(c.class_name, wKelas) + ' ' + R(sw, 5) + ' ' + R(h, 3) + ' ' + R(sk, 3) + ' ' + R(iz, 3) + ' ' + R(al, 3) + ' ' + R(sk + iz + al, 3);
     });
-    return { hari: DAY_NAMES[dowOfIso(date)], tanggal: dateIdn(date), rekap_kelas: lines.join('\n'),
-        total_hadir: totalH, total_siswa: totalS, jumlah_kelas: rows.length };
+    const tidakHadir = tot.sakit + tot.izin + tot.alpa;
+    const foot = R('', 2) + ' ' + L('JUMLAH', wKelas) + ' ' + R(tot.siswa, 5) + ' ' + R(tot.hadir, 3) + ' ' + R(tot.sakit, 3) + ' ' + R(tot.izin, 3) + ' ' + R(tot.alpa, 3) + ' ' + R(tidakHadir, 3);
+    const tabel = '```\n' + [head, line].concat(body, [line, foot]).join('\n') + '\n```';
+    const terabsen = tot.hadir + tidakHadir;
+    const persen = terabsen > 0 ? (Math.round(tot.hadir / terabsen * 1000) / 10).toString().replace('.', ',') : '0';
+    // Variabel lama (rekap_kelas, total_hadir, total_siswa, jumlah_kelas) tetap disediakan agar template buatan sendiri tidak rusak
+    const lama = rows.map(function(c) { return '• *' + c.class_name + '*: H ' + num(c.hadir) + ' | S ' + num(c.sakit) + ' | I ' + num(c.izin) + ' | A ' + num(c.alpa); }).join('\n');
+    return { hari: DAY_NAMES[dowOfIso(date)], tanggal: dateIdn(date), tabel_rekap: tabel, rekap_kelas: lama,
+        total_siswa: tot.siswa, total_hadir: tot.hadir, total_sakit: tot.sakit, total_izin: tot.izin, total_alfa: tot.alpa,
+        total_tidak_hadir: tidakHadir, persen_hadir: persen, jumlah_kelas: rows.length };
 }
 async function queueClassRecap(rows, date, jid) {
     const text = await renderMessage('class_attendance_recap', buildClassRecapVars(rows, date));

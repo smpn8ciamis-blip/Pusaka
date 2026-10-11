@@ -128,16 +128,21 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
   {
     key: 'class_attendance_recap',
     title: 'Rekap Absensi Per Kelas (ke Grup)',
-    description: 'Dikirim ke grup WhatsApp otomatis setelah absen jam pertama SEMUA kelas hari itu terisi (diatur di tab Rekap Grup).',
+    description: 'Dikirim ke grup WhatsApp otomatis setelah absen jam pertama SEMUA kelas hari itu terisi (diatur di tab Rekap Grup). Berbentuk tabel per kelas + rekap seluruh kelas.',
     variables: [
       { name: 'hari', sample: 'Senin', hint: 'Nama hari' },
       { name: 'tanggal', sample: '12/10/2026', hint: 'Tanggal' },
-      { name: 'rekap_kelas', sample: '• *VII A*: H 30 | S 1 | I 0 | A 1\n• *VII B*: H 28 | S 2 | I 1 | A 0', hint: 'Satu baris per kelas' },
-      { name: 'total_hadir', sample: '58', hint: 'Total siswa hadir' },
-      { name: 'total_siswa', sample: '62', hint: 'Total siswa seluruh kelas' },
-      { name: 'jumlah_kelas', sample: '2', hint: 'Jumlah kelas' },
+      { name: 'tabel_rekap', sample: '```No Kelas Siswa   H   S   I   A Jml\n 1 7A        32  30   1   0   1   2```', hint: 'Tabel No, Kelas, Siswa, H, S, I, A, Jml tidak sekolah + baris JUMLAH' },
+      { name: 'jumlah_kelas', sample: '6', hint: 'Jumlah kelas' },
+      { name: 'total_siswa', sample: '190', hint: 'Total siswa seluruh kelas' },
+      { name: 'total_hadir', sample: '181', hint: 'Total hadir' },
+      { name: 'total_sakit', sample: '4', hint: 'Total sakit' },
+      { name: 'total_izin', sample: '3', hint: 'Total izin' },
+      { name: 'total_alfa', sample: '2', hint: 'Total alfa' },
+      { name: 'total_tidak_hadir', sample: '9', hint: 'Sakit + izin + alfa' },
+      { name: 'persen_hadir', sample: '95,3', hint: 'Persentase hadir' },
     ],
-    defaultBody: `📊 *REKAP ABSENSI SISWA PER KELAS*\n{{hari}}, {{tanggal}}\n\n{{rekap_kelas}}\n\n*Total:* {{total_hadir}} hadir dari {{total_siswa}} siswa ({{jumlah_kelas}} kelas)\nKeterangan: H=Hadir, S=Sakit, I=Izin, A=Alpa\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
+    defaultBody: `📊 *REKAP ABSENSI SISWA PER KELAS*\n{{hari}}, {{tanggal}}\n\n{{tabel_rekap}}\nKet: H=Hadir, S=Sakit, I=Izin, A=Alfa, Jml=Jumlah tidak sekolah\n\n*REKAP SEMUA KELAS* ({{jumlah_kelas}} kelas, {{total_siswa}} siswa)\n• Hadir: *{{total_hadir}}* ({{persen_hadir}}%)\n• Sakit: *{{total_sakit}}*\n• Izin: *{{total_izin}}*\n• Alfa: *{{total_alfa}}*\n• Jml tidak hadir: *{{total_tidak_hadir}}*\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
   },
 ];
 
