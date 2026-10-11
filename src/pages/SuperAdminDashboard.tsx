@@ -14,13 +14,14 @@ import { toast } from 'sonner';
 import {
   School, Plus, Users, UserCircle, MapPin, Phone, Mail, Building2, BarChart3,
   CreditCard, Edit2, CheckCircle, XCircle, AlertTriangle, Check, Package,
-  ShieldCheck, Clock, Filter, X,
+  ShieldCheck, Clock, Filter, X, Database,
 } from 'lucide-react';
 import { format, addMonths } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
 import UserManagementTab from '@/components/super-admin/UserManagementTab';
 import SchoolEditDialog from '@/components/super-admin/SchoolEditDialog';
 import PlanManagementTab from '@/components/super-admin/PlanManagementTab';
+import TemplateExportTab from '@/components/super-admin/TemplateExportTab';
 import SchoolApprovalTab from '@/components/super-admin/SchoolApprovalTab';
 import { FEATURE_LABELS, formatRupiah } from '@/config/subscriptionPlans';
 import { useSubscriptionPlans } from '@/hooks/useSubscriptionPlans';
@@ -239,6 +240,7 @@ export default function SuperAdminDashboard() {
             <TabsTrigger value="subscriptions" className="gap-2"><CreditCard className="h-4 w-4" />Langganan</TabsTrigger>
             <TabsTrigger value="plans" className="gap-2"><Package className="h-4 w-4" />Paket</TabsTrigger>
             <TabsTrigger value="accounts" className="gap-2"><Users className="h-4 w-4" />Akun</TabsTrigger>
+            <TabsTrigger value="template-db" className="gap-2"><Database className="h-4 w-4" />Template DB</TabsTrigger>
           </TabsList>
 
           <TabsContent value="schools">
@@ -341,6 +343,7 @@ export default function SuperAdminDashboard() {
           </TabsContent>
 
           <TabsContent value="plans"><PlanManagementTab /></TabsContent>
+          <TabsContent value="template-db"><TemplateExportTab /></TabsContent>
 
           <TabsContent value="accounts">
             <Card>
