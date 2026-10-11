@@ -132,7 +132,7 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     variables: [
       { name: 'hari', sample: 'Senin', hint: 'Nama hari' },
       { name: 'tanggal', sample: '12/10/2026', hint: 'Tanggal' },
-      { name: 'tabel_rekap', sample: '```\n+---+---+---+\n|Kls|Sis|  H|\n+---+---+---+\n|7A | 32| 30|\n+---+---+---+\n```', hint: 'Tabel ber-border: Kls, Sis, H, S, I, A, Jml tidak sekolah + baris Tot' },
+      { name: 'tabel_rekap', sample: '```\n+---+---+---+-+-+-+---+\n|Kls|Sis|  H|S|I|A|Jml|\n+---+---+---+-+-+-+---+\n|7A | 32| 30|1|1|0|  2|\n|7B | 31| 29|1|0|1|  2|\n|8A | 32| 30|0|1|1|  2|\n|8B | 31| 30|1|0|0|  1|\n|9A | 32| 31|0|1|0|  1|\n|9B | 32| 31|1|0|0|  1|\n+---+---+---+-+-+-+---+\n|Tot|190|181|4|3|2|  9|\n+---+---+---+-+-+-+---+\n```', hint: 'Tabel ber-border: Kls, Sis, H, S, I, A, Jml tidak sekolah + baris Tot' },
       { name: 'jumlah_kelas', sample: '6', hint: 'Jumlah kelas' },
       { name: 'total_siswa', sample: '190', hint: 'Total siswa seluruh kelas' },
       { name: 'total_hadir', sample: '181', hint: 'Total hadir' },
