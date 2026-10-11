@@ -132,7 +132,7 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     variables: [
       { name: 'hari', sample: 'Senin', hint: 'Nama hari' },
       { name: 'tanggal', sample: '12/10/2026', hint: 'Tanggal' },
-      { name: 'tabel_rekap', sample: '```No Kelas Siswa   H   S   I   A Jml\n 1 7A        32  30   1   0   1   2```', hint: 'Tabel No, Kelas, Siswa, H, S, I, A, Jml tidak sekolah + baris JUMLAH' },
+      { name: 'tabel_rekap', sample: '```\n+---+---+---+\n|Kls|Sis|  H|\n+---+---+---+\n|7A | 32| 30|\n+---+---+---+\n```', hint: 'Tabel ber-border: Kls, Sis, H, S, I, A, Jml tidak sekolah + baris Tot' },
       { name: 'jumlah_kelas', sample: '6', hint: 'Jumlah kelas' },
       { name: 'total_siswa', sample: '190', hint: 'Total siswa seluruh kelas' },
       { name: 'total_hadir', sample: '181', hint: 'Total hadir' },
@@ -142,7 +142,7 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
       { name: 'total_tidak_hadir', sample: '9', hint: 'Sakit + izin + alfa' },
       { name: 'persen_hadir', sample: '95,3', hint: 'Persentase hadir' },
     ],
-    defaultBody: `📊 *REKAP ABSENSI SISWA PER KELAS*\n{{hari}}, {{tanggal}}\n\n{{tabel_rekap}}\nKet: H=Hadir, S=Sakit, I=Izin, A=Alfa, Jml=Jumlah tidak sekolah\n\n*REKAP SEMUA KELAS* ({{jumlah_kelas}} kelas, {{total_siswa}} siswa)\n• Hadir: *{{total_hadir}}* ({{persen_hadir}}%)\n• Sakit: *{{total_sakit}}*\n• Izin: *{{total_izin}}*\n• Alfa: *{{total_alfa}}*\n• Jml tidak hadir: *{{total_tidak_hadir}}*\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
+    defaultBody: `📊 *REKAP ABSENSI SISWA PER KELAS*\n{{hari}}, {{tanggal}}\n\n{{tabel_rekap}}\nKls=Kelas, Sis=Siswa, H=Hadir, S=Sakit, I=Izin, A=Alfa, Jml=Jumlah tidak sekolah\n\n*REKAP SEMUA KELAS* ({{jumlah_kelas}} kelas, {{total_siswa}} siswa)\n• Hadir: *{{total_hadir}}* ({{persen_hadir}}%)\n• Sakit: *{{total_sakit}}*\n• Izin: *{{total_izin}}*\n• Alfa: *{{total_alfa}}*\n• Jml tidak hadir: *{{total_tidak_hadir}}*\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
   },
 ];
 
