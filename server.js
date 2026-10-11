@@ -744,6 +744,85 @@ app.get('/', (req, res) => res.json({
     bot_started: !!sock
 }));
 
+// ===================== MESIN FINGERPRINT (ZKTeco / Solution, protokol ADMS "push") =====================
+// Mesin yang mengirim data ke server ini. Di mesin: Menu > Comm. > Cloud Server Setting
+//   Server Address = domain/IP server ini, Port = port HTTP bot (atau port nginx yang meneruskan /iclock/ ke bot)
+// Mesin baru otomatis terdaftar "menunggu"; admin mengaktifkannya di halaman Mesin Fingerprint.
+const fpSeen = new Map(); // sn -> { at, active }
+const rawText = express.text({ type: function() { return true; }, limit: '5mb' });
+async function fpDevice(sn, ip) {
+    const c = fpSeen.get(sn);
+    if (c && Date.now() - c.at < 30000) return c.active;
+    let active = false;
+    try {
+        const r = await supabase.from('fingerprint_devices').select('is_active').eq('serial_number', sn).maybeSingle();
+        if (r.error) throw r.error;
+        if (!r.data) {
+            await supabase.from('fingerprint_devices').insert({ serial_number: sn, name: 'Mesin ' + sn, is_active: false, last_seen_at: new Date().toISOString(), last_ip: ip });
+            console.log('[FINGERPRINT] Mesin baru terdeteksi (menunggu aktivasi admin): ' + sn);
+        } else {
+            active = !!r.data.is_active;
+            await supabase.from('fingerprint_devices').update({ last_seen_at: new Date().toISOString(), last_ip: ip }).eq('serial_number', sn);
+        }
+    } catch (e) { console.error('[FINGERPRINT] cek mesin gagal:', e.message); throw e; }
+    fpSeen.set(sn, { at: Date.now(), active: active });
+    return active;
+}
+function fpSn(req) { return String(req.query.SN || req.query.sn || '').trim().slice(0, 64); }
+function fpIp(req) { return String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim().slice(0, 64); }
+
+// Jabat tangan awal + konfigurasi
+app.get('/iclock/cdata', async (req, res) => {
+    try {
+        const sn = fpSn(req);
+        if (!sn) return res.status(400).send('ERROR: SN required');
+        await fpDevice(sn, fpIp(req));
+        res.type('text/plain').send([
+            'GET OPTION FROM: ' + sn, 'ErrorDelay=60', 'Delay=30', 'TransTimes=00:00;12:00', 'TransInterval=1',
+            'TransFlag=TransData AttLog', 'TimeZone=7', 'Realtime=1', 'Encrypt=0'
+        ].join('\n') + '\n');
+    } catch (e) { res.status(500).send('ERROR'); }
+});
+// Detak jantung mesin
+app.get('/iclock/getrequest', async (req, res) => {
+    try { const sn = fpSn(req); if (sn) await fpDevice(sn, fpIp(req)); res.type('text/plain').send('OK'); }
+    catch (e) { res.status(500).send('ERROR'); }
+});
+app.post('/iclock/devicecmd', rawText, (req, res) => res.type('text/plain').send('OK'));
+app.get('/iclock/ping', (req, res) => res.type('text/plain').send('OK'));
+// Terima log absen: tiap baris "PIN \t YYYY-MM-DD HH:MM:SS \t Status \t Verify \t ..."
+app.post('/iclock/cdata', rawText, async (req, res) => {
+    try {
+        const sn = fpSn(req);
+        if (!sn) return res.status(400).send('ERROR: SN required');
+        const active = await fpDevice(sn, fpIp(req));
+        const table = String(req.query.table || '').toUpperCase();
+        if (table !== 'ATTLOG') return res.type('text/plain').send('OK'); // OPERLOG / USER dll: diabaikan
+        // Mesin belum diaktifkan: balas error agar mesin menyimpan & mengirim ulang nanti (data tidak hilang)
+        if (!active) return res.status(403).type('text/plain').send('ERROR: device not activated');
+        const lines = String(req.body || '').split(/\r?\n/).map(function(l) { return l.trim(); }).filter(Boolean);
+        let n = 0;
+        for (const line of lines) {
+            const f = line.split('\t');
+            const pin = String(f[0] || '').trim();
+            const m = String(f[1] || '').trim().match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/);
+            if (!pin || !m) continue;
+            const at = new Date(m[1] + 'T' + m[2] + '+07:00'); // jam mesin = WIB
+            if (isNaN(at.getTime())) continue;
+            const r = await supabase.rpc('fp_process_punch', {
+                p_sn: sn, p_pin: pin, p_punched_at: at.toISOString(),
+                p_verify: Number.isNaN(parseInt(f[3], 10)) ? null : parseInt(f[3], 10), p_state: Number.isNaN(parseInt(f[2], 10)) ? null : parseInt(f[2], 10)
+            });
+            if (r.error) throw r.error; // kegagalan -> mesin mengirim ulang (aman, proses idempoten)
+            n++;
+        }
+        if (n) console.log('[FINGERPRINT] ' + sn + ': ' + n + ' log diproses');
+        res.type('text/plain').send('OK: ' + n);
+    } catch (e) { console.error('[FINGERPRINT ERROR]:', e.message); res.status(500).type('text/plain').send('ERROR'); }
+});
+// Admin: aktifkan/nonaktifkan mesin menghapus cache agar langsung berlaku
+app.post('/admin/fingerprint/reload', requireAdmin, (req, res) => { fpSeen.clear(); res.json({ status: 'success' }); });
+
 const PORT = parseInt(process.env.PORT || '3000', 10);
 app.listen(PORT, () => {
     console.log('Server API berjalan di port ' + PORT);
