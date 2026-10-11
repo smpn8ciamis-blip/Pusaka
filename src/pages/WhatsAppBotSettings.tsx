@@ -572,11 +572,11 @@ function GroupRecapTab() {
             {save.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />} Simpan
           </Button>
           <Button variant="outline" onClick={() => sendNow.mutate()} disabled={sendNow.isPending || !jid}>
-            {sendNow.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />} Kirim rekap hari ini sekarang
+            {sendNow.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />} Kirim rekap uji coba
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          &quot;Kirim sekarang&quot; mengirim rekap kondisi saat ini ke grup tanpa menunggu semua kelas lengkap (simpan pengaturan dulu bila baru memilih grup).
+          &quot;Kirim rekap uji coba&quot; bisa dipakai kapan saja, tanpa perlu jadwal aktif. Isinya diambil dari data absensi terakhir yang tercatat (simpan pengaturan dulu bila baru memilih grup).
           Isi pesan dapat diubah di tab Template Pesan.
         </p>
       </CardContent>
