@@ -26,6 +26,7 @@ import {
   getActiveDayNames,
 } from '@/hooks/useAttendanceDaySettings';
 import React, { useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -415,6 +416,7 @@ const Attendance = () => {
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
 
+  const [searchParams, setSearchParams] = useSearchParams();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedSchedule, setSelectedSchedule] = useState('');
   const [selectedDate, setSelectedDate] = useState(toISODate(new Date()));
@@ -535,6 +537,26 @@ const Attendance = () => {
     },
     enabled: !!user?.id && !!userRole && !!selectedYear,
   });
+
+  // Tautan langsung dari Jurnal Mengajar: /attendance?schedule=<id>&date=<yyyy-MM-dd>
+  // → pilih jadwal & tanggal itu lalu langsung buka form Isi Absensi.
+  React.useEffect(() => {
+    const scheduleParam = searchParams.get('schedule');
+    if (!scheduleParam || !schedules) return;
+    const dateParam = searchParams.get('date');
+    const found = (schedules as any[]).some((sc) => sc.id === scheduleParam);
+    const next = new URLSearchParams(searchParams);
+    next.delete('schedule');
+    next.delete('date');
+    setSearchParams(next, { replace: true });
+    if (!found) {
+      toast.error('Jadwal tidak ditemukan pada tahun ajaran / semester yang dipilih');
+      return;
+    }
+    if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) setSelectedDate(dateParam);
+    setSelectedSchedule(scheduleParam);
+    setIsDialogOpen(true);
+  }, [searchParams, schedules, setSearchParams]);
 
   // Jadwal terpilih yang tidak lagi ada di daftar (ganti tahun/semester) dikosongkan
   React.useEffect(() => {

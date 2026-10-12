@@ -58,6 +58,11 @@ const Journals = () => {
   });
   const [hasAttendanceData, setHasAttendanceData] = useState<boolean | null>(null);
   const [isCheckingAttendance, setIsCheckingAttendance] = useState(false);
+  // Absensi mapel lain (kelas & tanggal sama) yang bisa dipakai bila jadwal ini belum punya absensi
+  const [previousAttendance, setPreviousAttendance] = useState<{
+    label: string; present: number; absent: number;
+  } | null>(null);
+  const [usingPrevious, setUsingPrevious] = useState(false);
   const [formData, setFormData] = useState({
     schedule_id: '',
     date: toISODate(new Date()),
@@ -239,6 +244,8 @@ const Journals = () => {
   useEffect(() => {
     const fetchAttendanceData = async () => {
       // Don't auto-fetch if editing existing journal
+      setPreviousAttendance(null);
+      setUsingPrevious(false);
       if (!formData.schedule_id || !formData.date) {
         setHasAttendanceData(null);
         return;
@@ -269,11 +276,51 @@ const Journals = () => {
             students_present: 0,
             students_absent: 0,
           }));
-          toast({
-            title: 'Tidak ada data absensi',
-            description: 'Silakan isi absensi terlebih dahulu sebelum membuat jurnal.',
-            variant: 'destructive'
-          });
+          // Cari absensi mapel lain di kelas & tanggal yang sama
+          try {
+            const cur = schedules?.find((sc: any) => sc.id === formData.schedule_id) as any;
+            if (cur?.class_id) {
+              const { data: sibs } = await supabase
+                .from('schedules')
+                .select('id, subject, start_time')
+                .eq('class_id', cur.class_id)
+                .neq('id', formData.schedule_id);
+              const sibIds = (sibs || []).map((x) => x.id);
+              if (sibIds.length > 0) {
+                const { data: prevRows } = await supabase
+                  .from('attendance')
+                  .select('schedule_id, student_id, status, created_at')
+                  .in('schedule_id', sibIds)
+                  .eq('date', formData.date)
+                  .order('created_at', { ascending: false });
+                if (prevRows && prevRows.length > 0) {
+                  const bySched = new Map<string, any[]>();
+                  prevRows.forEach((r) => {
+                    if (!r.schedule_id) return;
+                    bySched.set(r.schedule_id, [...(bySched.get(r.schedule_id) || []), r]);
+                  });
+                  // Pilih mapel terdekat sebelum jam ini; jika tidak ada, yang terakhir diisi
+                  const cands = (sibs || []).filter((x) => bySched.has(x.id));
+                  const before = cands
+                    .filter((x) => (x.start_time || '') < (cur.start_time || ''))
+                    .sort((a, b) => (b.start_time || '').localeCompare(a.start_time || ''));
+                  const pick = before[0] || cands.sort((a, b) => (b.start_time || '').localeCompare(a.start_time || ''))[0];
+                  if (pick) {
+                    const uniq = new Map<string, string>();
+                    bySched.get(pick.id)!.forEach((r) => { if (!uniq.has(r.student_id)) uniq.set(r.student_id, r.status); });
+                    const sts = Array.from(uniq.values());
+                    setPreviousAttendance({
+                      label: `${pick.subject} (${shortTime(pick.start_time)})`,
+                      present: sts.filter((x) => x === 'hadir').length,
+                      absent: sts.filter((x) => x !== 'hadir').length,
+                    });
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            console.error('Error mencari absensi sebelumnya:', e);
+          }
           return;
         }
         
@@ -310,7 +357,7 @@ const Journals = () => {
     };
     
     fetchAttendanceData();
-  }, [formData.schedule_id, formData.date, editingJournal, toast]);
+  }, [formData.schedule_id, formData.date, editingJournal, toast, schedules]);
 
   const resetForm = () => {
     setFormData({
@@ -325,6 +372,24 @@ const Journals = () => {
     setEditingJournal(null);
     setHasAttendanceData(null);
     setIsCheckingAttendance(false);
+    setPreviousAttendance(null);
+    setUsingPrevious(false);
+  };
+
+  const usePreviousAttendance = () => {
+    if (!previousAttendance) return;
+    setHasAttendanceData(true);
+    setUsingPrevious(true);
+    setFormData((prev) => ({
+      ...prev,
+      students_present: previousAttendance.present,
+      students_absent: previousAttendance.absent,
+    }));
+  };
+
+  const createNewAttendance = () => {
+    setIsDialogOpen(false);
+    navigate(`/attendance?schedule=${encodeURIComponent(formData.schedule_id)}&date=${encodeURIComponent(formData.date)}`);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -741,27 +806,44 @@ const Journals = () => {
                         ) : hasAttendanceData === false ? (
                           <div>
                             <div className="text-red-700 mb-3">
-                              <p className="text-sm font-semibold mb-1">⚠️ Belum ada data absensi</p>
-                              <p className="text-xs">Silakan isi absensi untuk jadwal dan tanggal ini terlebih dahulu sebelum membuat jurnal mengajar.</p>
+                              <p className="text-sm font-semibold mb-1">⚠️ Belum ada data absensi untuk jadwal ini</p>
+                              <p className="text-xs">
+                                {previousAttendance
+                                  ? `Kelas ini sudah diabsen pada mapel ${previousAttendance.label}: hadir ${previousAttendance.present}, tidak hadir ${previousAttendance.absent}. Pakai absensi tersebut atau buat absen baru.`
+                                  : 'Silakan isi absensi untuk jadwal dan tanggal ini terlebih dahulu sebelum membuat jurnal mengajar.'}
+                              </p>
                             </div>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="gap-2 border-red-300 text-red-700 hover:bg-red-100 hover:text-red-800"
-                              onClick={() => {
-                                setIsDialogOpen(false);
-                                navigate('/attendance');
-                              }}
-                            >
-                              Isi Absensi Sekarang
-                              <ArrowRight className="h-4 w-4" />
-                            </Button>
+                            <div className="flex flex-col sm:flex-row gap-2">
+                              {previousAttendance && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className="gap-2"
+                                  onClick={usePreviousAttendance}
+                                >
+                                  Gunakan absensi mapel sebelumnya
+                                </Button>
+                              )}
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="gap-2 border-red-300 text-red-700 hover:bg-red-100 hover:text-red-800"
+                                onClick={createNewAttendance}
+                              >
+                                Buat absen baru
+                                <ArrowRight className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </div>
                         ) : hasAttendanceData === true ? (
                           <div className="text-green-700">
                             <p className="text-sm font-semibold mb-1">✓ Data absensi tersedia</p>
-                            <p className="text-xs">Jumlah kehadiran telah terisi otomatis dari data absensi.</p>
+                            <p className="text-xs">
+                              {usingPrevious && previousAttendance
+                                ? `Jumlah kehadiran diambil dari absensi mapel ${previousAttendance.label}.`
+                                : 'Jumlah kehadiran telah terisi otomatis dari data absensi.'}
+                            </p>
                           </div>
                         ) : null}
                       </div>
