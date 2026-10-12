@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   CheckCircle2, XCircle, Loader2, ShieldCheck, Calendar, Building2, Hash, Archive,
-  AlertTriangle, Users,
+  AlertTriangle, Users, BookOpen,
 } from 'lucide-react';
 
 /* ============================================================
@@ -50,6 +50,27 @@ interface ViolationSummary {
   berat: number;
 }
 
+interface JournalVerifyRow {
+  tanggal: string;
+  guru: string;
+  mapel: string;
+  kelas: string;
+  jam: string;
+  materi: string;
+  aktivitas: string;
+  hadir: number;
+  tidakHadir: number;
+  catatan: string;
+}
+
+interface JournalSummary {
+  totalJournals: number;
+  totalTeachers: number;
+  totalPresent: number;
+  totalAbsent: number;
+  presentPercent: number;
+}
+
 interface VerifyResult {
   valid: boolean;
   reason?: string;
@@ -60,6 +81,7 @@ interface VerifyResult {
   summary?: AbsentSummary | ViolationSummary | any;
   students?: StudentRow[];
   violations?: ViolationRow[];
+  journals?: JournalVerifyRow[];
   print_date?: string;
   verified_at?: string;
   expires_at?: string | null;
@@ -154,13 +176,18 @@ export default function VerifyReport() {
   // DETEKSI JENIS LAPORAN
   // Prioritas: cek array data (students vs violations) & type
   // ============================================================
-  const isViolation = !!(
+  const isJournal = !!(
+    data?.journals ||
+    (data?.type || '').toLowerCase().includes('jurnal')
+  );
+
+  const isViolation = !isJournal && !!(
     data?.violations ||
     data?.type === 'violations' ||
     (data?.type || '').toLowerCase().includes('pelanggaran')
   );
 
-  const isAbsent = !isViolation && !!(
+  const isAbsent = !isJournal && !isViolation && !!(
     data?.students ||
     data?.type === 'absent' ||
     (data?.type || '').toLowerCase().includes('tidak hadir')
@@ -229,7 +256,9 @@ export default function VerifyReport() {
                 <div className="space-y-1">
                   <p className="text-muted-foreground text-xs">Jenis Dokumen</p>
                   <p className="font-semibold">
-                    {isViolation
+                    {isJournal
+                      ? 'Rekap Jurnal Mengajar'
+                      : isViolation
                       ? 'Laporan Data Pelanggaran Siswa'
                       : isAbsent
                         ? 'Rekap Siswa Tidak Hadir'
@@ -470,8 +499,103 @@ export default function VerifyReport() {
               </>
             )}
 
+            {/* ============================================================
+                RENDER REKAP JURNAL MENGAJAR
+            ============================================================ */}
+            {isJournal && data.summary && (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <Card className="border-slate-200">
+                    <CardContent className="p-4 text-center">
+                      <p className="text-xs text-muted-foreground">Total Jurnal</p>
+                      <p className="text-2xl font-bold text-slate-800">
+                        {(data.summary as JournalSummary).totalJournals ?? 0}
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-blue-200 bg-blue-50/50">
+                    <CardContent className="p-4 text-center">
+                      <p className="text-xs text-blue-700">Jumlah Guru</p>
+                      <p className="text-2xl font-bold text-blue-700">
+                        {(data.summary as JournalSummary).totalTeachers ?? 0}
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-emerald-200 bg-emerald-50/50">
+                    <CardContent className="p-4 text-center">
+                      <p className="text-xs text-emerald-700">Siswa Hadir</p>
+                      <p className="text-2xl font-bold text-emerald-700">
+                        {(data.summary as JournalSummary).totalPresent ?? 0}
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-red-200 bg-red-50/50">
+                    <CardContent className="p-4 text-center">
+                      <p className="text-xs text-red-700">Siswa Tidak Hadir</p>
+                      <p className="text-2xl font-bold text-red-700">
+                        {(data.summary as JournalSummary).totalAbsent ?? 0}
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <BookOpen className="w-5 h-5 text-primary" />
+                      Daftar Jurnal Mengajar
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-12">No</TableHead>
+                          <TableHead>Tanggal</TableHead>
+                          <TableHead>Guru</TableHead>
+                          <TableHead>Mapel / Kelas</TableHead>
+                          <TableHead>Jam</TableHead>
+                          <TableHead>Materi</TableHead>
+                          <TableHead>Aktivitas</TableHead>
+                          <TableHead className="text-center">Hadir</TableHead>
+                          <TableHead className="text-center">Tidak</TableHead>
+                          <TableHead>Catatan</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {data.journals && data.journals.length > 0 ? (
+                          data.journals.map((j, i) => (
+                            <TableRow key={`${j.tanggal}-${j.guru}-${j.kelas}-${i}`}>
+                              <TableCell className="text-center">{i + 1}</TableCell>
+                              <TableCell className="whitespace-nowrap">
+                                {new Date(`${j.tanggal}T00:00:00`).toLocaleDateString('id-ID')}
+                              </TableCell>
+                              <TableCell className="font-medium">{j.guru}</TableCell>
+                              <TableCell>{j.mapel} · {j.kelas}</TableCell>
+                              <TableCell className="whitespace-nowrap text-xs">{j.jam}</TableCell>
+                              <TableCell className="text-xs max-w-[220px]">{j.materi || '-'}</TableCell>
+                              <TableCell className="text-xs max-w-[160px]">{j.aktivitas || '-'}</TableCell>
+                              <TableCell className="text-center font-semibold text-emerald-700">{j.hadir}</TableCell>
+                              <TableCell className="text-center font-semibold text-red-700">{j.tidakHadir}</TableCell>
+                              <TableCell className="text-xs text-muted-foreground max-w-[160px]">{j.catatan || '-'}</TableCell>
+                            </TableRow>
+                          ))
+                        ) : (
+                          <TableRow>
+                            <TableCell colSpan={10} className="text-center text-muted-foreground py-6">
+                              Tidak ada data jurnal
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              </>
+            )}
+
             {/* ===== FALLBACK: tipe tidak dikenal ===== */}
-            {!isAbsent && !isViolation && (
+            {!isAbsent && !isViolation && !isJournal && (
               <Card className="border-amber-200 bg-amber-50/50">
                 <CardContent className="py-8 text-center">
                   <AlertTriangle className="w-10 h-10 text-amber-600 mx-auto mb-2" />
