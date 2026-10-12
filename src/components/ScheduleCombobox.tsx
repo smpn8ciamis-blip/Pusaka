@@ -17,6 +17,32 @@ export interface ScheduleOption {
 const DAYS = ['', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
 const hhmm = (t: string) => (t ? t.slice(0, 5) : '');
 
+const norm = (v: string) => v.toLowerCase().replace(/\s+/g, ' ').trim();
+
+/**
+ * Pencocokan awalan (bukan fuzzy): setiap kata yang diketik harus menjadi
+ * awalan dari kode kelas ("8a" cocok 8A_2026/2027, bukan 8B), nama kelas,
+ * atau kata lain (mapel, hari, jam). Cocok di kelas diberi skor lebih tinggi
+ * agar urutan hasil akurat. Mengembalikan 0 bila tidak cocok.
+ */
+export function scheduleMatchScore(value: string, search: string): number {
+  const q = norm(search);
+  if (!q) return 1;
+  const [className = '', rest = ''] = value.split('|');
+  const cls = norm(className);
+  const short = cls.split('_')[0];
+  const words = norm(rest).split(/[\s:–-]+/).filter(Boolean);
+  const classWords = cls.split(/[\s_/-]+/).filter(Boolean);
+  let total = 0;
+  for (const token of q.split(' ')) {
+    if (short.startsWith(token) || cls.startsWith(token)) total += 100 - Math.min(short.length, 50);
+    else if (classWords.some((w) => w.startsWith(token))) total += 50;
+    else if (words.some((w) => w.startsWith(token))) total += 10;
+    else return 0;
+  }
+  return total;
+}
+
 interface Props {
   schedules: ScheduleOption[];
   value: string;
@@ -69,15 +95,15 @@ export function ScheduleCombobox({ schedules, value, onChange, placeholder = 'Pi
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[--radix-popover-trigger-width] min-w-[260px] p-0" align="start">
-        <Command>
-          <CommandInput placeholder="Ketik kelas, mapel, hari, atau jam…" />
+        <Command filter={scheduleMatchScore}>
+          <CommandInput placeholder="Ketik kelas (mis. 8a), mapel, hari, atau jam…" />
           {/* stopPropagation: agar scroll roda mouse tetap jalan di dalam dialog modal */}
           <CommandList className="max-h-[280px]" onWheel={(e) => e.stopPropagation()}>
             <CommandEmpty>Jadwal tidak ditemukan.</CommandEmpty>
             {sorted.map((s) => (
               <CommandItem
                 key={s.id}
-                value={`${s.classes?.name ?? ''} ${s.subject} ${DAYS[s.day_of_week] ?? ''} ${hhmm(s.start_time)} ${hhmm(s.end_time)} ${s.id}`}
+                value={`${s.classes?.name ?? ''}|${s.subject} ${DAYS[s.day_of_week] ?? ''} ${hhmm(s.start_time)} ${hhmm(s.end_time)}|${s.id}`}
                 onSelect={() => {
                   onChange(s.id);
                   setOpen(false);

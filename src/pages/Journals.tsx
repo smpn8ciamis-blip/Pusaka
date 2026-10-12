@@ -634,16 +634,16 @@ const Journals = () => {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Jurnal Mengajar</h1>
+            <h1 className="text-2xl md:text-3xl font-bold text-foreground">Jurnal Mengajar</h1>
             <p className="text-muted-foreground">
               {userRole === 'admin' ? 'Pantau jurnal mengajar semua guru' : 'Kelola jurnal mengajar Anda'}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-center">
             <Select value={paper} onValueChange={(v) => changePaper(v as PaperSize)}>
-              <SelectTrigger className="w-[110px]" title="Ukuran kertas cetak">
+              <SelectTrigger className="w-full sm:w-[110px]" title="Ukuran kertas cetak">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -651,22 +651,22 @@ const Journals = () => {
                 <SelectItem value="f4">F4</SelectItem>
               </SelectContent>
             </Select>
-            <Button variant="outline" onClick={() => handlePreview()} className="gap-2">
+            <Button variant="outline" onClick={() => handlePreview()} className="w-full gap-1.5 px-2 sm:w-auto sm:gap-2 sm:px-4">
               <Eye className="h-4 w-4" />
               Preview
             </Button>
-            <Button variant="outline" onClick={handleExportPDF} disabled={isPrinting} className="gap-2">
+            <Button variant="outline" onClick={handleExportPDF} disabled={isPrinting} className="w-full gap-1.5 px-2 sm:w-auto sm:gap-2 sm:px-4">
               {isPrinting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
               Cetak
             </Button>
-            <Button variant="outline" onClick={handleExportCSV} className="gap-2">
+            <Button variant="outline" onClick={handleExportCSV} className="col-span-3 w-full gap-2 sm:col-span-1 sm:w-auto">
               <Download className="h-4 w-4" />
               CSV
             </Button>
             {userRole === 'teacher' && (
               <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                 <DialogTrigger asChild>
-                  <Button onClick={resetForm}>
+                  <Button onClick={resetForm} className="col-span-3 w-full order-first sm:order-none sm:col-span-1 sm:w-auto">
                     <Plus className="mr-2 h-4 w-4" />
                     Tambah Jurnal
                   </Button>

@@ -1591,32 +1591,32 @@ const Attendance = () => {
               {isFullAccessRole ? 'Pantau absensi semua kelas' : 'Isi absensi siswa'}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap">
             {isFullAccessRole && <DuplicateAttendanceManager />}
-            <Button variant="outline" onClick={handlePrint} className="gap-2" size="sm">
+            <Button variant="outline" onClick={handlePrint} className="w-full gap-1.5 px-2 text-xs sm:w-auto sm:gap-2 sm:px-3 sm:text-sm" size="sm">
               <Printer className="h-4 w-4" />
-              <span className="hidden sm:inline">Cetak</span>
+              <span>Cetak</span>
             </Button>
-            <Button variant="outline" onClick={handlePrintAbsent} className="gap-2" size="sm">
+            <Button variant="outline" onClick={handlePrintAbsent} className="w-full gap-1.5 px-2 text-xs sm:w-auto sm:gap-2 sm:px-3 sm:text-sm" size="sm">
               <UserX className="h-4 w-4" />
-              <span className="hidden sm:inline">Tidak Hadir</span>
+              <span>Tidak Hadir</span>
             </Button>
-            <Button variant="outline" onClick={handleExportPDF} className="gap-2" size="sm">
+            <Button variant="outline" onClick={handleExportPDF} className="w-full gap-1.5 px-2 text-xs sm:w-auto sm:gap-2 sm:px-3 sm:text-sm" size="sm">
               <FileText className="h-4 w-4" />
-              <span className="hidden sm:inline">PDF</span>
+              <span>PDF</span>
             </Button>
-            <Button variant="outline" onClick={handleExportRekapPDF} className="gap-2" size="sm">
+            <Button variant="outline" onClick={handleExportRekapPDF} className="w-full gap-1.5 px-2 text-xs sm:w-auto sm:gap-2 sm:px-3 sm:text-sm" size="sm">
               <FileText className="h-4 w-4" />
-              <span className="hidden sm:inline">Rekap</span>
+              <span>Rekap</span>
             </Button>
-            <Button variant="outline" onClick={handleExport} className="gap-2" size="sm">
+            <Button variant="outline" onClick={handleExport} className="w-full gap-1.5 px-2 text-xs sm:w-auto sm:gap-2 sm:px-3 sm:text-sm" size="sm">
               <Download className="h-4 w-4" />
-              <span className="hidden sm:inline">CSV</span>
+              <span>CSV</span>
             </Button>
             {(userRole === 'teacher' || userRole === 'guru_piket' || userRole === 'kesiswaan' || userRole === 'admin') && (
               <>
                 <Button
-                  className="bg-gradient-primary gap-2"
+                  className="bg-gradient-primary gap-2 col-span-3 order-first h-11 sm:order-none sm:col-span-1 sm:h-10"
                   onClick={() => {
                     if (!isDayAllowed && !isFullAccessRole) {
                       toast.error(`Absensi tidak dapat diisi pada hari ini. Hari yang diizinkan: ${activeDayNames.join(', ')}`);
@@ -1626,8 +1626,7 @@ const Attendance = () => {
                   }}
                 >
                   <Plus className="h-4 w-4" />
-                  <span className="hidden sm:inline">Isi Absensi</span>
-                  <span className="sm:hidden">Absen</span>
+                  <span>Isi Absensi</span>
                 </Button>
 
                 {isMobile ? (
