@@ -1118,6 +1118,32 @@ const UnfilledClassesCard = memo(function UnfilledClassesCard({
     return { filledIds: ids, filledNames: names };
   }, [todayByClass]);
 
+  // Guru yang mengajar jam pertama hari ini (jadwal aktif) per kelas, untuk diingatkan bila kelas belum absen.
+  const dateKey = format(today, "yyyy-MM-dd");
+  const { data: firstPeriod } = useQuery({
+    queryKey: ["first-period-teachers", dateKey],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any).rpc("get_first_period_teachers", { p_date: dateKey });
+      if (error) throw error;
+      return (data || []) as Array<{
+        class_id: string; class_name: string; teacher_name: string | null; subject: string | null;
+        start_time: string | null; end_time: string | null;
+      }>;
+    },
+    enabled: !isSunday,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const firstPeriodByClass = useMemo(() => {
+    const byId = new Map<string, any>();
+    const byName = new Map<string, any>();
+    (firstPeriod || []).forEach((r) => {
+      byId.set(r.class_id, r);
+      if (r.class_name) byName.set(normName(r.class_name), r);
+    });
+    return { byId, byName };
+  }, [firstPeriod]);
+
   const total = (allClasses || []).length;
 
   const unfilled = useMemo(() => {
@@ -1340,6 +1366,20 @@ const UnfilledClassesCard = memo(function UnfilledClassesCard({
                           <span className="italic opacity-60">Wali kelas belum tercatat</span>
                         )}
                       </div>
+                      {(() => {
+                        const fp = firstPeriodByClass.byId.get(String(cls.id)) || firstPeriodByClass.byName.get(normName(cls.displayName));
+                        if (!fp) return null;
+                        const jam = fp.start_time ? String(fp.start_time).slice(0, 5) : "";
+                        const label = [fp.teacher_name || "Guru belum tercatat", fp.subject].filter(Boolean).join(" · ");
+                        return (
+                          <div className="flex items-center gap-1 text-[10px] text-amber-700/90 dark:text-amber-300/90" title={`Guru jam pertama${jam ? ` (${jam})` : ""}: ${label}`}>
+                            <Clock className="h-2.5 w-2.5 shrink-0" />
+                            <span className="truncate">
+                              <span className="font-semibold">Jam 1{jam ? ` (${jam})` : ""}:</span> {label}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </motion.div>
                 ))}
@@ -1351,7 +1391,7 @@ const UnfilledClassesCard = memo(function UnfilledClassesCard({
         <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-500/5 border border-amber-500/20 mt-2">
           <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
           <p className="text-[11px] sm:text-xs text-muted-foreground leading-relaxed">
-            Ingatkan wali kelas yang tercantum untuk mengisi absensi hari ini. Hari libur nasional
+            Ingatkan wali kelas dan guru jam pertama yang tercantum untuk mengisi absensi hari ini. Hari libur nasional
             tidak terdeteksi otomatis, jadi daftar ini bisa terisi penuh pada hari libur.
           </p>
         </div>
