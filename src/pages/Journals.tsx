@@ -17,7 +17,7 @@ import { useNavigate } from 'react-router-dom';
 import { DataPagination } from '@/components/ui/data-pagination';
 import { generateSecureToken, sha256Hex, buildVerificationUrl } from '@/lib/reportVerification';
 import {
-  buildJournalPdf, csvCell, formatTanggalID, formatTanggalPanjang, jamLabel, shortClass, shortTime,
+  buildJournalPdf, csvCell, type PaperSize, formatTanggalID, formatTanggalPanjang, jamLabel, shortClass, shortTime,
   type JournalRow,
 } from '@/lib/journalReport';
 
@@ -53,6 +53,9 @@ const Journals = () => {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
+  const [paper, setPaper] = useState<PaperSize>(() => {
+    try { return localStorage.getItem('journal-paper') === 'f4' ? 'f4' : 'a4'; } catch { return 'a4'; }
+  });
   const [hasAttendanceData, setHasAttendanceData] = useState<boolean | null>(null);
   const [isCheckingAttendance, setIsCheckingAttendance] = useState(false);
   const [formData, setFormData] = useState({
@@ -472,7 +475,8 @@ const Journals = () => {
     return lines;
   };
 
-  const pdfOptions = () => ({
+  const pdfOptions = (paperOverride?: PaperSize) => ({
+    paper: paperOverride || paper,
     rows: filteredJournals,
     settings: schoolSettings as any,
     periodLabel,
@@ -490,7 +494,13 @@ const Journals = () => {
     });
   };
 
-  const handlePreview = async () => {
+  const changePaper = (p: PaperSize) => {
+    setPaper(p);
+    try { localStorage.setItem('journal-paper', p); } catch { /* abaikan */ }
+    if (previewOpen) void handlePreview(p);
+  };
+
+  const handlePreview = async (paperOverride?: PaperSize) => {
     if (invalidRange) {
       toast({ title: 'Rentang tanggal tidak valid', description: 'Tanggal mulai tidak boleh setelah tanggal akhir.', variant: 'destructive' });
       return;
@@ -498,7 +508,7 @@ const Journals = () => {
     setPreviewOpen(true);
     setPreviewLoading(true);
     try {
-      const doc = await buildJournalPdf(pdfOptions());
+      const doc = await buildJournalPdf(pdfOptions(paperOverride));
       const url = URL.createObjectURL(doc.output('blob'));
       setPreviewUrl((old) => {
         if (old) URL.revokeObjectURL(old);
@@ -632,7 +642,16 @@ const Journals = () => {
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={handlePreview} className="gap-2">
+            <Select value={paper} onValueChange={(v) => changePaper(v as PaperSize)}>
+              <SelectTrigger className="w-[110px]" title="Ukuran kertas cetak">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="a4">A4</SelectItem>
+                <SelectItem value="f4">F4</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button variant="outline" onClick={() => handlePreview()} className="gap-2">
               <Eye className="h-4 w-4" />
               Preview
             </Button>
@@ -1024,9 +1043,18 @@ const Journals = () => {
           </div>
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">
-              Pratinjau mengikuti filter & periode saat ini. QR verifikasi dibuat saat dicetak.
+              Pratinjau mengikuti filter & periode saat ini. QR verifikasi (pojok kiri bawah) dibuat saat dicetak.
             </p>
             <div className="flex gap-2">
+              <Select value={paper} onValueChange={(v) => changePaper(v as PaperSize)}>
+                <SelectTrigger className="w-[110px]" title="Ukuran kertas">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="a4">A4</SelectItem>
+                  <SelectItem value="f4">F4</SelectItem>
+                </SelectContent>
+              </Select>
               <Button variant="outline" onClick={closePreview}>Tutup</Button>
               <Button onClick={handleExportPDF} disabled={isPrinting || filteredJournals.length === 0} className="gap-2">
                 {isPrinting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
