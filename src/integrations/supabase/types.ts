@@ -5274,6 +5274,7 @@ export type Database = {
           class_recap_group_jid: string | null
           class_recap_group_name: string | null
           followup_attendance: boolean
+          followup_attendance_next_teachers: boolean
           followup_journal: boolean
           reminder_scope: string
           id: number
@@ -5290,6 +5291,7 @@ export type Database = {
           class_recap_group_jid?: string | null
           class_recap_group_name?: string | null
           followup_attendance?: boolean
+          followup_attendance_next_teachers?: boolean
           followup_journal?: boolean
           reminder_scope?: string
           id?: number
@@ -5306,6 +5308,7 @@ export type Database = {
           class_recap_group_jid?: string | null
           class_recap_group_name?: string | null
           followup_attendance?: boolean
+          followup_attendance_next_teachers?: boolean
           followup_journal?: boolean
           reminder_scope?: string
           id?: number
