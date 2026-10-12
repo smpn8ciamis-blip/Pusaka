@@ -1,4 +1,4 @@
-import { useRef, useMemo } from 'react';
+import { Component, useRef, useMemo, useState, type ReactNode } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Float } from '@react-three/drei';
 import * as THREE from 'three';
@@ -124,16 +124,43 @@ function Scene() {
   );
 }
 
+// Latar 3D hanya dekorasi: bila WebGL tidak tersedia (akselerasi hardware mati, GPU bermasalah, terlalu banyak
+// konteks WebGL terbuka) atau Canvas melempar error, latar dimatikan diam-diam — halaman TIDAK boleh ikut rusak.
+function hasWebGL(): boolean {
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = (canvas.getContext('webgl2') || canvas.getContext('webgl')) as WebGLRenderingContext | null;
+    if (!gl) return false;
+    gl.getExtension('WEBGL_lose_context')?.loseContext(); // lepaskan konteks uji agar tidak menghabiskan jatah browser
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+class CanvasBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error: Error) {
+    console.warn('[FloatingShapes] Latar 3D dimatikan:', error?.message);
+  }
+  render() { return this.state.failed ? null : this.props.children; }
+}
+
 export function FloatingShapes3D() {
+  const [supported] = useState(hasWebGL);
+  if (!supported) return null;
   return (
     <div className="absolute inset-0 -z-10">
-      <Canvas
-        camera={{ position: [0, 0, 10], fov: 40 }}
-        style={{ background: 'transparent' }}
-        dpr={[1, 1.5]}
-      >
-        <Scene />
-      </Canvas>
+      <CanvasBoundary>
+        <Canvas
+          camera={{ position: [0, 0, 10], fov: 40 }}
+          style={{ background: 'transparent' }}
+          dpr={[1, 1.5]}
+        >
+          <Scene />
+        </Canvas>
+      </CanvasBoundary>
     </div>
   );
 }
