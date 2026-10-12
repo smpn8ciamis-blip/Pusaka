@@ -94,6 +94,7 @@ const DEFAULT_BOT_SETTINGS = {
     reminder_scope: 'all',            // 'first' = jam pertama saja, 'all' = semua jam mengajar
     followup_journal: true,           // cek & ingatkan jurnal yang belum terisi
     followup_attendance: true,        // cek & ingatkan daftar hadir yang belum terisi
+    followup_attendance_next_teachers: true, // false = guru jam ke-2 dst TIDAK diingatkan bila kelas itu sudah diabsen guru sebelumnya
     daily_recap_enabled: false,       // kirim rekap jadwal harian ke guru
     daily_recap_time: '06:00',        // jam kirim rekap (WIB)
     class_recap_enabled: false,       // kirim rekap absensi per kelas ke grup saat semua kelas sudah terabsen
@@ -444,6 +445,16 @@ async function runTeacherReminders() {
                 let journalDone = true, attDone = true;
                 if (cfg.followup_journal) { const jrRes = await supabase.from('teaching_journals').select('id').eq('schedule_id', s.id).eq('date', now.date).limit(1); journalDone = !!(jrRes.data && jrRes.data.length > 0); }
                 if (cfg.followup_attendance) { const atRes = await supabase.from('attendance').select('id').eq('schedule_id', s.id).eq('date', now.date).limit(1); attDone = !!(atRes.data && atRes.data.length > 0); }
+                if (cfg.followup_attendance && !attDone && cfg.followup_attendance_next_teachers === false) {
+                    // Guru jam berikutnya: bila kelas ini sudah diabsen pada jam lain hari ini, tidak perlu diingatkan lagi.
+                    const classScheds = schedules.filter(function(x) { return x.class_id === s.class_id; });
+                    const firstOfClass = classScheds.reduce(function(a, b) { return hhmmToMin(b.start_time) < hhmmToMin(a.start_time) ? b : a; }, classScheds[0]);
+                    if (firstOfClass && firstOfClass.id !== s.id) {
+                        const ids = classScheds.map(function(x) { return x.id; }).join(',');
+                        const cr = await supabase.from('attendance').select('id').eq('date', now.date).or('sched_class_id.eq.' + s.class_id + ',schedule_id.in.(' + ids + ')').limit(1);
+                        if (!cr.error && cr.data && cr.data.length > 0) attDone = true;
+                    }
+                }
                 markReminderSent(key);
                 if (journalDone && attDone) continue;
                 const todo = []; if (!attDone) todo.push('*absensi siswa*'); if (!journalDone) todo.push('*jurnal mengajar*');

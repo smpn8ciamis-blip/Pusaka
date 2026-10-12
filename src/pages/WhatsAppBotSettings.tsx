@@ -355,6 +355,7 @@ function ReminderTab() {
   const [scope, setScope] = useState<'first' | 'all'>('all');
   const [chkJournal, setChkJournal] = useState(true);
   const [chkAttendance, setChkAttendance] = useState(true);
+  const [remindNext, setRemindNext] = useState(true);
   const [recap, setRecap] = useState(false);
   const [recapTime, setRecapTime] = useState('06:00');
 
@@ -375,6 +376,7 @@ function ReminderTab() {
       setScope(data.reminder_scope === 'first' ? 'first' : 'all');
       setChkJournal(data.followup_journal);
       setChkAttendance(data.followup_attendance);
+      setRemindNext(data.followup_attendance_next_teachers !== false);
       setRecap(data.daily_recap_enabled);
       setRecapTime(String(data.daily_recap_time || '06:00').slice(0, 5));
     }
@@ -389,6 +391,7 @@ function ReminderTab() {
         reminder_scope: scope,
         followup_journal: chkJournal,
         followup_attendance: chkAttendance,
+        followup_attendance_next_teachers: remindNext,
         daily_recap_enabled: recap,
         daily_recap_time: /^\d{2}:\d{2}$/.test(recapTime) ? recapTime : '06:00',
         updated_at: new Date().toISOString(), updated_by: user?.id ?? null,
@@ -441,6 +444,17 @@ function ReminderTab() {
             <Label htmlFor="chk-a" className="font-normal">Daftar hadir (absensi) siswa</Label>
             <Switch id="chk-a" checked={chkAttendance} onCheckedChange={setChkAttendance} />
           </div>
+          {chkAttendance && (
+            <div className="flex items-start justify-between gap-3 pl-3 border-l-2">
+              <div>
+                <Label htmlFor="chk-next" className="font-normal">Ingatkan juga guru jam berikutnya</Label>
+                <p className="text-xs text-muted-foreground">
+                  Mati: guru jam ke-2 dst tidak diingatkan mengisi absensi bila kelas itu sudah diabsen guru sebelumnya hari ini (jurnal tetap diingatkan).
+                </p>
+              </div>
+              <Switch id="chk-next" checked={remindNext} onCheckedChange={setRemindNext} />
+            </div>
+          )}
           {!chkJournal && !chkAttendance && (
             <p className="text-xs text-muted-foreground">Keduanya mati: pesan tindak lanjut tidak akan dikirim.</p>
           )}
