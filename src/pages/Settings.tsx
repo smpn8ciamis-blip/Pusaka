@@ -563,9 +563,9 @@ const Settings = () => {
     return (
       <DashboardLayout>
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className="text-3xl font-bold tracking-tight">Pengaturan Akun</h1>
+              <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Pengaturan Akun</h1>
               <p className="text-muted-foreground">
                 Kelola pengaturan akun Anda
               </p>
@@ -609,7 +609,7 @@ const Settings = () => {
     <DashboardLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground flex items-center gap-2">
             <SettingsIcon className="h-8 w-8" />
             Pengaturan
           </h1>

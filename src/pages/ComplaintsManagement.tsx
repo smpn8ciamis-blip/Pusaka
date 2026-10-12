@@ -352,7 +352,7 @@ export default function ComplaintsManagement() {
     <DashboardLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Manajemen Pengaduan</h1>
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground">Manajemen Pengaduan</h1>
           <p className="text-muted-foreground mt-2">
             Kelola pengaduan kekerasan, kritik, dan saran dari warga sekolah
           </p>

@@ -474,7 +474,7 @@ const ParentPermission = () => {
     <div className="min-h-screen bg-background p-4 md:p-8">
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="text-center space-y-2">
-          <h1 className="text-3xl font-bold">Portal Orang Tua</h1>
+          <h1 className="text-2xl md:text-3xl font-bold">Portal Orang Tua</h1>
           <p className="text-muted-foreground">
             Berikan persetujuan untuk anak Anda mengikuti kegiatan sekolah
           </p>

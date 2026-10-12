@@ -43,7 +43,7 @@ const PublicServices = () => {
               />
             )}
           </div>
-          <h1 className="text-3xl font-bold text-foreground mb-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-2">
             {settings?.school_name || 'Layanan Publik'}
           </h1>
           {settings?.district_name && (

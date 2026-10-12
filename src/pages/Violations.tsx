@@ -1136,7 +1136,7 @@ export default function Violations() {
         <div className="space-y-6">
           <div className="flex items-start justify-between flex-wrap gap-3">
             <div>
-              <h1 className="text-3xl font-bold text-foreground">Poin Pelanggaran Siswa</h1>
+              <h1 className="text-2xl md:text-3xl font-bold text-foreground">Poin Pelanggaran Siswa</h1>
               <p className="text-muted-foreground mt-2">
                 {isOsis && !isAdmin && !isKesiswaan
                   ? 'Catat pelanggaran siswa dan lihat rekap'

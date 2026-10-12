@@ -434,7 +434,7 @@ const FileUploadManagement = () => {
     <DashboardLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold">Manajemen Upload Berkas</h1>
+          <h1 className="text-2xl md:text-3xl font-bold">Manajemen Upload Berkas</h1>
           <p className="text-muted-foreground">
             Kelola persyaratan berkas dan review berkas yang diupload guru
           </p>

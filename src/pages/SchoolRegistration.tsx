@@ -70,7 +70,7 @@ export default function SchoolRegistration() {
         <div className="w-full max-w-2xl space-y-6 animate-fade-in">
           <div className="text-center space-y-2">
             <School className="h-12 w-12 mx-auto text-primary" />
-            <h1 className="text-3xl font-bold">Daftarkan Sekolah</h1>
+            <h1 className="text-2xl md:text-3xl font-bold">Daftarkan Sekolah</h1>
             <p className="text-muted-foreground">Isi data sekolah, pilih paket, dan buat akun admin</p>
           </div>
 

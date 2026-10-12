@@ -62,7 +62,7 @@ export default function DebugSchedules() {
     <DashboardLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold">Debug Info - Schedules</h1>
+          <h1 className="text-2xl md:text-3xl font-bold">Debug Info - Schedules</h1>
           <p className="text-muted-foreground">Informasi debugging untuk jadwal</p>
         </div>
 

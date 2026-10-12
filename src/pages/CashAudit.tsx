@@ -611,7 +611,7 @@ const CashAudit = () => {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Berita Acara Pemeriksaan Kas</h1>
             <p className="text-muted-foreground">Formulir BOS-K7B & BOS-K7C</p>
