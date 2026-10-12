@@ -10,13 +10,27 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, FileText, Pencil, Printer, Download, ArrowUpDown, ArrowRight } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { Plus, FileText, Pencil, Printer, Download, ArrowUpDown, ArrowRight, Eye, Loader2, Search } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import { addLetterheadToPDF, addSignatureToPDF } from '@/lib/pdfLetterhead';
+import { DataPagination } from '@/components/ui/data-pagination';
+import { generateSecureToken, sha256Hex, buildVerificationUrl } from '@/lib/reportVerification';
+import {
+  buildJournalPdf, csvCell, formatTanggalID, formatTanggalPanjang, jamLabel, shortClass, shortTime,
+  type JournalRow,
+} from '@/lib/journalReport';
+
+type SortField = 'date' | 'teacher' | 'schedule' | 'present';
+
+/** Tanggal lokal → yyyy-MM-dd (toISOString memakai UTC sehingga bisa mundur sehari di WIB) */
+const toISODate = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const monthRange = () => {
+  const n = new Date();
+  return [toISODate(new Date(n.getFullYear(), n.getMonth(), 1)), toISODate(new Date(n.getFullYear(), n.getMonth() + 1, 0))];
+};
 
 const Journals = () => {
   const { userRole, user } = useAuth();
@@ -25,15 +39,25 @@ const Journals = () => {
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingJournal, setEditingJournal] = useState<any>(null);
-  const [filterDate, setFilterDate] = useState('');
+  const [periodPreset, setPeriodPreset] = useState('month');
+  const [startDate, setStartDate] = useState(() => monthRange()[0]);
+  const [endDate, setEndDate] = useState(() => monthRange()[1]);
   const [filterSchedule, setFilterSchedule] = useState('all');
-  const [sortBy, setSortBy] = useState<'date' | 'schedule'>('date');
+  const [filterTeacher, setFilterTeacher] = useState('all');
+  const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<SortField>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
   const [hasAttendanceData, setHasAttendanceData] = useState<boolean | null>(null);
   const [isCheckingAttendance, setIsCheckingAttendance] = useState(false);
   const [formData, setFormData] = useState({
     schedule_id: '',
-    date: new Date().toISOString().split('T')[0],
+    date: toISODate(new Date()),
     material: '',
     activity: '',
     students_present: 0,
@@ -76,105 +100,105 @@ const Journals = () => {
     enabled: !!user?.id && !!userRole,
   });
 
-  const { data: journals } = useQuery({
-    queryKey: ['teaching-journals', userRole, user?.id],
+  // ===== Data guru (nama dari profiles, NIP dari teachers) — 1 query, bukan N+1 =====
+  const { data: teacherList, isError: isTeacherListError } = useQuery({
+    queryKey: ['journal-teachers', userRole, user?.id],
     queryFn: async () => {
-      if (userRole === 'admin') {
-        const { data, error } = await supabase
-          .from('teaching_journals')
-          .select('*')
-          .order('date', { ascending: false });
-        
-        if (error) throw error;
-        
-        // Fetch related data separately
-        if (!data) return [];
-        
-        const journalsWithDetails = await Promise.all(
-          data.map(async (journal) => {
-            const { data: schedule } = await supabase
-              .from('schedules')
-              .select('subject, start_time, class_id, classes(name, grade), teacher_id')
-              .eq('id', journal.schedule_id)
-              .single();
-            
-            let teacherName = '-';
-            if (schedule?.teacher_id) {
-              const { data: teacher } = await supabase
-                .from('teachers')
-                .select('user_id')
-                .eq('id', schedule.teacher_id)
-                .single();
-              
-              if (teacher?.user_id) {
-                const { data: profile } = await supabase
-                  .from('profiles')
-                  .select('full_name')
-                  .eq('id', teacher.user_id)
-                  .single();
-                
-                teacherName = profile?.full_name || '-';
-              }
-            }
-            
-            return {
-              ...journal,
-              schedules: schedule,
-              teacher_name: teacherName
-            };
-          })
-        );
-        
-        return journalsWithDetails;
-      } else {
-        const { data: teacher } = await supabase
-          .from('teachers')
-          .select('id')
-          .eq('user_id', user?.id)
-          .maybeSingle();
+      const { data, error } = await supabase
+        .from('teachers')
+        .select('id, nip, user_id, profiles:profiles!teachers_user_id_profiles_fkey(full_name)');
+      if (error) throw error;
+      return (data || []).map((t: any) => ({
+        id: t.id as string,
+        user_id: t.user_id as string,
+        nip: (t.nip as string | null) || null,
+        name: (Array.isArray(t.profiles) ? t.profiles[0]?.full_name : t.profiles?.full_name) || '-',
+      }));
+    },
+    enabled: !!userRole && !!user?.id,
+    staleTime: 5 * 60 * 1000,
+  });
 
-        if (!teacher) return [];
+  const { data: classList } = useQuery({
+    queryKey: ['journal-classes'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('classes').select('id, name');
+      if (error) throw error;
+      return data || [];
+    },
+    staleTime: 10 * 60 * 1000,
+  });
 
-        // Get teacher's schedule IDs
-        const { data: teacherSchedules } = await supabase
+  const myTeacher = teacherList?.find((t) => t.user_id === user?.id) || null;
+
+  const { data: rawJournals, isLoading: isLoadingJournals, isError: isJournalsError } = useQuery({
+    queryKey: ['teaching-journals', userRole, user?.id, startDate, endDate, myTeacher?.id],
+    queryFn: async () => {
+      let scheduleIds: string[] | null = null;
+      if (userRole !== 'admin') {
+        if (!myTeacher) return [];
+        const { data: ts, error: tsErr } = await supabase
           .from('schedules')
           .select('id')
-          .eq('teacher_id', teacher.id);
-        
-        const scheduleIds = teacherSchedules?.map(s => s.id) || [];
+          .eq('teacher_id', myTeacher.id);
+        if (tsErr) throw tsErr;
+        scheduleIds = (ts || []).map((s) => s.id);
         if (scheduleIds.length === 0) return [];
-
-        // Query only journals for this teacher's schedules
-        const { data, error } = await supabase
-          .from('teaching_journals')
-          .select('*')
-          .in('schedule_id', scheduleIds)
-          .order('date', { ascending: false });
-        
-        if (error) throw error;
-        if (!data) return [];
-        
-        // Fetch schedule details
-        const journalsWithDetails = await Promise.all(
-          data.map(async (journal) => {
-            const { data: schedule } = await supabase
-              .from('schedules')
-              .select('subject, start_time, class_id, classes(name, grade)')
-              .eq('id', journal.schedule_id)
-              .single();
-            
-            return {
-              ...journal,
-              schedules: schedule
-            };
-          })
-        );
-        
-        return journalsWithDetails;
       }
+
+      // Ambil bertahap (batas 1000 baris per request) agar data tidak terpotong
+      const PAGE = 1000;
+      const all: any[] = [];
+      for (let from = 0; ; from += PAGE) {
+        let q = supabase
+          .from('teaching_journals')
+          .select('*, schedules(subject, start_time, end_time, class_id, teacher_id, classes(name))')
+          .order('date', { ascending: false })
+          .order('created_at', { ascending: false })
+          .range(from, from + PAGE - 1);
+        if (startDate) q = q.gte('date', startDate);
+        if (endDate) q = q.lte('date', endDate);
+        if (scheduleIds) q = q.in('schedule_id', scheduleIds);
+        const { data, error } = await q;
+        if (error) throw error;
+        all.push(...(data || []));
+        if (!data || data.length < PAGE) break;
+      }
+      return all;
     },
-    enabled: !!userRole && (userRole === 'admin' || !!user?.id),
+    enabled: !!userRole && !!user?.id && (userRole === 'admin' || teacherList !== undefined || isTeacherListError),
+    placeholderData: (prev) => prev,
   });
+
+  // Normalisasi: pakai jadwal bila ada, jika jadwal sudah dihapus pakai snapshot di jurnal
+  const journals: JournalRow[] = useMemo(() => {
+    const tMap = new Map((teacherList || []).map((t) => [t.id, t]));
+    const cMap = new Map((classList || []).map((c: any) => [c.id, c.name as string]));
+    return (rawJournals || []).map((j: any) => {
+      const s = j.schedules;
+      const teacherId = s?.teacher_id || j.sched_teacher_id || null;
+      const t = teacherId ? tMap.get(teacherId) : undefined;
+      const classId = s?.class_id || j.sched_class_id;
+      return {
+        id: j.id,
+        date: j.date,
+        schedule_id: j.schedule_id,
+        teacher_id: teacherId,
+        teacher_name: t?.name || '-',
+        teacher_nip: t?.nip || null,
+        subject: s?.subject || j.sched_subject || '-',
+        class_name: s?.classes?.name || (classId ? cMap.get(classId) : '') || '-',
+        start_time: s?.start_time || j.sched_start_time || '',
+        end_time: s?.end_time || j.sched_end_time || '',
+        material: j.material || '',
+        activity: j.activity || '',
+        students_present: j.students_present || 0,
+        students_absent: j.students_absent || 0,
+        notes: j.notes || '',
+      } as JournalRow;
+    });
+  }, [rawJournals, teacherList, classList]);
+
 
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -288,7 +312,7 @@ const Journals = () => {
   const resetForm = () => {
     setFormData({
       schedule_id: '',
-      date: new Date().toISOString().split('T')[0],
+      date: toISODate(new Date()),
       material: '',
       activity: '',
       students_present: 0,
@@ -315,10 +339,10 @@ const Journals = () => {
     }
   };
 
-  const handleEdit = (journal: any) => {
+  const handleEdit = (journal: JournalRow) => {
     setEditingJournal(journal);
     setFormData({
-      schedule_id: journal.schedule_id,
+      schedule_id: journal.schedule_id || '',
       date: journal.date,
       material: journal.material,
       activity: journal.activity || '',
@@ -329,198 +353,272 @@ const Journals = () => {
     setIsDialogOpen(true);
   };
 
-  const getScheduleInfo = (journal: any) => {
-    if (!journal?.schedules) return '-';
-    const schedule = journal.schedules;
-    const className = schedule.classes ? `${schedule.classes.name}` : '';
-    return `${schedule.subject} - ${className} - ${schedule.start_time}`;
-  };
+  const getScheduleInfo = (j: JournalRow) =>
+    `${j.subject} - ${shortClass(j.class_name)}${j.start_time ? ` - ${shortTime(j.start_time)}` : ''}`;
 
-  const getTeacherName = (journal: any) => {
-    return journal?.teacher_name || '-';
-  };
+  const filteredJournals = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const list = journals.filter((j) => {
+      if (filterSchedule !== 'all' && j.schedule_id !== filterSchedule) return false;
+      if (filterTeacher !== 'all' && j.teacher_id !== filterTeacher) return false;
+      if (q) {
+        const hay = `${j.material} ${j.activity} ${j.notes} ${j.subject} ${j.class_name} ${j.teacher_name}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    return list.sort((a, b) => {
+      let c = 0;
+      switch (sortBy) {
+        case 'teacher': c = a.teacher_name.localeCompare(b.teacher_name, 'id'); break;
+        case 'schedule':
+          c = `${a.subject} ${shortClass(a.class_name)}`.localeCompare(`${b.subject} ${shortClass(b.class_name)}`, 'id', { numeric: true });
+          break;
+        case 'present': c = a.students_present - b.students_present; break;
+        default: c = a.date.localeCompare(b.date);
+      }
+      if (c === 0) c = a.date.localeCompare(b.date) || a.start_time.localeCompare(b.start_time);
+      return c * dir;
+    });
+  }, [journals, filterSchedule, filterTeacher, search, sortBy, sortOrder]);
 
-  const filteredJournals = journals?.filter((journal) => {
-    const matchesDate = !filterDate || journal.date === filterDate;
-    const matchesSchedule = filterSchedule === 'all' || journal.schedule_id === filterSchedule;
-    return matchesDate && matchesSchedule;
-  }).sort((a, b) => {
-    if (sortBy === 'date') {
-      const comparison = a.date.localeCompare(b.date);
-      return sortOrder === 'asc' ? comparison : -comparison;
-    } else {
-      const scheduleA = getScheduleInfo(a);
-      const scheduleB = getScheduleInfo(b);
-      const comparison = scheduleA.localeCompare(scheduleB);
-      return sortOrder === 'asc' ? comparison : -comparison;
-    }
-  }) || [];
+  const totalPages = Math.max(1, Math.ceil(filteredJournals.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pagedJournals = filteredJournals.slice((safePage - 1) * pageSize, safePage * pageSize);
 
-  const toggleSort = (field: 'date' | 'schedule') => {
+  // Kembali ke halaman 1 saat filter / urutan berubah
+  useEffect(() => {
+    setPage(1);
+  }, [startDate, endDate, filterSchedule, filterTeacher, search, sortBy, sortOrder, pageSize]);
+
+  const toggleSort = (field: SortField) => {
     if (sortBy === field) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
       setSortBy(field);
-      setSortOrder('asc');
+      setSortOrder(field === 'date' || field === 'present' ? 'desc' : 'asc');
     }
   };
+
+  const applyPreset = (preset: string) => {
+    setPeriodPreset(preset);
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    switch (preset) {
+      case 'today': setStartDate(toISODate(now)); setEndDate(toISODate(now)); break;
+      case '7d': {
+        const s = new Date(now); s.setDate(s.getDate() - 6);
+        setStartDate(toISODate(s)); setEndDate(toISODate(now)); break;
+      }
+      case 'month': setStartDate(toISODate(new Date(y, m, 1))); setEndDate(toISODate(new Date(y, m + 1, 0))); break;
+      case 'last_month': setStartDate(toISODate(new Date(y, m - 1, 1))); setEndDate(toISODate(new Date(y, m, 0))); break;
+      case 'year': setStartDate(toISODate(new Date(y, 0, 1))); setEndDate(toISODate(new Date(y, 11, 31))); break;
+      case 'all': setStartDate(''); setEndDate(''); break;
+      default: break; // custom: biarkan tanggal apa adanya
+    }
+  };
+
+  const invalidRange = !!startDate && !!endDate && startDate > endDate;
+
+  const periodLabel = useMemo(() => {
+    if (!startDate && !endDate) return 'Semua periode';
+    if (startDate && endDate) {
+      return startDate === endDate
+        ? formatTanggalPanjang(startDate)
+        : `${formatTanggalPanjang(startDate)} s/d ${formatTanggalPanjang(endDate)}`;
+    }
+    return startDate ? `Mulai ${formatTanggalPanjang(startDate)}` : `Sampai ${formatTanggalPanjang(endDate)}`;
+  }, [startDate, endDate]);
 
   const { data: schoolSettings } = useQuery({
     queryKey: ['school-settings'],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('school_settings')
-        .select('*')
-        .limit(1)
-        .maybeSingle();
+      const { data } = await supabase.from('school_settings').select('*').limit(1).maybeSingle();
       return data;
     },
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 10 * 60 * 1000, // 10 minutes
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 
-  const handleExportPDF = async () => {
-    if (!filteredJournals) return;
+  // Penandatangan Guru Mapel: guru yang login, atau satu-satunya guru pada data terfilter
+  const signer = useMemo(() => {
+    if (userRole !== 'admin') return myTeacher ? { name: myTeacher.name, nip: myTeacher.nip } : null;
+    const ids = new Set(filteredJournals.map((j) => j.teacher_id));
+    if (ids.size === 1) {
+      const j = filteredJournals[0];
+      return { name: j.teacher_name, nip: j.teacher_nip };
+    }
+    return null;
+  }, [userRole, myTeacher, filteredJournals]);
 
-    const doc = new jsPDF();
-    
-    // Add letterhead
-    const startY = await addLetterheadToPDF(doc, schoolSettings);
-    
-    // Report title
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text('LAPORAN JURNAL MENGAJAR', 105, startY, { align: 'center' });
-    
-    // Report info
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}`, 14, startY + 8);
+  const showTeacherColumn = userRole === 'admin';
 
-    // Table data with teacher name for admin
-    const tableData = filteredJournals.map((j, index) => {
-      const baseData = [
-        index + 1,
-        j.date,
-        getScheduleInfo(j),
-        j.material,
-        j.activity || '-',
-        j.students_present || 0,
-        j.students_absent || 0,
-        j.notes || '-'
-      ];
-      
-      if (userRole === 'admin') {
-        return [index + 1, getTeacherName(j), ...baseData.slice(1)];
-      }
-      return baseData;
+  const filterLines = () => {
+    const lines: string[] = [];
+    if (filterTeacher !== 'all') {
+      const t = teacherList?.find((x) => x.id === filterTeacher);
+      if (t) lines.push(`Guru: ${t.name}`);
+    } else if (userRole === 'admin') {
+      lines.push('Guru: Semua guru');
+    }
+    if (filterSchedule !== 'all') {
+      const s = schedules?.find((x) => x.id === filterSchedule);
+      if (s) lines.push(`Jadwal: ${s.subject} - ${shortClass((s as any).classes?.name)} - ${shortTime(s.start_time)}`);
+    }
+    if (search.trim()) lines.push(`Pencarian: "${search.trim()}"`);
+    lines.push(`Urutan: ${{ date: 'Tanggal', teacher: 'Guru', schedule: 'Mapel/Kelas', present: 'Siswa hadir' }[sortBy]} (${sortOrder === 'asc' ? 'naik' : 'turun'})`);
+    return lines;
+  };
+
+  const pdfOptions = () => ({
+    rows: filteredJournals,
+    settings: schoolSettings as any,
+    periodLabel,
+    filterLines: filterLines(),
+    showTeacher: showTeacherColumn,
+    signerTeacherName: signer?.name,
+    signerTeacherNip: signer?.nip,
+  });
+
+  const closePreview = () => {
+    setPreviewOpen(false);
+    setPreviewUrl((old) => {
+      if (old) URL.revokeObjectURL(old);
+      return null;
     });
+  };
 
-    const headers = userRole === 'admin' 
-      ? [['No', 'Guru', 'Tanggal', 'Jadwal', 'Materi', 'Aktivitas Pembelajaran', 'Hadir', 'Absen', 'Catatan']]
-      : [['No', 'Tanggal', 'Jadwal', 'Materi', 'Aktivitas Pembelajaran', 'Hadir', 'Absen', 'Catatan']];
-
-    autoTable(doc, {
-      startY: startY + 16,
-      head: headers,
-      body: tableData,
-      theme: 'grid',
-      headStyles: { fillColor: [139, 92, 246] },
-      styles: { fontSize: 8 },
-      columnStyles: userRole === 'admin' ? {
-        0: { cellWidth: 10 },
-        1: { cellWidth: 25 },
-        2: { cellWidth: 18 },
-        3: { cellWidth: 28 },
-        4: { cellWidth: 30 },
-        5: { cellWidth: 30 },
-        6: { cellWidth: 12 },
-        7: { cellWidth: 12 },
-        8: { cellWidth: 25 }
-      } : {
-        0: { cellWidth: 10 },
-        1: { cellWidth: 22 },
-        2: { cellWidth: 32 },
-        3: { cellWidth: 35 },
-        4: { cellWidth: 30 },
-        5: { cellWidth: 15 },
-        6: { cellWidth: 15 },
-        7: { cellWidth: 30 }
-      }
-    });
-
-    // Save report data to database
-    const finalY = (doc as any).lastAutoTable.finalY;
-    const reportData = {
-      verification: 'DOKUMEN VALID',
-      type: 'Laporan Jurnal Mengajar',
-      school: schoolSettings?.school_name,
-      printDate: new Date().toISOString(),
-      totalJournals: filteredJournals.length,
-      dateRange: filterDate || 'Semua',
-      journals: filteredJournals.map(j => ({
-        tanggal: j.date,
-        jadwal: `${j.schedules?.subject} - ${j.schedules?.classes?.name}`,
-        materi: j.material,
-        aktivitas: j.activity,
-        siswaHadir: j.students_present,
-        siswaAbsen: j.students_absent,
-        catatan: j.notes
-      }))
-    };
-
-    // Generate serial number and save to database
-    const { data: serialData, error: serialError } = await supabase.rpc('generate_report_serial');
-    if (serialError) {
-      console.error('Error generating serial:', serialError);
-      toast({ description: 'Gagal menggenerate nomor seri laporan', variant: 'destructive' });
+  const handlePreview = async () => {
+    if (invalidRange) {
+      toast({ title: 'Rentang tanggal tidak valid', description: 'Tanggal mulai tidak boleh setelah tanggal akhir.', variant: 'destructive' });
       return;
     }
-    
-    const { error: insertError } = await supabase
-      .from('verified_reports')
-      .insert({
-        serial_number: serialData,
+    setPreviewOpen(true);
+    setPreviewLoading(true);
+    try {
+      const doc = await buildJournalPdf(pdfOptions());
+      const url = URL.createObjectURL(doc.output('blob'));
+      setPreviewUrl((old) => {
+        if (old) URL.revokeObjectURL(old);
+        return url;
+      });
+    } catch (err) {
+      console.error('Preview error:', err);
+      toast({ title: 'Gagal membuat pratinjau', variant: 'destructive' });
+      setPreviewOpen(false);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleExportPDF = async () => {
+    if (invalidRange) {
+      toast({ title: 'Rentang tanggal tidak valid', description: 'Tanggal mulai tidak boleh setelah tanggal akhir.', variant: 'destructive' });
+      return;
+    }
+    if (filteredJournals.length === 0) {
+      toast({ title: 'Tidak ada jurnal untuk dicetak', description: 'Ubah filter atau periode terlebih dahulu.', variant: 'destructive' });
+      return;
+    }
+    setIsPrinting(true);
+    try {
+      const { data: serial, error: serialError } = await supabase.rpc('generate_report_serial');
+      if (serialError || !serial) {
+        console.error('Error generating serial:', serialError);
+        toast({ title: 'Gagal menggenerate nomor seri laporan', variant: 'destructive' });
+        return;
+      }
+
+      const rawToken = generateSecureToken();
+      const tokenHash = await sha256Hex(rawToken);
+      const verifyUrl = buildVerificationUrl(rawToken);
+
+      const doc = await buildJournalPdf({ ...pdfOptions(), verifyUrl, serialNumber: serial as string });
+
+      const totalHadir = filteredJournals.reduce((a, j) => a + j.students_present, 0);
+      const totalTidak = filteredJournals.reduce((a, j) => a + j.students_absent, 0);
+      const nowIso = new Date().toISOString();
+      const reportData = {
+        verification: 'DOKUMEN VALID',
+        type: 'Rekap Jurnal Mengajar',
+        school: (schoolSettings as any)?.school_name,
+        period: periodLabel,
+        summary: {
+          totalJournals: filteredJournals.length,
+          totalTeachers: new Set(filteredJournals.map((j) => j.teacher_id || j.teacher_name)).size,
+          totalPresent: totalHadir,
+          totalAbsent: totalTidak,
+          presentPercent: totalHadir + totalTidak > 0 ? Math.round((totalHadir / (totalHadir + totalTidak)) * 1000) / 10 : 0,
+        },
+        filters: filterLines(),
+        signer: signer?.name || null,
+        journals: filteredJournals.map((j) => ({
+          tanggal: j.date,
+          guru: j.teacher_name,
+          mapel: j.subject,
+          kelas: shortClass(j.class_name),
+          jam: jamLabel(j),
+          materi: j.material,
+          aktivitas: j.activity,
+          hadir: j.students_present,
+          tidakHadir: j.students_absent,
+          catatan: j.notes,
+        })),
+        printDate: nowIso,
+        print_date: nowIso,
+        totalRecords: filteredJournals.length,
+      };
+
+      const { error: insertError } = await supabase.from('verified_reports').insert({
+        serial_number: serial as string,
         report_type: 'journal',
         report_data: reportData,
-        created_by: user?.id
+        created_by: user?.id,
+        token_hash: tokenHash,
+        token_expires_at: null,
+        revoked_at: null,
+        access_count: 0,
       });
+      if (insertError) {
+        console.error('Error saving report:', insertError);
+        toast({ title: 'Gagal menyimpan data laporan untuk verifikasi', variant: 'destructive' });
+        return;
+      }
 
-    if (insertError) {
-      console.error('Error saving report:', insertError);
-      toast({ description: 'Gagal menyimpan data laporan untuk verifikasi', variant: 'destructive' });
-      return;
+      doc.save(`jurnal-mengajar-${startDate || 'awal'}-${endDate || 'akhir'}.pdf`);
+      toast({ title: 'Laporan berhasil dicetak', description: 'QR verifikasi aman sudah disematkan.' });
+    } catch (err) {
+      console.error('Print error:', err);
+      toast({ title: 'Gagal mencetak laporan', variant: 'destructive' });
+    } finally {
+      setIsPrinting(false);
     }
-
-    // Add signature with serial number QR code
-    await addSignatureToPDF(doc, schoolSettings, schoolSettings?.headmaster_name, schoolSettings?.headmaster_nip, finalY, serialData);
-
-    doc.save(`jurnal-mengajar-${new Date().toISOString().split('T')[0]}.pdf`);
-    toast({ description: 'Laporan berhasil dicetak dengan QR code verifikasi' });
   };
 
   const handleExportCSV = () => {
-    if (!filteredJournals) return;
-    
-    const csvContent = [
-      ['Tanggal', 'Jadwal', 'Materi', 'Aktivitas Pembelajaran', 'Siswa Hadir', 'Siswa Absen', 'Catatan'].join(','),
-      ...filteredJournals.map(j => [
-        j.date,
-        getScheduleInfo(j).replace(',', ' '),
-        j.material.replace(',', ' '),
-        (j.activity || '-').replace(',', ' '),
-        j.students_present || 0,
-        j.students_absent || 0,
-        (j.notes || '-').replace(',', ' ')
-      ].join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+    if (filteredJournals.length === 0) {
+      toast({ title: 'Tidak ada data untuk diekspor', variant: 'destructive' });
+      return;
+    }
+    const header = ['Tanggal', 'Guru', 'Mapel', 'Kelas', 'Jam', 'Materi', 'Aktivitas Pembelajaran', 'Siswa Hadir', 'Siswa Tidak Hadir', 'Catatan'];
+    const lines = [
+      header.map(csvCell).join(','),
+      ...filteredJournals.map((j) =>
+        [j.date, j.teacher_name, j.subject, shortClass(j.class_name), jamLabel(j), j.material, j.activity, j.students_present, j.students_absent, j.notes]
+          .map(csvCell).join(','),
+      ),
+    ];
+    const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `jurnal-mengajar-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `jurnal-mengajar-${startDate || 'awal'}-${endDate || 'akhir'}.csv`;
+    document.body.appendChild(a);
     a.click();
+    a.remove();
+    setTimeout(() => window.URL.revokeObjectURL(url), 1000);
   };
 
   return (
@@ -534,9 +632,13 @@ const Journals = () => {
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={handleExportPDF} className="gap-2">
-              <FileText className="h-4 w-4" />
-              PDF
+            <Button variant="outline" onClick={handlePreview} className="gap-2">
+              <Eye className="h-4 w-4" />
+              Preview
+            </Button>
+            <Button variant="outline" onClick={handleExportPDF} disabled={isPrinting} className="gap-2">
+              {isPrinting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+              Cetak
             </Button>
             <Button variant="outline" onClick={handleExportCSV} className="gap-2">
               <Download className="h-4 w-4" />
@@ -707,14 +809,40 @@ const Journals = () => {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="space-y-2">
-                <Label>Filter Tanggal</Label>
+                <Label>Periode</Label>
+                <Select value={periodPreset} onValueChange={applyPreset}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="today">Hari ini</SelectItem>
+                    <SelectItem value="7d">7 hari terakhir</SelectItem>
+                    <SelectItem value="month">Bulan ini</SelectItem>
+                    <SelectItem value="last_month">Bulan lalu</SelectItem>
+                    <SelectItem value="year">Tahun ini</SelectItem>
+                    <SelectItem value="custom">Pilih tanggal sendiri</SelectItem>
+                    <SelectItem value="all">Semua periode</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Dari Tanggal</Label>
                 <Input
                   type="date"
-                  value={filterDate}
-                  onChange={(e) => setFilterDate(e.target.value)}
-                  placeholder="Semua tanggal"
+                  value={startDate}
+                  max={endDate || undefined}
+                  onChange={(e) => { setStartDate(e.target.value); setPeriodPreset('custom'); }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Sampai Tanggal</Label>
+                <Input
+                  type="date"
+                  value={endDate}
+                  min={startDate || undefined}
+                  onChange={(e) => { setEndDate(e.target.value); setPeriodPreset('custom'); }}
                 />
               </div>
               <div className="space-y-2">
@@ -727,63 +855,187 @@ const Journals = () => {
                     <SelectItem value="all">Semua Jadwal</SelectItem>
                     {schedules?.map((schedule) => (
                       <SelectItem key={schedule.id} value={schedule.id}>
-                        {schedule.subject} - {schedule.classes?.name || ''} - {schedule.start_time}
+                        {schedule.subject} - {shortClass((schedule as any).classes?.name)} - {shortTime(schedule.start_time)}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
             </div>
-            
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12">No</TableHead>
-                  {userRole === 'admin' && <TableHead>Guru</TableHead>}
-                  <TableHead>
-                    <Button variant="ghost" size="sm" onClick={() => toggleSort('date')} className="gap-1">
-                      Tanggal
-                      <ArrowUpDown className="h-3 w-3" />
-                    </Button>
-                  </TableHead>
-                  <TableHead>
-                    <Button variant="ghost" size="sm" onClick={() => toggleSort('schedule')} className="gap-1">
-                      Jadwal
-                      <ArrowUpDown className="h-3 w-3" />
-                    </Button>
-                  </TableHead>
-                  <TableHead>Materi</TableHead>
-                  <TableHead>Kehadiran</TableHead>
-                  {userRole === 'teacher' && <TableHead>Aksi</TableHead>}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredJournals?.map((journal, index) => (
-                  <TableRow key={journal.id}>
-                    <TableCell>{index + 1}</TableCell>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              {userRole === 'admin' && (
+                <div className="space-y-2">
+                  <Label>Guru</Label>
+                  <Select value={filterTeacher} onValueChange={setFilterTeacher}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Semua guru" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Semua Guru</SelectItem>
+                      {[...(teacherList || [])]
+                        .sort((a, b) => a.name.localeCompare(b.name, 'id'))
+                        .map((t) => (
+                          <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div className={`space-y-2 ${userRole === 'admin' ? 'md:col-span-2' : 'md:col-span-3'}`}>
+                <Label>Cari (materi, aktivitas, catatan)</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Ketik kata kunci..."
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Urutkan</Label>
+                <div className="flex gap-2">
+                  <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortField)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="date">Tanggal</SelectItem>
+                      {userRole === 'admin' && <SelectItem value="teacher">Guru</SelectItem>}
+                      <SelectItem value="schedule">Mapel / Kelas</SelectItem>
+                      <SelectItem value="present">Siswa hadir</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    title={sortOrder === 'asc' ? 'Naik (A-Z / terlama)' : 'Turun (Z-A / terbaru)'}
+                    onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                  >
+                    <ArrowUpDown className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {invalidRange && (
+              <p className="text-sm text-destructive">Tanggal mulai tidak boleh setelah tanggal akhir.</p>
+            )}
+            {isJournalsError && (
+              <p className="text-sm text-destructive">Gagal memuat data jurnal. Coba muat ulang halaman.</p>
+            )}
+
+            <p className="text-sm text-muted-foreground">
+              {isLoadingJournals ? 'Memuat jurnal...' : `${filteredJournals.length} jurnal · ${periodLabel}`}
+            </p>
+
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-12">No</TableHead>
                     {userRole === 'admin' && (
-                      <TableCell className="font-medium">{getTeacherName(journal)}</TableCell>
-                    )}
-                    <TableCell>{journal.date}</TableCell>
-                    <TableCell>{getScheduleInfo(journal)}</TableCell>
-                    <TableCell className="max-w-xs truncate">{journal.material}</TableCell>
-                    <TableCell>
-                      Hadir: {journal.students_present}, Tidak: {journal.students_absent}
-                    </TableCell>
-                    {userRole === 'teacher' && (
-                      <TableCell>
-                        <Button variant="ghost" size="sm" onClick={() => handleEdit(journal)}>
-                          <Pencil className="h-4 w-4" />
+                      <TableHead>
+                        <Button variant="ghost" size="sm" onClick={() => toggleSort('teacher')} className="gap-1 -ml-3">
+                          Guru <ArrowUpDown className="h-3 w-3" />
                         </Button>
-                      </TableCell>
+                      </TableHead>
                     )}
+                    <TableHead>
+                      <Button variant="ghost" size="sm" onClick={() => toggleSort('date')} className="gap-1 -ml-3">
+                        Tanggal <ArrowUpDown className="h-3 w-3" />
+                      </Button>
+                    </TableHead>
+                    <TableHead>
+                      <Button variant="ghost" size="sm" onClick={() => toggleSort('schedule')} className="gap-1 -ml-3">
+                        Jadwal <ArrowUpDown className="h-3 w-3" />
+                      </Button>
+                    </TableHead>
+                    <TableHead>Materi</TableHead>
+                    <TableHead>
+                      <Button variant="ghost" size="sm" onClick={() => toggleSort('present')} className="gap-1 -ml-3">
+                        Kehadiran <ArrowUpDown className="h-3 w-3" />
+                      </Button>
+                    </TableHead>
+                    {userRole === 'teacher' && <TableHead>Aksi</TableHead>}
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {pagedJournals.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={userRole === 'admin' ? 6 : 6} className="text-center text-muted-foreground py-8">
+                        {isLoadingJournals ? 'Memuat...' : 'Tidak ada jurnal pada periode / filter ini'}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {pagedJournals.map((journal, index) => (
+                    <TableRow key={journal.id}>
+                      <TableCell>{(safePage - 1) * pageSize + index + 1}</TableCell>
+                      {userRole === 'admin' && (
+                        <TableCell className="font-medium">{journal.teacher_name}</TableCell>
+                      )}
+                      <TableCell className="whitespace-nowrap">{formatTanggalID(journal.date)}</TableCell>
+                      <TableCell>{getScheduleInfo(journal)}</TableCell>
+                      <TableCell className="max-w-xs truncate" title={journal.material}>{journal.material}</TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        Hadir: {journal.students_present}, Tidak: {journal.students_absent}
+                      </TableCell>
+                      {userRole === 'teacher' && (
+                        <TableCell>
+                          <Button variant="ghost" size="sm" onClick={() => handleEdit(journal)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            <DataPagination
+              currentPage={safePage}
+              totalPages={totalPages}
+              totalItems={filteredJournals.length}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={previewOpen} onOpenChange={(o) => { if (!o) closePreview(); }}>
+        <DialogContent className="max-w-5xl w-[95vw] h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Pratinjau Laporan Jurnal Mengajar</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 rounded-md border bg-muted overflow-hidden">
+            {previewLoading || !previewUrl ? (
+              <div className="h-full flex items-center justify-center gap-2 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" /> Menyusun pratinjau...
+              </div>
+            ) : (
+              <iframe title="Pratinjau jurnal" src={previewUrl} className="w-full h-full" />
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">
+              Pratinjau mengikuti filter & periode saat ini. QR verifikasi dibuat saat dicetak.
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={closePreview}>Tutup</Button>
+              <Button onClick={handleExportPDF} disabled={isPrinting || filteredJournals.length === 0} className="gap-2">
+                {isPrinting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                Cetak PDF
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 };
