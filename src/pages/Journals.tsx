@@ -1,5 +1,6 @@
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAcademicYear } from '@/contexts/AcademicYearContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -21,6 +22,8 @@ import {
   type JournalRow,
 } from '@/lib/journalReport';
 
+const DAY_NAMES = ['', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+
 type SortField = 'date' | 'teacher' | 'schedule' | 'present';
 
 /** Tanggal lokal → yyyy-MM-dd (toISOString memakai UTC sehingga bisa mundur sehari di WIB) */
@@ -34,6 +37,7 @@ const monthRange = () => {
 
 const Journals = () => {
   const { userRole, user } = useAuth();
+  const { selectedYear, selectedSemester } = useAcademicYear();
   const { toast } = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -74,14 +78,20 @@ const Journals = () => {
   });
 
   const { data: schedules } = useQuery({
-    queryKey: ['teacher-schedules-journal', user?.id, userRole],
+    queryKey: ['teacher-schedules-journal', user?.id, userRole, selectedYear, selectedSemester],
     queryFn: async () => {
+      if (!selectedYear) return [];
+      // Hanya jadwal tahun ajaran & semester aktif (jadwal lama tanpa semester tetap ikut)
+      const semesterFilter = `semester.eq.${selectedSemester},semester.is.null`;
       if (userRole === 'admin') {
         const { data, error } = await supabase
           .from('schedules')
           .select('*, classes(id, name, grade)')
           .eq('is_active', true)
-          .order('day_of_week');
+          .eq('academic_year', selectedYear)
+          .or(semesterFilter)
+          .order('day_of_week')
+          .order('start_time');
         if (error) throw error;
         return data;
       } else {
@@ -99,13 +109,16 @@ const Journals = () => {
           .select('*, classes(id, name, grade)')
           .eq('teacher_id', teacher.id)
           .eq('is_active', true)
-          .order('day_of_week');
+          .eq('academic_year', selectedYear)
+          .or(semesterFilter)
+          .order('day_of_week')
+          .order('start_time');
         
         if (error) throw error;
         return data;
       }
     },
-    enabled: !!user?.id && !!userRole,
+    enabled: !!user?.id && !!userRole && !!selectedYear,
   });
 
   // ===== Data guru (nama dari profiles, NIP dari teachers) — 1 query, bukan N+1 =====
@@ -750,9 +763,14 @@ const Journals = () => {
                           <SelectValue placeholder="Pilih jadwal" />
                         </SelectTrigger>
                         <SelectContent>
+                          {editingJournal && formData.schedule_id && !schedules?.some((sc) => sc.id === formData.schedule_id) && (
+                            <SelectItem value={formData.schedule_id}>
+                              {getScheduleInfo(editingJournal)} (jadwal periode lain)
+                            </SelectItem>
+                          )}
                           {schedules?.map((schedule) => (
                             <SelectItem key={schedule.id} value={schedule.id}>
-                              {schedule.subject} - {schedule.classes?.name || ''} - {schedule.start_time}
+                              {DAY_NAMES[schedule.day_of_week] || ''} · {schedule.subject} - {shortClass((schedule as any).classes?.name)} - {shortTime(schedule.start_time)}
                             </SelectItem>
                           ))}
                         </SelectContent>

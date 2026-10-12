@@ -127,7 +127,7 @@ const Changelog = () => {
               <ArrowLeft className="h-5 w-5" />
             </Button>
             <div>
-              <h1 className="text-3xl font-bold">Changelog</h1>
+              <h1 className="text-2xl md:text-3xl font-bold">Changelog</h1>
               <p className="text-muted-foreground">
                 Riwayat perubahan dan pembaruan aplikasi
               </p>

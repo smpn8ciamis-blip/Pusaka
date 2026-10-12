@@ -457,7 +457,7 @@ export default function Auth() {
               
               {/* Heading and Subheading */}
               <div className="text-center space-y-3">
-                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight leading-tight overflow-hidden">
+                <h1 className="text-2xl md:text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight leading-tight overflow-hidden">
                   <span className="inline-block bg-gradient-to-r from-primary via-secondary to-primary bg-clip-text text-transparent typing-animation">
                     PUSAKA NEDELCIS
                   </span>

@@ -1816,7 +1816,7 @@ const ExamAdministration = () => {
     <DashboardLayout>
       <div className="container mx-auto p-6 space-y-6">
         <div>
-          <h1 className="text-3xl font-bold">Administrasi Ujian</h1>
+          <h1 className="text-2xl md:text-3xl font-bold">Administrasi Ujian</h1>
           <p className="text-muted-foreground">Kelola kartu ujian, denah duduk, dan nomor meja</p>
         </div>
 

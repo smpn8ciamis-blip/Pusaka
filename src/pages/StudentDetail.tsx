@@ -548,7 +548,7 @@ function StudentDetailPage() {
                 <ArrowLeft className="h-4 w-4" />
               </Button>
               <div>
-                <h1 className="text-3xl font-bold text-foreground">Detail Siswa</h1>
+                <h1 className="text-2xl md:text-3xl font-bold text-foreground">Detail Siswa</h1>
                 <p className="text-muted-foreground">Informasi lengkap siswa</p>
               </div>
             </div>

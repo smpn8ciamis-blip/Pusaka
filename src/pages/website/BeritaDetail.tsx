@@ -276,7 +276,7 @@ export default function BeritaDetail() {
         </div>
         <div className="grid lg:grid-cols-[1fr_280px] gap-8">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold text-slate-900 mb-6 leading-tight">{news.title}</h1>
+            <h1 className="text-2xl md:text-3xl md:text-4xl font-bold text-slate-900 mb-6 leading-tight">{news.title}</h1>
             <div className="prose prose-slate max-w-none prose-headings:text-slate-900 prose-a:text-[#1E40AF] prose-img:rounded-lg" dangerouslySetInnerHTML={{ __html: news.content }} />
           </div>
           <aside className="hidden lg:block lg:sticky lg:top-24 lg:self-start">

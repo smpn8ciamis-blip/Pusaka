@@ -318,7 +318,7 @@ const PermissionLetters = () => {
       <div className="p-6 space-y-6">
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-bold">Kelola Kegiatan Sekolah</h1>
+            <h1 className="text-2xl md:text-3xl font-bold">Kelola Kegiatan Sekolah</h1>
             <p className="text-muted-foreground">Buat kegiatan dan tunggu izin dari orang tua siswa</p>
           </div>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

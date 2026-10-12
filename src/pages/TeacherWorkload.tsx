@@ -194,7 +194,7 @@ const TeacherWorkload = () => {
     <DashboardLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Analisis Beban Mengajar</h1>
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground">Analisis Beban Mengajar</h1>
           <p className="text-muted-foreground">
             Distribusi jam mengajar per guru untuk tahun ajaran {selectedYear}
             {selectedSemester && ` - Semester ${selectedSemester}`}

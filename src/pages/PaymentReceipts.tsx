@@ -1032,7 +1032,7 @@ export default function PaymentReceipts() {
         <div className="space-y-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
+              <h1 className="text-2xl md:text-3xl font-bold text-foreground flex items-center gap-2">
                 <Receipt className="h-8 w-8" />
                 Kwitansi
               </h1>

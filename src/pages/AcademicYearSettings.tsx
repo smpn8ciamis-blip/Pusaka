@@ -132,7 +132,7 @@ const AcademicYearSettings = () => {
     <DashboardLayout>
       <div className="p-8">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold">Pengaturan Tahun Pelajaran</h1>
+          <h1 className="text-2xl md:text-3xl font-bold">Pengaturan Tahun Pelajaran</h1>
           <p className="text-muted-foreground mt-2">
             Kelola tahun pelajaran dan tentukan tahun pelajaran aktif
           </p>

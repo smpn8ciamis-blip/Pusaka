@@ -335,7 +335,7 @@ const Schedules = () => {
       <div className="space-y-6">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Jadwal Pelajaran</h1>
+            <h1 className="text-2xl md:text-3xl font-bold text-foreground">Jadwal Pelajaran</h1>
             <p className="text-muted-foreground">
               {userRole === 'admin' ? 'Kelola jadwal pelajaran sekolah' : 'Jadwal pelajaran Anda'}
             </p>

@@ -1050,9 +1050,9 @@ function StudentsPage() {
       )}
 
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
+            <h1 className="text-2xl md:text-3xl font-bold text-foreground flex items-center gap-2">
               Manajemen Siswa
               <span className="text-[10px] font-normal bg-primary/10 text-primary px-2 py-0.5 rounded-full">{CARD_ENGINE}</span>
             </h1>

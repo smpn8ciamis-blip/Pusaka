@@ -180,7 +180,7 @@ export default function StudentAttendanceReport() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Rekap Absensi Per Siswa</h1>
+            <h1 className="text-2xl md:text-3xl font-bold text-foreground">Rekap Absensi Per Siswa</h1>
             <p className="text-muted-foreground">Statistik dan grafik kehadiran siswa</p>
           </div>
         </div>

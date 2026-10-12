@@ -147,7 +147,7 @@ const StudentRegistrationPage = () => {
     <DashboardLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold">Registrasi Akun Siswa</h1>
+          <h1 className="text-2xl md:text-3xl font-bold">Registrasi Akun Siswa</h1>
           <p className="text-muted-foreground">Buat akun login untuk siswa</p>
         </div>
 

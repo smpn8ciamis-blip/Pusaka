@@ -319,7 +319,7 @@ export default function PublicAttendanceCheck() {
               <GraduationCap className="h-10 w-10 text-primary" />
             </div>
           </div>
-          <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+          <h1 className="text-2xl md:text-3xl md:text-4xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
             Cek Status Peserta Didik
           </h1>
           <p className="text-muted-foreground max-w-xl mx-auto">

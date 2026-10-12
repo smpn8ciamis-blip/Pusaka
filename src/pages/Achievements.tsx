@@ -347,7 +347,7 @@ export default function Achievements() {
       <div className="space-y-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Penghargaan & Prestasi Siswa</h1>
+            <h1 className="text-2xl md:text-3xl font-bold text-foreground">Penghargaan & Prestasi Siswa</h1>
             <p className="text-muted-foreground">Kelola data penghargaan dan prestasi siswa</p>
           </div>
           <div className="flex gap-2">
