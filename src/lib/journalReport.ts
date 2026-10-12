@@ -53,7 +53,16 @@ export const csvCell = (v: unknown): string => {
   return `"${s.replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`;
 };
 
+export type PaperSize = 'a4' | 'f4';
+
+/** A4 = 210x297 mm, F4 (Folio) = 215x330 mm */
+export const PAPER_FORMAT: Record<PaperSize, [number, number]> = {
+  a4: [210, 297],
+  f4: [215, 330],
+};
+
 export interface BuildJournalPdfOptions {
+  paper?: PaperSize;
   rows: JournalRow[];
   settings?: (LetterheadSettings & Record<string, any>) | null;
   /** Mis. "01 Okt 2026 s/d 31 Okt 2026" */
@@ -76,7 +85,7 @@ export interface BuildJournalPdfOptions {
  */
 export async function buildJournalPdf(opts: BuildJournalPdfOptions): Promise<jsPDF> {
   const { rows, settings, periodLabel, filterLines = [], showTeacher } = opts;
-  const doc = new jsPDF({ orientation: showTeacher ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
+  const doc = new jsPDF({ orientation: showTeacher ? 'landscape' : 'portrait', unit: 'mm', format: PAPER_FORMAT[opts.paper || 'a4'] });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const M = 14;
@@ -233,10 +242,15 @@ export async function buildJournalPdf(opts: BuildJournalPdfOptions): Promise<jsP
   const noteY = (doc as any).lastAutoTable.finalY + 4;
   doc.text('H = jumlah siswa hadir, TH = jumlah siswa tidak hadir', M, noteY);
 
-  // ===== Blok tanda tangan: Guru Mapel (kiri) · QR (tengah) · Kepala Sekolah (kanan) =====
-  const blockH = 52;
+  // ===== Blok tanda tangan: Kepala Sekolah (kiri) · Guru Mapel (kanan); QR di pojok kiri bawah =====
+  const sigH = 50;
+  const qrSize = 26;
+  const qrPad = 3;
+  const box = qrSize + qrPad * 2;
+  const qrBlockH = box + 10; // kotak + teks di bawahnya
+  const bottomLimit = pageHeight - 16;
   let top = noteY + 8;
-  if (top + blockH > pageHeight - 16) {
+  if (top + sigH + 4 + qrBlockH > bottomLimit) {
     doc.addPage();
     top = 22;
   }
@@ -244,7 +258,6 @@ export async function buildJournalPdf(opts: BuildJournalPdfOptions): Promise<jsP
   const colW = 62;
   const leftCx = M + colW / 2;
   const rightCx = pageWidth - M - colW / 2;
-  const midCx = pageWidth / 2;
 
   doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'normal');
@@ -254,58 +267,55 @@ export async function buildJournalPdf(opts: BuildJournalPdfOptions): Promise<jsP
   doc.text(formatTanggalPanjang(new Date()), rightCx, top, { align: 'center' });
 
   const roleY = top + 5;
-  const lineY = top + 38;
+  const lineY = top + 36;
   const nameY = lineY + 5;
-
-  // Kiri: Guru Mapel
-  doc.text('Guru Mata Pelajaran,', leftCx, roleY, { align: 'center' });
   doc.setLineWidth(0.3);
   doc.setDrawColor(0, 0, 0);
+
+  // Kiri: Kepala Sekolah
+  doc.text('Mengetahui,', leftCx, roleY, { align: 'center' });
+  doc.text(settings?.headmaster_position || 'Kepala Sekolah', leftCx, roleY + 5, { align: 'center' });
   doc.line(leftCx - 26, lineY, leftCx + 26, lineY);
   doc.setFont('helvetica', 'bold');
-  doc.text(opts.signerTeacherName || '..............................', leftCx, nameY, { align: 'center' });
-  if (opts.signerTeacherNip) {
-    doc.setFont('helvetica', 'normal');
-    doc.text(`NIP. ${opts.signerTeacherNip}`, leftCx, nameY + 5, { align: 'center' });
-  }
-
-  // Kanan: Kepala Sekolah
-  doc.setFont('helvetica', 'normal');
-  doc.text('Mengetahui,', rightCx, roleY, { align: 'center' });
-  doc.text(settings?.headmaster_position || 'Kepala Sekolah', rightCx, roleY + 5, { align: 'center' });
-  doc.line(rightCx - 26, lineY, rightCx + 26, lineY);
-  doc.setFont('helvetica', 'bold');
-  doc.text(settings?.headmaster_name || 'Nama Kepala Sekolah', rightCx, nameY, { align: 'center' });
+  doc.text(settings?.headmaster_name || 'Nama Kepala Sekolah', leftCx, nameY, { align: 'center' });
   if (settings?.headmaster_nip) {
     doc.setFont('helvetica', 'normal');
-    doc.text(`NIP. ${settings.headmaster_nip}`, rightCx, nameY + 5, { align: 'center' });
+    doc.text(`NIP. ${settings.headmaster_nip}`, leftCx, nameY + 5, { align: 'center' });
   }
 
-  // Tengah: QR verifikasi
-  const qrSize = 26;
-  const qrPad = 3;
-  const box = qrSize + qrPad * 2;
-  const boxX = midCx - box / 2;
-  const boxY = top + 6;
+  // Kanan: Guru Mapel
+  doc.setFont('helvetica', 'normal');
+  doc.text('Guru Mata Pelajaran,', rightCx, roleY + 5, { align: 'center' });
+  doc.line(rightCx - 26, lineY, rightCx + 26, lineY);
+  doc.setFont('helvetica', 'bold');
+  doc.text(opts.signerTeacherName || '..............................', rightCx, nameY, { align: 'center' });
+  if (opts.signerTeacherNip) {
+    doc.setFont('helvetica', 'normal');
+    doc.text(`NIP. ${opts.signerTeacherNip}`, rightCx, nameY + 5, { align: 'center' });
+  }
+
+  // QR verifikasi: pojok kiri bawah halaman terakhir
+  const boxX = M;
+  const boxY = bottomLimit - qrBlockH;
   doc.setDrawColor(209, 213, 219);
   doc.setLineWidth(0.3);
   doc.setFillColor(255, 255, 255);
   doc.roundedRect(boxX, boxY, box, box, 2, 2, 'FD');
+  const midCx = boxX + box / 2;
 
   if (opts.verifyUrl) {
     await addVerificationQR(doc, opts.verifyUrl, boxX + qrPad, boxY + qrPad, qrSize);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
+    doc.setFontSize(6.5);
     doc.setTextColor(22, 101, 52);
-    doc.text('DOKUMEN TERVERIFIKASI', midCx, boxY + box + 7, { align: 'center' });
+    doc.text('DOKUMEN TERVERIFIKASI', midCx, boxY + box + 4, { align: 'center' });
     if (opts.serialNumber) {
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(6.5);
+      doc.setFontSize(6);
       doc.setTextColor(100, 100, 100);
-      doc.text(`No. Seri: ${opts.serialNumber}`, midCx, boxY + box + 11, { align: 'center' });
+      doc.text(`No. Seri: ${opts.serialNumber}`, midCx, boxY + box + 7.5, { align: 'center' });
     }
   } else {
-    // Pratinjau: placeholder, QR asli dibuat saat dicetak
     doc.setFont('helvetica', 'italic');
     doc.setFontSize(7);
     doc.setTextColor(150, 150, 150);
