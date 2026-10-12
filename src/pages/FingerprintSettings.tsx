@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Loader2, Fingerprint, Wand2, Download } from 'lucide-react';
+import { Loader2, Fingerprint, Wand2 } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -16,7 +16,6 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { waAdminFetch } from '@/lib/waBot';
-import * as XLSX from 'xlsx';
 
 // Tabel fingerprint belum ada di types.ts yang digenerate, jadi pakai klien tanpa tipe.
 const db = supabase as any;
@@ -125,12 +124,15 @@ function PersonPinList({ kind }: { kind: 'students' | 'teachers' }) {
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ['fp-map', kind, q, onlyEmpty, page, pageSize],
     queryFn: async () => {
-      const { data, error } = await db.rpc('fp_list_people', {
-        p_kind: kind, p_q: q.trim() || null, p_only_empty: onlyEmpty, p_limit: pageSize, p_offset: (page - 1) * pageSize,
-      });
+      let query = kind === 'students'
+        ? db.from('students').select('id, full_name, fingerprint_pin, classes(name)', { count: 'exact' }).eq('status', 'aktif')
+        : db.from('teachers').select('id, full_name, fingerprint_pin', { count: 'exact' });
+      if (q.trim()) query = query.ilike('full_name', `%${q.trim()}%`);
+      if (onlyEmpty) query = query.is('fingerprint_pin', null);
+      const from = (page - 1) * pageSize;
+      const { data, error, count } = await query.order('full_name').range(from, from + pageSize - 1);
       if (error) throw error;
-      const rows = (data || []) as any[];
-      return { rows, total: rows.length ? Number(rows[0].total) : 0 };
+      return { rows: data as any[], total: (count as number) || 0 };
     },
     placeholderData: (prev: any) => prev,
   });
@@ -162,7 +164,7 @@ function PersonPinList({ kind }: { kind: 'students' | 'teachers' }) {
       <div className="flex flex-wrap gap-2 items-center">
         <Input
           className="max-w-xs"
-          placeholder={kind === 'students' ? 'Cari nama siswa aktif…' : 'Cari nama guru…'}
+          placeholder={kind === 'students' ? 'Cari nama siswa…' : 'Cari nama guru…'}
           value={q}
           onChange={(e) => { setQ(e.target.value); setPage(1); }}
         />
@@ -191,8 +193,8 @@ function PersonPinList({ kind }: { kind: 'students' | 'teachers' }) {
               )}
               {rows.map((p) => (
                 <TableRow key={`${p.id}-${p.fingerprint_pin ?? ''}`}>
-                  <TableCell>{p.full_name || '-'}</TableCell>
-                  {kind === 'students' && <TableCell>{p.class_name || '-'}</TableCell>}
+                  <TableCell>{p.full_name}</TableCell>
+                  {kind === 'students' && <TableCell>{p.classes?.name || '-'}</TableCell>}
                   <TableCell>
                     <div className="flex gap-1">
                       <Input
@@ -244,7 +246,7 @@ function PersonPinList({ kind }: { kind: 'students' | 'teachers' }) {
       <AlertDialog open={confirmAll} onOpenChange={setConfirmAll}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Generate PIN untuk semua {kind === 'students' ? 'siswa aktif (bukan alumni/mutasi)' : 'guru'} yang belum punya PIN?</AlertDialogTitle>
+            <AlertDialogTitle>Generate PIN untuk semua {kind === 'students' ? 'siswa aktif' : 'guru'} yang belum punya PIN?</AlertDialogTitle>
             <AlertDialogDescription>
               PIN dibuat berurutan (urut kelas lalu nama untuk siswa). Setelah itu daftarkan PIN yang sama di mesin saat enroll jari.
               PIN yang sudah ada tidak berubah.
@@ -260,44 +262,7 @@ function PersonPinList({ kind }: { kind: 'students' | 'teachers' }) {
   );
 }
 
-async function fetchAllPeople(kind: 'students' | 'teachers') {
-  const all: any[] = [];
-  const size = 1000;
-  for (let off = 0; ; off += size) {
-    const { data, error } = await db.rpc('fp_list_people', { p_kind: kind, p_q: null, p_only_empty: false, p_limit: size, p_offset: off });
-    if (error) throw error;
-    all.push(...(data || []));
-    if (!data || data.length < size) break;
-  }
-  return all;
-}
-
 function MappingTab() {
-  const [exporting, setExporting] = useState(false);
-  const exportExcel = async () => {
-    setExporting(true);
-    try {
-      const [students, teachers] = await Promise.all([fetchAllPeople('students'), fetchAllPeople('teachers')]);
-      const wb = XLSX.utils.book_new();
-      const sSheet = XLSX.utils.json_to_sheet(students.map((p, i) => ({
-        No: i + 1, Nama: p.full_name, Kelas: p.class_name || '', NIS: p.nis || '', NISN: p.nisn || '', PIN: p.fingerprint_pin || '',
-      })), { header: ['No', 'Nama', 'Kelas', 'NIS', 'NISN', 'PIN'] });
-      sSheet['!cols'] = [{ wch: 5 }, { wch: 32 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 12 }];
-      const tSheet = XLSX.utils.json_to_sheet(teachers.map((p, i) => ({
-        No: i + 1, Nama: p.full_name || '', NIP: p.nip || '', PIN: p.fingerprint_pin || '',
-      })), { header: ['No', 'Nama', 'NIP', 'PIN'] });
-      tSheet['!cols'] = [{ wch: 5 }, { wch: 32 }, { wch: 22 }, { wch: 12 }];
-      XLSX.utils.book_append_sheet(wb, sSheet, 'Siswa');
-      XLSX.utils.book_append_sheet(wb, tSheet, 'Guru');
-      const stamp = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
-      XLSX.writeFile(wb, `PIN-Fingerprint-${stamp}.xlsx`);
-      toast.success(`Export selesai: ${students.length} siswa aktif, ${teachers.length} guru`);
-    } catch (e: any) {
-      toast.error(e.message || 'Gagal export');
-    } finally {
-      setExporting(false);
-    }
-  };
   const { data: unmapped = [] } = useQuery({
     queryKey: ['fp-unmapped'],
     queryFn: async () => {
@@ -310,12 +275,6 @@ function MappingTab() {
   });
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button variant="outline" size="sm" onClick={exportExcel} disabled={exporting}>
-          {exporting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
-          Export PIN ke Excel (siswa aktif + guru)
-        </Button>
-      </div>
       {unmapped.length > 0 && (
         <Card>
           <CardHeader><CardTitle className="text-base">PIN yang sudah menempel jari tapi belum dipetakan</CardTitle></CardHeader>
@@ -379,7 +338,7 @@ function TeacherPresenceTab() {
   const { data = [], isLoading } = useQuery({
     queryKey: ['fp-presence', date],
     queryFn: async () => {
-      const { data, error } = await db.from('teacher_presence').select('*, teachers(profiles(full_name))').eq('date', date).order('check_in_at');
+      const { data, error } = await db.from('teacher_presence').select('*, teachers(full_name)').eq('date', date).order('check_in_at');
       if (error) throw error;
       return data as any[];
     },
@@ -400,7 +359,7 @@ function TeacherPresenceTab() {
             <TableBody>
               {data.map((r) => (
                 <TableRow key={r.id}>
-                  <TableCell>{r.teachers?.profiles?.full_name || '-'}</TableCell>
+                  <TableCell>{r.teachers?.full_name || '-'}</TableCell>
                   <TableCell>{fmtTime(r.check_in_at)}</TableCell>
                   <TableCell>{fmtTime(r.check_out_at)}</TableCell>
                   <TableCell><Badge variant={r.status === 'terlambat' ? 'destructive' : 'default'}>{r.status}</Badge></TableCell>
