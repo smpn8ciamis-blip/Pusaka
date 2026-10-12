@@ -634,16 +634,16 @@ const Journals = () => {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Jurnal Mengajar</h1>
+            <h1 className="text-2xl md:text-3xl font-bold text-foreground">Jurnal Mengajar</h1>
             <p className="text-muted-foreground">
               {userRole === 'admin' ? 'Pantau jurnal mengajar semua guru' : 'Kelola jurnal mengajar Anda'}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Select value={paper} onValueChange={(v) => changePaper(v as PaperSize)}>
-              <SelectTrigger className="w-[110px]" title="Ukuran kertas cetak">
+              <SelectTrigger className="w-[84px] md:w-[110px]" title="Ukuran kertas cetak">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -653,22 +653,23 @@ const Journals = () => {
             </Select>
             <Button variant="outline" onClick={() => handlePreview()} className="gap-2">
               <Eye className="h-4 w-4" />
-              Preview
+              <span className="hidden sm:inline">Preview</span>
             </Button>
             <Button variant="outline" onClick={handleExportPDF} disabled={isPrinting} className="gap-2">
               {isPrinting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-              Cetak
+              <span className="hidden sm:inline">Cetak</span>
             </Button>
             <Button variant="outline" onClick={handleExportCSV} className="gap-2">
               <Download className="h-4 w-4" />
-              CSV
+              <span className="hidden sm:inline">CSV</span>
             </Button>
             {userRole === 'teacher' && (
               <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                 <DialogTrigger asChild>
                   <Button onClick={resetForm}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Tambah Jurnal
+                    <Plus className="mr-1 sm:mr-2 h-4 w-4" />
+                    <span className="sm:hidden">Tambah</span>
+                    <span className="hidden sm:inline">Tambah Jurnal</span>
                   </Button>
                 </DialogTrigger>
               <DialogContent className="max-w-2xl">
@@ -1028,7 +1029,7 @@ const Journals = () => {
       </div>
 
       <Dialog open={previewOpen} onOpenChange={(o) => { if (!o) closePreview(); }}>
-        <DialogContent className="max-w-5xl w-[95vw] h-[90vh] flex flex-col">
+        <DialogContent className="max-w-5xl w-[95vw] h-[90vh] p-3 sm:p-6 flex flex-col">
           <DialogHeader>
             <DialogTitle>Pratinjau Laporan Jurnal Mengajar</DialogTitle>
           </DialogHeader>
@@ -1041,13 +1042,13 @@ const Journals = () => {
               <iframe title="Pratinjau jurnal" src={previewUrl} className="w-full h-full" />
             )}
           </div>
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs text-muted-foreground">
               Pratinjau mengikuti filter & periode saat ini. QR verifikasi (pojok kiri bawah) dibuat saat dicetak.
             </p>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2 sm:justify-end">
               <Select value={paper} onValueChange={(v) => changePaper(v as PaperSize)}>
-                <SelectTrigger className="w-[110px]" title="Ukuran kertas">
+                <SelectTrigger className="w-[84px] sm:w-[110px]" title="Ukuran kertas">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

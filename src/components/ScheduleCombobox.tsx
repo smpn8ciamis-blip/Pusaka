@@ -17,6 +17,36 @@ export interface ScheduleOption {
 const DAYS = ['', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
 const hhmm = (t: string) => (t ? t.slice(0, 5) : '');
 
+const norm = (v: string) => v.toLowerCase().replace(/[_/\-–]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * Skor kecocokan; 0 = tidak cocok. Setiap kata yang diketik harus cocok di AWAL
+ * nama kelas, kata mapel, nama hari, atau jam (bukan sembarang huruf di tengah),
+ * sehingga mengetik "9a" langsung menampilkan kelas 9A saja.
+ */
+function scoreSchedule(s: ScheduleOption, query: string): number {
+  const tokens = norm(query).split(' ').filter(Boolean);
+  if (tokens.length === 0) return 1;
+  const className = norm(s.classes?.name ?? '');
+  const classShort = className.split(' ')[0] || '';
+  const subjectWords = norm(s.subject).split(' ');
+  const day = (DAYS[s.day_of_week] ?? '').toLowerCase();
+  const times = [hhmm(s.start_time), hhmm(s.end_time)];
+  let total = 0;
+  for (const t of tokens) {
+    let sc = 0;
+    if (classShort === t) sc = 100;
+    else if (classShort.startsWith(t)) sc = 80;
+    else if (className.startsWith(t)) sc = 70;
+    else if (subjectWords.some((w) => w.startsWith(t))) sc = 40;
+    else if (day.startsWith(t)) sc = 30;
+    else if (times.some((x) => x.startsWith(t) || x.replace(':', '').startsWith(t))) sc = 20;
+    if (sc === 0) return 0;
+    total += sc;
+  }
+  return total;
+}
+
 interface Props {
   schedules: ScheduleOption[];
   value: string;
@@ -28,6 +58,7 @@ interface Props {
 /** Pilih jadwal dengan pencarian: ketik kelas, mapel, hari, atau jam. */
 export function ScheduleCombobox({ schedules, value, onChange, placeholder = 'Pilih jadwal pelajaran', className }: Props) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
 
   const sorted = useMemo(
     () =>
@@ -41,10 +72,19 @@ export function ScheduleCombobox({ schedules, value, onChange, placeholder = 'Pi
     [schedules],
   );
 
+  const results = useMemo(() => {
+    if (!query.trim()) return sorted;
+    return sorted
+      .map((s) => ({ s, sc: scoreSchedule(s, query) }))
+      .filter((x) => x.sc > 0)
+      .sort((a, b) => b.sc - a.sc) // sort stabil: urutan kelas/mapel tetap untuk skor sama
+      .map((x) => x.s);
+  }, [sorted, query]);
+
   const selected = schedules.find((s) => s.id === value);
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQuery(''); }}>
       <PopoverTrigger asChild>
         <Button
           type="button"
@@ -69,18 +109,25 @@ export function ScheduleCombobox({ schedules, value, onChange, placeholder = 'Pi
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[--radix-popover-trigger-width] min-w-[260px] p-0" align="start">
-        <Command>
-          <CommandInput placeholder="Ketik kelas, mapel, hari, atau jam…" />
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder="Ketik kelas (mis. 9a), mapel, hari, atau jam…"
+            value={query}
+            onValueChange={setQuery}
+            autoCapitalize="off"
+            autoCorrect="off"
+          />
           {/* stopPropagation: agar scroll roda mouse tetap jalan di dalam dialog modal */}
           <CommandList className="max-h-[280px]" onWheel={(e) => e.stopPropagation()}>
             <CommandEmpty>Jadwal tidak ditemukan.</CommandEmpty>
-            {sorted.map((s) => (
+            {results.map((s) => (
               <CommandItem
                 key={s.id}
-                value={`${s.classes?.name ?? ''} ${s.subject} ${DAYS[s.day_of_week] ?? ''} ${hhmm(s.start_time)} ${hhmm(s.end_time)} ${s.id}`}
+                value={s.id}
                 onSelect={() => {
                   onChange(s.id);
                   setOpen(false);
+                  setQuery('');
                 }}
                 className="py-2"
               >
