@@ -836,9 +836,334 @@ app.post('/iclock/cdata', rawText, async (req, res) => {
 // Admin: aktifkan/nonaktifkan mesin menghapus cache agar langsung berlaku
 app.post('/admin/fingerprint/reload', requireAdmin, (req, res) => { fpSeen.clear(); res.json({ status: 'success' }); });
 
+// ===================== AUTO BACKUP KE GOOGLE DRIVE =====================
+// Database (pg_dump -> .sql.gz) dan isi tiap bucket Storage (.tar.gz) diunggah ke Google Drive sesuai jadwal di tabel backup_settings.
+// Akses Drive lewat OAuth (scope drive.file: bot hanya dapat mengakses berkas/folder yang dibuatnya sendiri).
+// Env: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI (opsional), BACKUP_DB_COMMAND / BACKUP_DATABASE_URL / BACKUP_DB_CONTAINER (opsional).
+const { spawn } = require('child_process');
+const os = require('os');
+const path = require('path');
+const zlib = require('zlib');
+const { pipeline } = require('stream/promises');
+
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'https://pusaka.smpn8ciamis.sch.id/wa-api/backup/oauth/callback';
+const GDRIVE_TOKEN_FILE = process.env.GDRIVE_TOKEN_FILE || path.join(__dirname, 'gdrive-token.json');
+const APP_BACKUP_PAGE = process.env.APP_BACKUP_PAGE_URL || 'https://pusaka.smpn8ciamis.sch.id/database-backup';
+const DEFAULT_BACKUP_SETTINGS = { enabled: false, schedule_time: '02:00', days: [1, 2, 3, 4, 5, 6, 7], include_db: true, include_storage: true, keep_count: 7, drive_folder_id: null, last_run_date: null };
+
+let backupRunning = false;
+let gAccess = { token: '', exp: 0 };
+const oauthStates = new Map(); // state -> kedaluwarsa (ms)
+
+function readGdriveToken() { try { return JSON.parse(fs.readFileSync(GDRIVE_TOKEN_FILE, 'utf8')); } catch (e) { return null; } }
+function writeGdriveToken(obj) { fs.writeFileSync(GDRIVE_TOKEN_FILE, JSON.stringify(obj), { mode: 0o600 }); try { fs.chmodSync(GDRIVE_TOKEN_FILE, 0o600); } catch (e) { /* abaikan */ } }
+function escHtml(t) { return String(t).replace(/[&<>"']/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+async function gdriveAccessToken() {
+    if (gAccess.token && Date.now() < gAccess.exp - 60000) return gAccess.token;
+    const t = readGdriveToken();
+    if (!t || !t.refresh_token) throw new Error('Google Drive belum dihubungkan.');
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) throw new Error('GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET belum diset di server.');
+    const body = new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, client_secret: GOOGLE_CLIENT_SECRET, refresh_token: t.refresh_token, grant_type: 'refresh_token' });
+    const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body });
+    const j = await r.json().catch(function() { return {}; });
+    if (!r.ok) throw new Error('Gagal memperbarui token Google: ' + (j.error_description || j.error || r.status) + (j.error === 'invalid_grant' ? ' (hubungkan ulang Google Drive; pastikan aplikasi OAuth berstatus "In production")' : ''));
+    gAccess = { token: j.access_token, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000 };
+    return gAccess.token;
+}
+async function gfetch(url, init) {
+    const token = await gdriveAccessToken();
+    const i = init || {};
+    return fetch(url, Object.assign({}, i, { headers: Object.assign({ Authorization: 'Bearer ' + token }, i.headers || {}) }));
+}
+async function gjson(url, init) {
+    const r = await gfetch(url, init);
+    const j = await r.json().catch(function() { return {}; });
+    if (!r.ok) throw new Error('Google Drive: ' + ((j.error && (j.error.message || j.error)) || r.status));
+    return j;
+}
+async function loadBackupSettings() {
+    const r = await supabase.from('backup_settings').select('*').eq('id', 1).maybeSingle();
+    if (r.error) throw r.error;
+    const v = Object.assign({}, DEFAULT_BACKUP_SETTINGS, r.data || {});
+    v.days = Array.isArray(v.days) ? v.days.map(Number) : DEFAULT_BACKUP_SETTINGS.days;
+    return v;
+}
+// Folder induk di Drive: dibuat otomatis oleh bot ("Pusaka Backup") dan id-nya disimpan di backup_settings.
+async function gdriveEnsureFolder(cfg) {
+    if (cfg.drive_folder_id) {
+        try {
+            const f = await gjson('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(cfg.drive_folder_id) + '?fields=id,trashed');
+            if (f && f.id && !f.trashed) return f.id;
+        } catch (e) { /* folder hilang/dihapus: buat baru */ }
+    }
+    const f = await gjson('https://www.googleapis.com/drive/v3/files?fields=id', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Pusaka Backup', mimeType: 'application/vnd.google-apps.folder' })
+    });
+    await supabase.from('backup_settings').upsert({ id: 1, drive_folder_id: f.id });
+    return f.id;
+}
+// Unggah resumable per potongan 8 MiB (aman untuk berkas besar, ulang otomatis bila gagal sementara)
+async function gdriveUpload(filePath, name, parentId) {
+    const size = fs.statSync(filePath).size;
+    const init = await gfetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': 'application/octet-stream', 'X-Upload-Content-Length': String(size) },
+        body: JSON.stringify({ name: name, parents: [parentId] })
+    });
+    if (!init.ok) { const t = await init.text().catch(function() { return ''; }); throw new Error('Google Drive menolak unggahan (' + init.status + '): ' + t.slice(0, 200)); }
+    const session = init.headers.get('location');
+    if (!session) throw new Error('Google Drive tidak memberi alamat unggahan.');
+    if (size === 0) {
+        const r0 = await fetch(session, { method: 'PUT', headers: { 'Content-Length': '0' } });
+        if (!r0.ok) throw new Error('Unggah berkas kosong gagal (' + r0.status + ')');
+        return await r0.json();
+    }
+    const CHUNK = 8 * 1024 * 1024;
+    const fd = fs.openSync(filePath, 'r');
+    try {
+        let start = 0;
+        while (start < size) {
+            const len = Math.min(CHUNK, size - start);
+            const buf = Buffer.alloc(len);
+            fs.readSync(fd, buf, 0, len, start);
+            let res = null, lastErr = null;
+            for (let attempt = 1; attempt <= 4; attempt++) {
+                try {
+                    res = await fetch(session, { method: 'PUT', headers: { 'Content-Length': String(len), 'Content-Range': 'bytes ' + start + '-' + (start + len - 1) + '/' + size }, body: buf });
+                    if (res.status === 308 || res.status === 200 || res.status === 201) { lastErr = null; break; }
+                    lastErr = new Error('HTTP ' + res.status);
+                    if (res.status < 500 && res.status !== 429) break;
+                } catch (e) { lastErr = e; }
+                await new Promise(function(r) { setTimeout(r, attempt * 2000); });
+            }
+            if (lastErr || !res) throw new Error('Unggah terhenti pada ' + Math.round(start / 1048576) + ' MB: ' + (lastErr ? lastErr.message : 'tanpa respons'));
+            start += len;
+            if (res.status === 200 || res.status === 201) return await res.json();
+        }
+        throw new Error('Unggah selesai tetapi Google Drive tidak mengonfirmasi berkas.');
+    } finally { fs.closeSync(fd); }
+}
+// Simpan hanya N backup terakhir untuk tiap awalan nama berkas (yang lebih lama dihapus)
+async function gdriveCleanup(folderId, prefix, keep) {
+    const q = "'" + folderId + "' in parents and trashed=false and name contains '" + prefix.replace(/'/g, "\\'") + "'";
+    const j = await gjson('https://www.googleapis.com/drive/v3/files?pageSize=200&orderBy=createdTime%20desc&fields=files(id,name,createdTime)&q=' + encodeURIComponent(q));
+    const files = (j.files || []).filter(function(f) { return String(f.name).startsWith(prefix); });
+    let deleted = 0;
+    for (const f of files.slice(keep)) {
+        const r = await gfetch('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(f.id), { method: 'DELETE' });
+        if (r.ok || r.status === 204) deleted++;
+    }
+    return deleted;
+}
+
+function dbDumpCommand() {
+    if (process.env.BACKUP_DB_COMMAND) return process.env.BACKUP_DB_COMMAND;                       // perintah bebas, hasil SQL lewat stdout
+    if (process.env.BACKUP_DATABASE_URL) return 'pg_dump --no-owner --no-privileges "$BACKUP_DATABASE_URL"';
+    return 'docker exec ' + (process.env.BACKUP_DB_CONTAINER || 'supabase-db') + ' pg_dump -U postgres -d postgres --no-owner --no-privileges';
+}
+async function dumpDatabase(dir, stamp) {
+    const out = path.join(dir, 'pusaka-db-' + stamp + '.sql.gz');
+    await new Promise(function(resolve, reject) {
+        const child = spawn('sh', ['-c', dbDumpCommand()], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+        let err = '';
+        child.stderr.on('data', function(d) { if (err.length < 800) err += d.toString(); });
+        const gz = zlib.createGzip();
+        const ws = fs.createWriteStream(out);
+        const done = pipeline(child.stdout, gz, ws);
+        const exited = new Promise(function(res) { child.on('close', res); child.on('error', function(e) { err += e.message; res(-1); }); });
+        Promise.all([done, exited]).then(function(r) {
+            if (r[1] !== 0) return reject(new Error('Perintah dump database gagal (kode ' + r[1] + '): ' + err.trim().slice(0, 300)));
+            resolve();
+        }).catch(reject);
+    });
+    if (fs.statSync(out).size < 200) throw new Error('Hasil dump database kosong/terlalu kecil. Periksa BACKUP_DB_COMMAND / nama kontainer database.');
+    return out;
+}
+async function listAllStorageFiles(bucket, prefix, out) {
+    for (let offset = 0; ; offset += 1000) {
+        const r = await supabase.storage.from(bucket).list(prefix, { limit: 1000, offset: offset, sortBy: { column: 'name', order: 'asc' } });
+        if (r.error) throw r.error;
+        const items = r.data || [];
+        for (const it of items) {
+            const p = prefix ? prefix + '/' + it.name : it.name;
+            if (it.id === null || it.id === undefined) await listAllStorageFiles(bucket, p, out); else out.push(p);
+        }
+        if (items.length < 1000) break;
+    }
+}
+function runTar(outFile, cwd, dirName) {
+    return new Promise(function(resolve, reject) {
+        const c = spawn('tar', ['-czf', outFile, '-C', cwd, dirName], { stdio: ['ignore', 'ignore', 'pipe'] });
+        let err = '';
+        c.stderr.on('data', function(d) { if (err.length < 500) err += d.toString(); });
+        c.on('error', reject);
+        c.on('close', function(code) { code === 0 ? resolve() : reject(new Error('tar gagal: ' + err.trim())); });
+    });
+}
+async function archiveBucket(dir, bucket, stamp) {
+    const files = [];
+    await listAllStorageFiles(bucket, '', files);
+    if (files.length === 0) return { empty: true };
+    const root = path.join(dir, 'bucket-' + bucket);
+    let skipped = 0, next = 0;
+    async function worker() {
+        while (next < files.length) {
+            const f = files[next++];
+            try {
+                const d = await supabase.storage.from(bucket).download(f);
+                if (d.error) throw d.error;
+                const target = path.join(root, f);
+                fs.mkdirSync(path.dirname(target), { recursive: true });
+                fs.writeFileSync(target, Buffer.from(await d.data.arrayBuffer()));
+            } catch (e) { skipped++; console.error('[BACKUP] lewati ' + bucket + '/' + f + ': ' + e.message); }
+        }
+    }
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    const out = path.join(dir, 'pusaka-storage-' + bucket + '-' + stamp + '.tar.gz');
+    await runTar(out, dir, 'bucket-' + bucket);
+    fs.rmSync(root, { recursive: true, force: true });
+    return { file: out, count: files.length, skipped: skipped };
+}
+function fmtMB(n) { return (n / 1048576).toFixed(1) + ' MB'; }
+
+async function runBackup(trigger) {
+    if (backupRunning) throw new Error('Backup sedang berjalan.');
+    backupRunning = true;
+    const startedAt = new Date();
+    let runId = null;
+    const details = { files: [], errors: [] };
+    let status = 'success', message = '';
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pusaka-backup-'));
+    try {
+        const ins = await supabase.from('backup_runs').insert({ trigger: trigger, status: 'running', started_at: startedAt.toISOString() }).select('id').single();
+        if (ins.data) runId = ins.data.id;
+        const cfg = await loadBackupSettings();
+        if (!cfg.include_db && !cfg.include_storage) throw new Error('Tidak ada yang dipilih untuk di-backup (database/bucket).');
+        const folderId = await gdriveEnsureFolder(cfg);
+        const w = wibNow();
+        const stamp = w.date + '_' + String(Math.floor(w.minutes / 60)).padStart(2, '0') + String(w.minutes % 60).padStart(2, '0');
+        const keep = Math.max(1, Number(cfg.keep_count) || 7);
+        const stage = async function(file, prefix, extra) {
+            const name = path.basename(file);
+            const size = fs.statSync(file).size;
+            await gdriveUpload(file, name, folderId);
+            fs.rmSync(file, { force: true });
+            let deleted = 0;
+            try { deleted = await gdriveCleanup(folderId, prefix, keep); } catch (e) { details.errors.push('Pembersihan backup lama gagal: ' + e.message); }
+            details.files.push(Object.assign({ name: name, size: size, old_deleted: deleted }, extra || {}));
+            console.log('[BACKUP] terunggah: ' + name + ' (' + fmtMB(size) + ')');
+        };
+        if (cfg.include_db) {
+            try { await stage(await dumpDatabase(tmp, stamp), 'pusaka-db-'); }
+            catch (e) { details.errors.push('Database: ' + e.message); console.error('[BACKUP] database gagal:', e.message); }
+        }
+        if (cfg.include_storage) {
+            let buckets = [];
+            try {
+                const b = await supabase.storage.listBuckets();
+                if (b.error) throw b.error;
+                buckets = (b.data || []).map(function(x) { return x.name; });
+            } catch (e) { details.errors.push('Daftar bucket: ' + e.message); }
+            for (const bucket of buckets) {
+                try {
+                    const a = await archiveBucket(tmp, bucket, stamp);
+                    if (a.empty) { details.files.push({ name: 'bucket ' + bucket, size: 0, note: 'kosong, dilewati' }); continue; }
+                    await stage(a.file, 'pusaka-storage-' + bucket + '-', { files: a.count, skipped: a.skipped });
+                    if (a.skipped) details.errors.push('Bucket ' + bucket + ': ' + a.skipped + ' berkas gagal diunduh dan dilewati');
+                } catch (e) { details.errors.push('Bucket ' + bucket + ': ' + e.message); console.error('[BACKUP] bucket ' + bucket + ' gagal:', e.message); }
+            }
+        }
+        const uploaded = details.files.filter(function(f) { return f.size > 0; }).length;
+        if (uploaded === 0) { status = 'failed'; message = details.errors.join(' | ') || 'Tidak ada berkas yang diunggah.'; }
+        else if (details.errors.length) { status = 'partial'; message = details.errors.join(' | '); }
+        else message = uploaded + ' berkas terunggah (' + fmtMB(details.files.reduce(function(a, f) { return a + f.size; }, 0)) + ').';
+    } catch (e) {
+        status = 'failed'; message = e.message; console.error('[BACKUP ERROR]:', e.message);
+    } finally {
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { /* abaikan */ }
+        if (runId) await supabase.from('backup_runs').update({ status: status, message: message.slice(0, 1500), finished_at: new Date().toISOString(), details: details }).eq('id', runId);
+        backupRunning = false;
+    }
+    return { status: status, message: message };
+}
+// Pemeriksa jadwal (1 query ringan per menit). Dimulai hanya pada jam terjadwal (toleransi 3 jam), maksimal sekali per hari.
+function shouldRunBackup(cfg, now) {
+    if (!cfg.enabled) return false;
+    if (String(cfg.last_run_date || '').slice(0, 10) === now.date) return false;
+    if (cfg.days.indexOf(now.dow) === -1) return false;
+    const at = hhmmToMin(cfg.schedule_time || '02:00');
+    return now.minutes >= at && now.minutes <= at + 180;
+}
+async function checkBackupSchedule() {
+    try {
+        if (backupRunning) return;
+        const cfg = await loadBackupSettings();
+        const now = wibNow();
+        if (!shouldRunBackup(cfg, now)) return;
+        await supabase.from('backup_settings').upsert({ id: 1, last_run_date: now.date }); // tandai dulu agar tidak berulang bila gagal
+        console.log('[BACKUP] memulai backup terjadwal');
+        runBackup('schedule').catch(function(e) { console.error('[BACKUP]', e.message); });
+    } catch (e) { console.error('[BACKUP SCHEDULE ERROR]:', e.message); }
+}
+
+app.get('/admin/backup/status', requireAdmin, function(req, res) {
+    const t = readGdriveToken();
+    res.json({ status: 'success', google_configured: !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET), connected: !!(t && t.refresh_token), email: (t && t.email) || null, running: backupRunning, redirect_uri: GOOGLE_REDIRECT_URI });
+});
+app.post('/admin/backup/auth-url', requireAdmin, function(req, res) {
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) return res.status(400).json({ status: 'error', message: 'GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET belum diset di server bot.' });
+    const state = crypto.randomBytes(24).toString('hex');
+    oauthStates.set(state, Date.now() + 10 * 60 * 1000);
+    const params = new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, redirect_uri: GOOGLE_REDIRECT_URI, response_type: 'code', scope: 'https://www.googleapis.com/auth/drive.file', access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state: state });
+    res.json({ status: 'success', url: 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString() });
+});
+// Tujuan pengalihan dari Google (dibuka di browser admin, tanpa header login): dilindungi parameter state sekali pakai
+app.get('/backup/oauth/callback', async function(req, res) {
+    const page = function(ok, msg) {
+        res.status(ok ? 200 : 400).type('html').send('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Google Drive</title>' +
+            '<body style="font-family:system-ui;max-width:480px;margin:15vh auto;padding:0 20px;text-align:center"><h2>' + (ok ? 'Google Drive terhubung' : 'Gagal menghubungkan') + '</h2><p>' + escHtml(msg) + '</p>' +
+            '<p><a href="' + escHtml(APP_BACKUP_PAGE) + '">Kembali ke halaman Backup</a></p>' + (ok ? '<script>setTimeout(function(){location.href=' + JSON.stringify(APP_BACKUP_PAGE) + '},2500)</script>' : '') + '</body>');
+    };
+    try {
+        const state = String(req.query.state || '');
+        const exp = oauthStates.get(state);
+        oauthStates.delete(state);
+        if (!exp || exp < Date.now()) return page(false, 'Sesi otorisasi tidak valid atau kedaluwarsa. Ulangi dari halaman Backup.');
+        if (req.query.error) return page(false, 'Google: ' + String(req.query.error));
+        const code = String(req.query.code || '');
+        if (!code) return page(false, 'Kode otorisasi tidak ada.');
+        const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ code: code, client_id: GOOGLE_CLIENT_ID, client_secret: GOOGLE_CLIENT_SECRET, redirect_uri: GOOGLE_REDIRECT_URI, grant_type: 'authorization_code' }) });
+        const j = await r.json().catch(function() { return {}; });
+        if (!r.ok) return page(false, 'Google menolak kode: ' + (j.error_description || j.error || r.status));
+        if (!j.refresh_token) return page(false, 'Google tidak memberi refresh token. Cabut akses aplikasi di myaccount.google.com/permissions lalu hubungkan ulang.');
+        gAccess = { token: j.access_token, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000 };
+        let email = null;
+        try { const about = await gjson('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)'); email = about.user && about.user.emailAddress; } catch (e) { /* tidak wajib */ }
+        writeGdriveToken({ refresh_token: j.refresh_token, email: email, connected_at: new Date().toISOString() });
+        page(true, email ? 'Akun: ' + email : 'Berhasil.');
+    } catch (e) { console.error('[BACKUP OAUTH ERROR]:', e.message); page(false, e.message); }
+});
+app.post('/admin/backup/disconnect', requireAdmin, function(req, res) {
+    try { fs.rmSync(GDRIVE_TOKEN_FILE, { force: true }); } catch (e) { /* abaikan */ }
+    gAccess = { token: '', exp: 0 };
+    res.json({ status: 'success' });
+});
+app.post('/admin/backup/run', requireAdmin, function(req, res) {
+    if (backupRunning) return res.status(409).json({ status: 'error', message: 'Backup sedang berjalan.' });
+    if (!readGdriveToken()) return res.status(400).json({ status: 'error', message: 'Hubungkan Google Drive dulu.' });
+    runBackup('manual').catch(function(e) { console.error('[BACKUP]', e.message); });
+    res.json({ status: 'success', message: 'Backup dimulai. Hasilnya muncul di riwayat di bawah.' });
+});
+
 const PORT = parseInt(process.env.PORT || '3000', 10);
 app.listen(PORT, () => {
     console.log('Server API berjalan di port ' + PORT);
     startBot();
     setInterval(runTeacherReminders, 60 * 1000);
+    setInterval(checkBackupSchedule, 60 * 1000);
 });
