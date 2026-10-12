@@ -690,6 +690,8 @@ app.post('/attendance-complete', requireUser, async (req, res) => {
         if (!isReady) return res.status(503).json({ status: 'error', message: 'Bot belum terhubung.' });
         const rows = await loadClassCompletion(date);
         if (rows.length === 0 || rows.some(function(c) { return !c.filled; })) {
+            const belum = rows.filter(function(c) { return !c.filled; }).map(function(c) { return c.class_name; });
+            console.log('[REKAP KELAS] belum lengkap (' + (rows.length - belum.length) + '/' + rows.length + '). Belum absen: ' + (belum.join(', ') || '(tidak ada kelas berjadwal aktif hari ini)'));
             return res.json({ status: 'not_complete', filled: rows.filter(function(c) { return c.filled; }).length, total: rows.length });
         }
         if (classRecapSentFor(date)) return res.json({ status: 'already_sent' });

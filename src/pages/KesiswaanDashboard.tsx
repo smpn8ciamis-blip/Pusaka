@@ -26,6 +26,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { notifyBotIfAttendanceComplete } from "@/lib/waBot";
 import {
   Calendar as CalendarIcon,
   X,
@@ -1166,6 +1167,13 @@ const UnfilledClassesCard = memo(function UnfilledClassesCard({
       })
       .sort((a, b) => a.displayName.localeCompare(b.displayName, "id", { numeric: true }));
   }, [allClasses, filledIds, filledNames]);
+
+  // Pemicu cadangan rekap grup WA: bila dashboard menunjukkan semua kelas sudah mengisi, beri tahu bot (satu kali per sesi,
+  // bot sendiri hanya mengirim sekali per hari). Tidak ada polling; hanya saat halaman dimuat.
+  const allFilled = !isLoading && !failed && !isSunday && total > 0 && unfilled.length === 0;
+  useEffect(() => {
+    if (allFilled) void notifyBotIfAttendanceComplete();
+  }, [allFilled]);
 
   const filled = total - unfilled.length;
   const yearSuffix = academicYear ? ` · TP ${academicYear}` : "";
