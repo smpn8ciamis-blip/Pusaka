@@ -163,14 +163,17 @@ export async function notifyBotIfAttendanceComplete(savedDate?: string): Promise
     const key = `wa-class-recap-notified-${today}`;
     try { if (sessionStorage.getItem(key)) return; } catch { /* abaikan */ }
     const { data, error } = await (supabase as any).rpc('get_class_attendance_completion', { p_date: today });
-    if (error || !Array.isArray(data) || data.length === 0) return;
+    if (error) { console.warn('[Rekap grup] gagal memeriksa kelengkapan absensi:', error.message); return; }
+    if (!Array.isArray(data) || data.length === 0) return;
     if (data.some((c: { filled: boolean }) => !c.filled)) return; // belum lengkap: jangan beri tahu bot
     const res = await waAdminFetch<{ status: string }>('/attendance-complete', { method: 'POST', body: { date: today } });
+    console.info('[Rekap grup] bot menjawab:', res.status);
     if (['queued', 'already_sent', 'disabled'].includes(res.status)) {
       try { sessionStorage.setItem(key, '1'); } catch { /* abaikan */ }
     }
-  } catch {
-    /* bot tidak aktif / belum diatur: abaikan */
+  } catch (e) {
+    // Bot tidak aktif / belum diatur: tidak mengganggu simpan absen, tetapi dicatat di konsol untuk diagnosis.
+    console.warn('[Rekap grup] tidak dapat memberi tahu bot:', (e as Error)?.message);
   }
 }
 
