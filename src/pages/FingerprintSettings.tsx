@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Loader2, Fingerprint, Copy } from 'lucide-react';
+import { Loader2, Fingerprint, Wand2 } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,10 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { waAdminFetch } from '@/lib/waBot';
 
 // Tabel fingerprint belum ada di types.ts yang digenerate, jadi pakai klien tanpa tipe.
@@ -112,52 +116,148 @@ function DevicesTab() {
 function PersonPinList({ kind }: { kind: 'students' | 'teachers' }) {
   const qc = useQueryClient();
   const [q, setQ] = useState('');
-  const { data = [], isLoading } = useQuery({
-    queryKey: ['fp-map', kind, q],
+  const [onlyEmpty, setOnlyEmpty] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [confirmAll, setConfirmAll] = useState(false);
+
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: ['fp-map', kind, q, onlyEmpty, page, pageSize],
     queryFn: async () => {
       let query = kind === 'students'
-        ? db.from('students').select('id, full_name, fingerprint_pin, classes(name)').eq('status', 'aktif')
-        : db.from('teachers').select('id, full_name, fingerprint_pin');
+        ? db.from('students').select('id, full_name, fingerprint_pin, classes(name)', { count: 'exact' }).eq('status', 'aktif')
+        : db.from('teachers').select('id, full_name, fingerprint_pin', { count: 'exact' });
       if (q.trim()) query = query.ilike('full_name', `%${q.trim()}%`);
-      const { data, error } = await query.order('full_name').limit(40);
+      if (onlyEmpty) query = query.is('fingerprint_pin', null);
+      const from = (page - 1) * pageSize;
+      const { data, error, count } = await query.order('full_name').range(from, from + pageSize - 1);
       if (error) throw error;
-      return data as any[];
+      return { rows: data as any[], total: (count as number) || 0 };
     },
+    placeholderData: (prev: any) => prev,
   });
+  const rows = data?.rows ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['fp-map', kind] }); };
   const save = useMutation({
     mutationFn: async ({ id, pin }: { id: string; pin: string }) => {
       const { error } = await db.from(kind).update({ fingerprint_pin: pin.trim() || null }).eq('id', id);
       if (error) throw error;
     },
-    onSuccess: () => { toast.success('PIN disimpan'); qc.invalidateQueries({ queryKey: ['fp-map', kind] }); },
+    onSuccess: () => { toast.success('PIN disimpan'); refresh(); },
     onError: (e: Error) => toast.error(e.message.includes('duplicate') ? 'PIN sudah dipakai orang lain' : e.message),
   });
+  const generate = useMutation({
+    mutationFn: async (ids: string[] | null) => {
+      const { data, error } = await db.rpc('fp_generate_pins', { p_kind: kind, p_ids: ids });
+      if (error) throw error;
+      return data as number;
+    },
+    onSuccess: (n) => { toast.success(n > 0 ? `${n} PIN berhasil dibuat` : 'Tidak ada PIN baru yang perlu dibuat'); refresh(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   return (
     <div className="space-y-3">
-      <Input placeholder={kind === 'students' ? 'Cari nama siswa…' : 'Cari nama guru…'} value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="flex flex-wrap gap-2 items-center">
+        <Input
+          className="max-w-xs"
+          placeholder={kind === 'students' ? 'Cari nama siswa…' : 'Cari nama guru…'}
+          value={q}
+          onChange={(e) => { setQ(e.target.value); setPage(1); }}
+        />
+        <label className="flex items-center gap-2 text-sm">
+          <Switch checked={onlyEmpty} onCheckedChange={(v) => { setOnlyEmpty(v); setPage(1); }} /> Belum punya PIN
+        </label>
+        <Button className="ml-auto" size="sm" onClick={() => setConfirmAll(true)} disabled={generate.isPending}>
+          {generate.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Wand2 className="h-4 w-4 mr-1" />}
+          Generate PIN semua yang kosong
+        </Button>
+      </div>
+
       {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : (
-        <Table>
-          <TableHeader><TableRow><TableHead>Nama</TableHead>{kind === 'students' && <TableHead>Kelas</TableHead>}<TableHead className="w-32">PIN mesin</TableHead></TableRow></TableHeader>
-          <TableBody>
-            {data.map((p) => (
-              <TableRow key={p.id}>
-                <TableCell>{p.full_name}</TableCell>
-                {kind === 'students' && <TableCell>{p.classes?.name || '-'}</TableCell>}
-                <TableCell>
-                  <Input
-                    defaultValue={p.fingerprint_pin || ''}
-                    inputMode="numeric"
-                    className="h-8"
-                    placeholder="PIN"
-                    onBlur={(e) => e.target.value.trim() !== (p.fingerprint_pin || '') && save.mutate({ id: p.id, pin: e.target.value })}
-                  />
-                </TableCell>
+        <div className={isFetching ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Nama</TableHead>
+                {kind === 'students' && <TableHead>Kelas</TableHead>}
+                <TableHead className="w-44">PIN mesin</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {rows.length === 0 && (
+                <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground">Tidak ada data.</TableCell></TableRow>
+              )}
+              {rows.map((p) => (
+                <TableRow key={`${p.id}-${p.fingerprint_pin ?? ''}`}>
+                  <TableCell>{p.full_name}</TableCell>
+                  {kind === 'students' && <TableCell>{p.classes?.name || '-'}</TableCell>}
+                  <TableCell>
+                    <div className="flex gap-1">
+                      <Input
+                        defaultValue={p.fingerprint_pin || ''}
+                        inputMode="numeric"
+                        className="h-8"
+                        placeholder="PIN"
+                        onBlur={(e) => e.target.value.trim() !== (p.fingerprint_pin || '') && save.mutate({ id: p.id, pin: e.target.value })}
+                      />
+                      {!p.fingerprint_pin && (
+                        <Button size="icon" variant="outline" className="h-8 w-8 shrink-0" title="Generate PIN" disabled={generate.isPending}
+                          onClick={() => generate.mutate([p.id])}>
+                          <Wand2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-3 text-sm">
+            <span className="text-muted-foreground">
+              {total === 0 ? '0 data' : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} dari ${total}`}
+            </span>
+            <div className="flex items-center gap-2">
+              <select
+                className="h-8 rounded-md border bg-background px-2 text-sm"
+                value={pageSize}
+                onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+              >
+                {[10, 20, 50, 100].map((n) => <option key={n} value={n}>{n} / halaman</option>)}
+              </select>
+              <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage(1)}>«</Button>
+              <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((x) => x - 1)}>Sebelumnya</Button>
+              <span>Hal. {page} / {totalPages}</span>
+              <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((x) => x + 1)}>Berikutnya</Button>
+              <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage(totalPages)}>»</Button>
+            </div>
+          </div>
+        </div>
       )}
-      <p className="text-xs text-muted-foreground">Menampilkan maksimal 40 nama; gunakan pencarian. PIN = nomor ID yang didaftarkan di mesin. Ketik PIN lalu klik di luar kolom untuk menyimpan.</p>
+      <p className="text-xs text-muted-foreground">
+        PIN = nomor ID yang didaftarkan di mesin. Ketik PIN lalu klik di luar kolom untuk menyimpan, atau klik ikon tongkat untuk membuat PIN otomatis
+        (angka urut, tidak kembar antara siswa dan guru). Yang sudah punya PIN tidak diubah.
+      </p>
+
+      <AlertDialog open={confirmAll} onOpenChange={setConfirmAll}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Generate PIN untuk semua {kind === 'students' ? 'siswa aktif' : 'guru'} yang belum punya PIN?</AlertDialogTitle>
+            <AlertDialogDescription>
+              PIN dibuat berurutan (urut kelas lalu nama untuk siswa). Setelah itu daftarkan PIN yang sama di mesin saat enroll jari.
+              PIN yang sudah ada tidak berubah.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={() => generate.mutate(null)}>Generate</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
