@@ -150,7 +150,82 @@ function detectColumns(rows: unknown[][]): { map: Partial<Record<ColKey, number>
   return { map: { no: 0, name: 1, desc: 2, volume: 3, unit: 4, price: 5, amount: 6, month: 7 }, headerRow: -1 };
 }
 
+/**
+ * Format RKAS sekolah (kolom bulan): A=No | B:C=Uraian Kegiatan | D=Volume | E=Satuan | F=Frekuensi | G=Satuan frekuensi |
+ * H=Harga Satuan | I=Jumlah | J..U = anggaran bulan 1..12 (baris judul berisi angka 1..12).
+ * Baris bernomor di kolom A = kegiatan utama; baris tanpa angka rupiah = judul kelompok; baris dengan angka = rincian.
+ */
+function findMonthGrid(rows: unknown[][]): { row: number; col: number } | null {
+  for (let r = 0; r < Math.min(rows.length, 15); r++) {
+    const row = rows[r] || [];
+    for (let c = 0; c + 11 < row.length; c++) {
+      let ok = true;
+      for (let k = 0; k < 12 && ok; k++) ok = Number(row[c + k]) === k + 1 && String(row[c + k]).trim() !== '';
+      if (ok) return { row: r, col: c };
+    }
+  }
+  return null;
+}
+
+function parseRkasGrid(rows: unknown[][], grid: { row: number; col: number }): RkaParseResult {
+  const text = (v: unknown) => String(v ?? '').replace(/\s+/g, ' ').trim();
+  const out: RkaRow[] = [];
+  let skipped = 0;
+  let activity = '';
+  let group = '';
+  let sub = '';
+  for (let r = grid.row + 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const a = text(row[0]).replace(/\.0+$/, '');
+    const b = text(row[1]).replace(/\.0+$/, '');
+    const c = text(row[2]);
+    const mv = Array.from({ length: 12 }, (_, k) => Math.max(0, parseNumber(row[grid.col + k])));
+    const months = mv.map((v, k) => (v > 0 ? k + 1 : 0)).filter(Boolean);
+    const monthSum = mv.reduce((x, y) => x + y, 0);
+    const volume = parseNumber(row[3]);
+    const freq = parseNumber(row[5]);
+    const price = parseNumber(row[7]);
+    const amtI = parseNumber(row[8]);
+    const hasMoney = price > 0 || amtI > 0 || monthSum > 0;
+    const hasText = !!(a || b || c);
+    if (!hasText) { if (hasMoney) skipped++; continue; } // baris total
+    // "b" berupa angka urut saja (1, 2, 3.) → bukan teks
+    const bText = /^[0-9]+\.?$/.test(b) ? '' : b;
+
+    if (!hasMoney) {
+      if (a) { activity = bText || c || b; group = ''; sub = ''; }
+      else if (b || bText) { group = c || bText; sub = ''; }
+      else sub = c;
+      skipped++;
+      continue;
+    }
+    if (a) { activity = bText || c || b; group = ''; sub = ''; }
+    else if (b) { group = ''; sub = ''; }
+    const label = c || bText;
+    const parts = [group, sub, label].filter((x, i, arr) => x && arr.indexOf(x) === i);
+    let desc = parts.join(' › ');
+    if (freq > 1) desc += ` (× ${freq}${text(row[6]) ? ' ' + text(row[6]) : ''})`;
+    let amount = amtI > 0 ? amtI : monthSum > 0 ? monthSum : Math.round(volume * price * (freq || 1));
+    out.push({
+      line_no: out.length + 1,
+      activity_name: activity || group || label,
+      description: desc,
+      volume,
+      unit: text(row[4]),
+      unit_price: price,
+      amount,
+      months,
+      month_label: formatMonths(months),
+    });
+  }
+  const warnings: string[] = ['Format RKAS (kolom bulan 1–12) terdeteksi.'];
+  if (out.some((x) => x.months.length === 0)) warnings.push('Sebagian rincian tidak memiliki anggaran pada kolom bulan; dihitung sebagai "Tanpa bulan" pada grafik.');
+  return { rows: out, skipped, warnings };
+}
+
 export function parseRkaRows(rows: unknown[][]): RkaParseResult {
+  const grid = findMonthGrid(rows);
+  if (grid) return parseRkasGrid(rows, grid);
   const { map, headerRow } = detectColumns(rows);
   const warnings: string[] = [];
   if (headerRow < 0) warnings.push('Baris judul tidak dikenali; dipakai urutan kolom baku (No, Nama Kegiatan, Uraian, Volume, Satuan, Harga Satuan, Jumlah, Bulan).');

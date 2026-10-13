@@ -159,16 +159,38 @@ export function RkaTab({ standardId, standardName }: { standardId: string; stand
   });
 
   const downloadTemplate = () => {
-    const aoa = [
-      ['No', 'Nama Kegiatan', 'Uraian', 'Volume', 'Satuan', 'Harga Satuan', 'Jumlah', 'Bulan Kegiatan'],
-      [1, 'Workshop Pengembangan Kurikulum', 'Honor narasumber', 2, 'kali', 1500000, 3000000, 'Juli'],
-      [2, 'Pengadaan Buku Paket', 'Buku pegangan guru', 100, 'buku', 50000, 5000000, 'Jan-Mar'],
-      [3, 'Rapat Evaluasi', 'Konsumsi rapat', 12, 'kali', 250000, 3000000, 'Setiap bulan'],
+    // Format RKAS: kolom bulan 1–12 (sama dengan RKAS sekolah). Format datar lama tetap dapat dibaca.
+    const blank = (n: number) => new Array(n).fill('');
+    const head1 = ['NO', 'URAIAN KEGIATAN', '', 'VOLUME', 'SATUAN', 'FREKUENSI', 'SATUAN', 'HARGA SATUAN', 'JUMLAH', 'DIANGGARKAN BULAN', ...blank(11), 'TOTAL'];
+    const head2 = [...blank(9), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, ''];
+    const line = (m: number, amt: number) => { const r = blank(12).map((_, i) => (i + 1 === m ? amt : '')); return r; };
+    const aoa: unknown[][] = [
+      head1,
+      head2,
+      [1, 'MPLS', ...blank(20)],
+      ['', 1, 'Kelengkapan MPLS', ...blank(19)],
+      ['', '', 'Fotokopi dan kuarto', 3400, 'lembar', 1, 'kali', 250, 850000, ...line(7, 850000), 850000],
+      ['', '', 'Spanduk 4m x 1m', 2, 'buah', 1, 'kali', 100000, 200000, ...line(7, 200000), 200000],
+      ['', 2, 'Honor pemateri', 12, 'orang', 1, 'kali', 150000, 1800000, ...line(7, 1800000), 1800000],
+      [2, 'Kegiatan Jeda Semester', ...blank(20)],
+      ['', 1, 'Uang pembinaan', 4, 'mata lomba', ...blank(16)],
+      ['', '', '1. Juara 1', 4, 'tim', 1, 'kali', 100000, 400000, ...line(12, 400000), 400000],
+      ['', 2, 'Honor pelatih', 1, 'orang', 12, 'kali', 200000, 2400000, ...new Array(12).fill(200000), 2400000],
     ];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{ wch: 5 }, { wch: 34 }, { wch: 30 }, { wch: 9 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 16 }];
+    ws['!cols'] = [{ wch: 5 }, { wch: 5 }, { wch: 34 }, { wch: 9 }, { wch: 12 }, { wch: 10 }, { wch: 9 }, { wch: 14 }, { wch: 14 }, ...new Array(12).fill({ wch: 11 }), { wch: 14 }];
+    ws['!merges'] = [{ s: { r: 0, c: 1 }, e: { r: 0, c: 2 } }, { s: { r: 0, c: 9 }, e: { r: 0, c: 20 } }];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'RKA');
+    XLSX.utils.book_append_sheet(wb, ws, 'RKAS');
+    const guide = [
+      ['PETUNJUK PENGISIAN'],
+      ['1. Kolom A (NO) diisi nomor untuk kegiatan utama (mis. MPLS, HUT RI); judul kegiatan boleh di kolom B atau C.'],
+      ['2. Baris tanpa angka rupiah dianggap judul kelompok (mis. "Kelengkapan MPLS", "Uang pembinaan").'],
+      ['3. Baris rincian: isi Uraian (kolom C), Volume, Satuan, Frekuensi, Harga Satuan, Jumlah.'],
+      ['4. Letakkan anggaran pada kolom bulan (1 = Januari ... 12 = Desember). Boleh lebih dari satu bulan.'],
+      ['5. Jangan ubah baris angka 1–12 di bawah "DIANGGARKAN BULAN"; baris TOTAL otomatis diabaikan.'],
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(guide), 'Petunjuk');
     XLSX.writeFile(wb, 'template-rka-penjab.xlsx');
   };
 
