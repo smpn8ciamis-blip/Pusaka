@@ -202,6 +202,7 @@ function parseRkasGrid(rows: unknown[][], grid: { row: number; col: number }): R
     if (a) { activity = bText || c || b; group = ''; sub = ''; }
     else if (b) { group = ''; sub = ''; }
     const label = c || bText;
+    if (/^(total|jumlah|sub ?total)\b/.test(norm(label)) && !volume && !price) { skipped++; continue; }
     const parts = [group, sub, label].filter((x, i, arr) => x && arr.indexOf(x) === i);
     let desc = parts.join(' › ');
     if (freq > 1) desc += ` (× ${freq}${text(row[6]) ? ' ' + text(row[6]) : ''})`;

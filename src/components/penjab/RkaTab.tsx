@@ -159,38 +159,113 @@ export function RkaTab({ standardId, standardName }: { standardId: string; stand
   });
 
   const downloadTemplate = () => {
-    // Format RKAS: kolom bulan 1–12 (sama dengan RKAS sekolah). Format datar lama tetap dapat dibaca.
-    const blank = (n: number) => new Array(n).fill('');
-    const head1 = ['NO', 'URAIAN KEGIATAN', '', 'VOLUME', 'SATUAN', 'FREKUENSI', 'SATUAN', 'HARGA SATUAN', 'JUMLAH', 'DIANGGARKAN BULAN', ...blank(11), 'TOTAL'];
-    const head2 = [...blank(9), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, ''];
-    const line = (m: number, amt: number) => { const r = blank(12).map((_, i) => (i + 1 === m ? amt : '')); return r; };
-    const aoa: unknown[][] = [
-      head1,
-      head2,
-      [1, 'MPLS', ...blank(20)],
-      ['', 1, 'Kelengkapan MPLS', ...blank(19)],
-      ['', '', 'Fotokopi dan kuarto', 3400, 'lembar', 1, 'kali', 250, 850000, ...line(7, 850000), 850000],
-      ['', '', 'Spanduk 4m x 1m', 2, 'buah', 1, 'kali', 100000, 200000, ...line(7, 200000), 200000],
-      ['', 2, 'Honor pemateri', 12, 'orang', 1, 'kali', 150000, 1800000, ...line(7, 1800000), 1800000],
-      [2, 'Kegiatan Jeda Semester', ...blank(20)],
-      ['', 1, 'Uang pembinaan', 4, 'mata lomba', ...blank(16)],
-      ['', '', '1. Juara 1', 4, 'tim', 1, 'kali', 100000, 400000, ...line(12, 400000), 400000],
-      ['', 2, 'Honor pelatih', 1, 'orang', 12, 'kali', 200000, 2400000, ...new Array(12).fill(200000), 2400000],
+    // Format RKAS: kolom bulan 1–12 (sama dengan RKAS sekolah) + rumus otomatis. Format datar lama tetap dapat dibaca.
+    // Kolom: A NO | B-C URAIAN | D VOLUME | E SATUAN | F FREKUENSI | G SATUAN FREK | H HARGA SATUAN | I JUMLAH | J..U bulan 1..12 | V TOTAL
+    const COLS = 22;
+    const colL = (i: number) => XLSX.utils.encode_col(i);
+    const ws: XLSX.WorkSheet = {};
+    const put = (r: number, c: number, v: string | number | null, f?: string) => {
+      if (v === null && !f) return;
+      const addr = XLSX.utils.encode_cell({ r, c });
+      ws[addr] = f ? { t: 'n', v: (v as number) ?? 0, f } : typeof v === 'number' ? { t: 'n', v } : { t: 's', v: String(v) };
+    };
+    const heads = ['NO', 'URAIAN KEGIATAN', '', 'VOLUME', 'SATUAN', 'FREKUENSI', 'SATUAN FREKUENSI', 'HARGA SATUAN', 'JUMLAH', 'DIANGGARKAN BULAN'];
+    heads.forEach((h, c) => h && put(0, c, h));
+    put(0, 21, 'TOTAL');
+    for (let m = 1; m <= 12; m++) put(1, 8 + m, m);
+
+    type Line = { kind: 'act' | 'grp' | 'sub' | 'item'; no?: number | string; text: string; vol?: number; unit?: string; freq?: number; fu?: string; price?: number; month?: number };
+    const lines: Line[] = [
+      { kind: 'act', no: 1, text: 'MPLS' },
+      { kind: 'grp', no: 1, text: 'Kelengkapan MPLS' },
+      { kind: 'item', text: 'Fotokopi dan kuarto', vol: 3400, unit: 'lembar', freq: 1, fu: 'kali', price: 250, month: 7 },
+      { kind: 'item', text: 'Spanduk 4m x 1m', vol: 2, unit: 'buah', freq: 1, fu: 'kali', price: 100000, month: 7 },
+      { kind: 'grp', no: 2, text: 'Honor dan konsumsi pelaksana' },
+      { kind: 'item', text: 'Makan', vol: 12, unit: 'orang', freq: 1, fu: 'kali', price: 25000, month: 7 },
+      { kind: 'act', no: 2, text: 'Kegiatan Jeda Semester' },
+      { kind: 'grp', no: 1, text: 'Uang pembinaan' },
+      { kind: 'sub', text: '1. Lomba Futsal' },
+      { kind: 'item', text: 'Juara 1', vol: 4, unit: 'tim', freq: 1, fu: 'kali', price: 100000, month: 12 },
+      { kind: 'item', text: 'Juara 2', vol: 4, unit: 'tim', freq: 1, fu: 'kali', price: 75000, month: 12 },
+      { kind: 'act', no: 3, text: 'Honor Pelatih (tiap bulan)' },
+      { kind: 'item', no: 1, text: 'Honor pelatih basket', vol: 1, unit: 'orang', freq: 12, fu: 'bulan', price: 200000 },
     ];
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{ wch: 5 }, { wch: 5 }, { wch: 34 }, { wch: 9 }, { wch: 12 }, { wch: 10 }, { wch: 9 }, { wch: 14 }, { wch: 14 }, ...new Array(12).fill({ wch: 11 }), { wch: 14 }];
+    let r = 2;
+    const first = r + 1; // baris Excel pertama data
+    for (const ln of lines) {
+      const x = r + 1; // nomor baris Excel
+      if (ln.kind === 'act') { put(r, 0, ln.no ?? null); put(r, 1, ln.text); }
+      else if (ln.kind === 'grp') { put(r, 1, ln.no ?? null); put(r, 2, ln.text); }
+      else if (ln.kind === 'sub') { put(r, 2, ln.text); }
+      else {
+        if (ln.no !== undefined) put(r, 1, ln.no);
+        put(r, 2, ln.text);
+        put(r, 3, ln.vol ?? null); put(r, 4, ln.unit ?? null); put(r, 5, ln.freq ?? null); put(r, 6, ln.fu ?? null); put(r, 7, ln.price ?? null);
+        const amt = (ln.vol ?? 0) * (ln.freq || 1) * (ln.price ?? 0);
+        put(r, 8, amt, `D${x}*IF(F${x}="",1,F${x})*H${x}`);
+        for (let m = 1; m <= 12; m++) {
+          const col = 8 + m;
+          if (ln.month === m) put(r, col, amt, `$I${x}`);
+          else if (ln.month === undefined) put(r, col, amt / (ln.freq || 12), `$I${x}/$F${x}`); // tersebar tiap bulan
+        }
+        put(r, 21, amt, `SUM(J${x}:U${x})`);
+      }
+      r++;
+    }
+    const last = r; // baris Excel terakhir data
+    // Baris TOTAL (otomatis dilewati saat import karena tanpa uraian)
+    const tr = r + 1;
+    ws[XLSX.utils.encode_cell({ r: tr, c: 8 })] = { t: 'n', v: 0, f: `SUM(I${first}:I${last})` };
+    for (let c = 9; c <= 21; c++) ws[XLSX.utils.encode_cell({ r: tr, c })] = { t: 'n', v: 0, f: `SUM(${colL(c)}${first}:${colL(c)}${last})` };
+    ws['!ref'] = `A1:${colL(COLS - 1)}${tr + 1}`;
+    ws['!cols'] = [{ wch: 5 }, { wch: 6 }, { wch: 36 }, { wch: 9 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, ...new Array(12).fill({ wch: 11 }), { wch: 14 }];
     ws['!merges'] = [{ s: { r: 0, c: 1 }, e: { r: 0, c: 2 } }, { s: { r: 0, c: 9 }, e: { r: 0, c: 20 } }];
+    ws['!freeze'] = { xSplit: 0, ySplit: 2 } as unknown as XLSX.WorkSheet['!freeze'];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'RKAS');
-    const guide = [
-      ['PETUNJUK PENGISIAN'],
-      ['1. Kolom A (NO) diisi nomor untuk kegiatan utama (mis. MPLS, HUT RI); judul kegiatan boleh di kolom B atau C.'],
-      ['2. Baris tanpa angka rupiah dianggap judul kelompok (mis. "Kelengkapan MPLS", "Uang pembinaan").'],
-      ['3. Baris rincian: isi Uraian (kolom C), Volume, Satuan, Frekuensi, Harga Satuan, Jumlah.'],
-      ['4. Letakkan anggaran pada kolom bulan (1 = Januari ... 12 = Desember). Boleh lebih dari satu bulan.'],
-      ['5. Jangan ubah baris angka 1–12 di bawah "DIANGGARKAN BULAN"; baris TOTAL otomatis diabaikan.'],
+
+    const guide: string[][] = [
+      ['PETUNJUK PENGISIAN TEMPLATE IMPORT RKA'],
+      [''],
+      ['A. LANGKAH SINGKAT'],
+      ['1. Buka sheet "RKAS". Hapus baris contoh (baris 3 dst.), lalu isi sesuai RKA penanggung jawab Anda. Jangan hapus baris judul (baris 1) dan baris angka bulan 1–12 (baris 2).'],
+      ['2. Simpan file (.xlsx), lalu di aplikasi pilih Penjab SNP → tab RKA → "Pilih file Excel".'],
+      ['3. Periksa pratinjau (jumlah baris dan total harus sama dengan total di Excel), lalu klik Simpan/Impor.'],
+      [''],
+      ['B. ARTI SETIAP KOLOM'],
+      ['NO (A)', 'Nomor untuk KEGIATAN UTAMA saja (mis. 1. MPLS, 2. HUT RI). Judul kegiatan utama ditulis di kolom B atau C pada baris yang sama.'],
+      ['URAIAN (B–C)', 'Kolom B: nomor urut kelompok (1, 2, 3). Kolom C: uraian/nama kelompok atau rincian belanja.'],
+      ['VOLUME (D)', 'Jumlah barang/orang. Angka saja.'],
+      ['SATUAN (E)', 'Satuan volume: lembar, buah, orang, paket, dll.'],
+      ['FREKUENSI (F)', 'Berapa kali kegiatan/pembelian dilakukan. Kosong dianggap 1.'],
+      ['SATUAN FREKUENSI (G)', 'kali, bulan, hari, kegiatan, dll. (hanya keterangan).'],
+      ['HARGA SATUAN (H)', 'Harga satu satuan dalam rupiah, angka saja tanpa "Rp" dan titik.'],
+      ['JUMLAH (I)', 'OTOMATIS = Volume × Frekuensi × Harga Satuan. Jangan ketik manual kecuali perlu; boleh ditimpa angka bila ada perhitungan khusus.'],
+      ['BULAN 1–12 (J–U)', 'Letakkan anggaran pada bulan pelaksanaan (1 = Januari … 12 = Desember). Cara termudah: ketik rumus =$I3 (sesuaikan nomor baris) pada kolom bulan yang dipilih. Boleh diisi lebih dari satu bulan; kosongkan bulan lain.'],
+      ['TOTAL (V)', 'OTOMATIS = jumlah semua kolom bulan pada baris tersebut. Harus sama dengan JUMLAH (I); bila beda berarti ada bulan yang belum diisi/berlebih.'],
+      [''],
+      ['C. JENIS BARIS'],
+      ['Kegiatan utama', 'Kolom A terisi nomor + judul kegiatan, tanpa angka rupiah. Menjadi "Nama Kegiatan" pada hasil import dan grafik.'],
+      ['Judul kelompok', 'Baris tanpa angka rupiah (mis. "Uang pembinaan", "Konsumsi"). Hanya menjadi awalan uraian rincian di bawahnya.'],
+      ['Rincian belanja', 'Baris yang memuat Harga/Jumlah/anggaran bulan. Setiap baris ini menjadi satu data RKA.'],
+      ['Baris TOTAL', 'Baris paling bawah berisi rumus SUM untuk jumlah dan tiap bulan. Tidak ikut diimpor; gunakan untuk mencocokkan total.'],
+      [''],
+      ['D. RUMUS YANG TERSEDIA'],
+      ['Jumlah (I)', '=D*IF(F="",1,F)*H   → Volume × Frekuensi × Harga'],
+      ['Bulan terpilih', '=$I3   → salin nilai Jumlah ke kolom bulan'],
+      ['Tersebar tiap bulan', '=$I3/$F3   → bila Frekuensi = 12 bulan, tiap bulan mendapat bagian yang sama'],
+      ['Total baris (V)', '=SUM(J3:U3)'],
+      ['Total kolom', '=SUM(I3:I100)  (baris TOTAL di bagian bawah; perluas rentang bila baris bertambah)'],
+      [''],
+      ['E. CATATAN PENTING'],
+      ['• Setelah menambah baris baru, salin (copy–paste) rumus dari baris di atasnya, lalu perluas rentang SUM pada baris TOTAL.'],
+      ['• Jika ada beberapa sheet, aplikasi memakai sheet yang paling banyak baris rinciannya. Sheet "Petunjuk" ini diabaikan.'],
+      ['• Anggaran yang tidak diletakkan di kolom bulan tetap tersimpan, tetapi pada grafik masuk kategori "Tanpa bulan".'],
+      ['• Format lama (kolom datar: No, Nama Kegiatan, Uraian, Volume, Satuan, Harga Satuan, Jumlah, Bulan Kegiatan) tetap bisa diimpor.'],
     ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(guide), 'Petunjuk');
+    const gws = XLSX.utils.aoa_to_sheet(guide);
+    gws['!cols'] = [{ wch: 26 }, { wch: 110 }];
+    XLSX.utils.book_append_sheet(wb, gws, 'Petunjuk');
     XLSX.writeFile(wb, 'template-rka-penjab.xlsx');
   };
 
