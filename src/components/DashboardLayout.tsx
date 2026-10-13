@@ -1,5 +1,6 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsEkskulCoach } from '@/hooks/useEkskul';
+import { useMySnpStandardIds } from '@/hooks/usePenjabSnp';
 import { SubscriptionBanner } from '@/components/SubscriptionBanner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -66,6 +67,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isHomeroomTeacher, setIsHomeroomTeacher] = useState(false);
   const { isCoach: isEkskulCoach } = useIsEkskulCoach();
+  const { isPenjab: isSnpPenjab } = useMySnpStandardIds();
   const [menuSearch, setMenuSearch] = useState('');
   const [favorites, setFavorites] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
@@ -300,6 +302,12 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
       ],
     },
     {
+      label: 'Standar Pendidikan',
+      items: [
+        { icon: ClipboardList, label: 'Penjab Standar (SNP)', href: '/penjab-snp' },
+      ],
+    },
+    {
       label: 'Informasi',
       items: [
         { icon: Megaphone, label: 'Pengumuman', href: '/announcements' },
@@ -450,8 +458,17 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     : baseTeacherMenuItems;
 
   // Sisipkan sebelum "Pengaturan" (item terakhir)
-  const teacherMenuItems: MenuItem[] = isEkskulCoach
-    ? [...teacherMenuItemsBase.slice(0, -1), ...ekskulCoachMenuItems, ...teacherMenuItemsBase.slice(-1)]
+  // Guru yang ditugaskan admin sebagai penjab Standar Nasional Pendidikan
+  const snpPenjabMenuItems: MenuItem[] = [
+    { icon: ClipboardList, label: 'Penjab Standar (SNP)', href: '/penjab-snp' },
+  ];
+
+  const teacherExtraItems: MenuItem[] = [
+    ...(isEkskulCoach ? ekskulCoachMenuItems : []),
+    ...(isSnpPenjab ? snpPenjabMenuItems : []),
+  ];
+  const teacherMenuItems: MenuItem[] = teacherExtraItems.length > 0
+    ? [...teacherMenuItemsBase.slice(0, -1), ...teacherExtraItems, ...teacherMenuItemsBase.slice(-1)]
     : teacherMenuItemsBase;
 
   const bendaharaMenuItems: MenuItem[] = [
