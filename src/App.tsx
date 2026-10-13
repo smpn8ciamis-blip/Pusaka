@@ -9,6 +9,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { VersionNotification } from "./components/VersionNotification";
 import { WaterProgressLoader } from "./components/ui/water-progress-loader";
 import { EkskulAccessRoute } from "./components/EkskulAccessRoute";
+import { PenjabSnpRoute } from "./components/PenjabSnpRoute";
 
 // Lazy load all page components for better performance
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -96,6 +97,8 @@ const BulkPhotoUpload = lazy(() => import("./pages/BulkPhotoUpload"));
 const StudentMutations = lazy(() => import("./pages/StudentMutations"));
 const GuruPiketDashboard = lazy(() => import("./pages/GuruPiketDashboard"));
 const EkskulJournal = lazy(() => import("./pages/EkskulJournal"));
+const PenjabSnp = lazy(() => import("./pages/PenjabSnp"));
+const PenjabSnpDetail = lazy(() => import("./pages/PenjabSnpDetail"));
 const EkskulMembers = lazy(() => import("./pages/EkskulMembers"));
 const EkskulCoaches = lazy(() => import("./pages/EkskulCoaches"));
 const EkskulTypes = lazy(() => import("./pages/EkskulTypes"));
@@ -334,6 +337,8 @@ const App = () => (
               <Route path="/guru-piket-dashboard" element={<ProtectedRoute allowedRoles={['guru_piket', 'admin']}><GuruPiketDashboard /></ProtectedRoute>} />
               <Route path="/dispensasi-siswa" element={<ProtectedRoute allowedRoles={['guru_piket', 'admin', 'kesiswaan']}><DispensasiSiswa /></ProtectedRoute>} />
               <Route path="/buku-tamu" element={<ProtectedRoute allowedRoles={['guru_piket', 'admin']}><BukuTamu /></ProtectedRoute>} />
+              <Route path="/penjab-snp" element={<PenjabSnpRoute><PenjabSnp /></PenjabSnpRoute>} />
+              <Route path="/penjab-snp/:code" element={<PenjabSnpRoute><PenjabSnpDetail /></PenjabSnpRoute>} />
               <Route path="/ekskul-journal" element={<EkskulAccessRoute><EkskulJournal /></EkskulAccessRoute>} />
               <Route path="/ekskul-members" element={<EkskulAccessRoute><EkskulMembers /></EkskulAccessRoute>} />
               <Route path="/ekskul-coaches" element={<ProtectedRoute allowedRoles={['kesiswaan', 'admin']}><EkskulCoaches /></ProtectedRoute>} />
