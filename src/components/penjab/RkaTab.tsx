@@ -8,7 +8,6 @@ import {
 import { Download, FileSpreadsheet, Loader2, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -16,6 +15,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { RkaDetailPanel } from '@/components/penjab/RkaDetailPanel';
 import { snpDb, type SnpRkaBatch, type SnpRkaItem } from '@/hooks/usePenjabSnp';
 import {
   amountPerMonth, formatMonths, formatRupiah, MONTH_SHORT, parseRkaRows, type RkaRow,
@@ -421,39 +421,7 @@ export function RkaTab({ standardId, standardName }: { standardId: string; stand
                 </Card>
               </div>
 
-              <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-base">Rincian RKA</CardTitle></CardHeader>
-                <CardContent className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-12">No</TableHead><TableHead>Nama Kegiatan</TableHead><TableHead>Uraian</TableHead>
-                        <TableHead className="text-right">Volume</TableHead><TableHead>Satuan</TableHead>
-                        <TableHead className="text-right">Harga Satuan</TableHead><TableHead className="text-right">Jumlah</TableHead><TableHead>Bulan</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {items.map((r, i) => (
-                        <TableRow key={r.id}>
-                          <TableCell>{r.line_no ?? i + 1}</TableCell>
-                          <TableCell className="min-w-[160px] font-medium">{r.activity_name}</TableCell>
-                          <TableCell className="min-w-[140px] text-muted-foreground">{r.description || '-'}</TableCell>
-                          <TableCell className="text-right">{Number(r.volume)}</TableCell>
-                          <TableCell>{r.unit || '-'}</TableCell>
-                          <TableCell className="text-right whitespace-nowrap">{formatRupiah(Number(r.unit_price))}</TableCell>
-                          <TableCell className="text-right whitespace-nowrap font-medium">{formatRupiah(Number(r.amount))}</TableCell>
-                          <TableCell className="whitespace-nowrap"><Badge variant="outline">{formatMonths(r.months ?? [])}</Badge></TableCell>
-                        </TableRow>
-                      ))}
-                      <TableRow>
-                        <TableCell colSpan={6} className="text-right font-semibold">Total</TableCell>
-                        <TableCell className="text-right font-bold whitespace-nowrap">{formatRupiah(total)}</TableCell>
-                        <TableCell />
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
+              <RkaDetailPanel items={items} standardName={standardName} fiscalYear={activeBatch.fiscal_year} />
             </>
           )}
         </>
