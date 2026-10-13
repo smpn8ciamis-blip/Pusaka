@@ -588,6 +588,21 @@ const StudentDashboardPage = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: myEkskul, isLoading: ekskulLoading, isError: ekskulError } = useQuery({
+    queryKey: ['student-ekskul', studentId],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any).rpc('get_my_ekskul');
+      if (error) throw error;
+      return (data || []) as Array<{
+        member_id: string; type_id: string; name: string; description: string | null;
+        status: string; joined_at: string | null; notes: string | null; coaches: string | null;
+        meeting_count: number; last_meeting: string | null;
+      }>;
+    },
+    enabled: !!studentId && activeTab === 'ekskul',
+    staleTime: 5 * 60 * 1000,
+  });
+
   const { data: allGrades, isLoading: gradesLoading } = useQuery({
     queryKey: ['student-grades', studentId],
     queryFn: async () => {
@@ -833,6 +848,7 @@ const StudentDashboardPage = () => {
     { tab: 'attendance', label: 'Absensi', icon: CalendarCheck, color: 'bg-amber-500' },
     { tab: 'violations', label: 'Pelanggaran', icon: AlertTriangle, color: 'bg-red-500' },
     { tab: 'achievements', label: 'Prestasi', icon: Trophy, color: 'bg-purple-500' },
+    { tab: 'ekskul', label: 'Ekstrakurikuler', icon: Users, color: 'bg-orange-500' },
     { tab: 'announcements', label: 'Pengumuman', icon: Megaphone, color: 'bg-indigo-500' },
     { tab: 'dispensasi', label: 'Dispensasi', icon: Hourglass, color: 'bg-cyan-500' },
     { tab: 'uploads', label: 'Upload Berkas', icon: Upload, color: 'bg-emerald-500' },
@@ -1396,6 +1412,50 @@ const StudentDashboardPage = () => {
     </div>
   );
 
+  const renderEkskulTab = () => (
+    <div className="p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold">Ekstrakurikuler</h2>
+        <Badge className="bg-orange-100 text-orange-700 text-xs">
+          {myEkskul?.filter((e) => e.status === 'aktif').length || 0} Aktif
+        </Badge>
+      </div>
+      {ekskulLoading ? <LoadingState /> : ekskulError ? (
+        <EmptyState icon={AlertCircle} title="Gagal memuat ekstrakurikuler" subtitle="Coba muat ulang halaman" />
+      ) : myEkskul && myEkskul.length > 0 ? (
+        <div className="space-y-2">
+          {myEkskul.map((e) => (
+            <div key={e.member_id} className="bg-white dark:bg-gray-900 rounded-xl p-4 shadow-sm border border-orange-100 dark:border-orange-900/30 flex items-start gap-3">
+              <div className="w-10 h-10 bg-orange-100 dark:bg-orange-900/30 rounded-full flex items-center justify-center shrink-0">
+                <Users className="h-5 w-5 text-orange-500" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-semibold text-sm text-gray-800 dark:text-gray-100">{e.name}</p>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${e.status === 'aktif' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>
+                    {e.status === 'aktif' ? 'Aktif' : 'Nonaktif'}
+                  </span>
+                </div>
+                {e.description && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{e.description}</p>}
+                <div className="mt-2 space-y-0.5 text-xs text-gray-500">
+                  {e.coaches && <p>Pembina: <span className="text-gray-700 dark:text-gray-300">{e.coaches}</span></p>}
+                  {e.joined_at && <p>Bergabung: {safeFormatDate(e.joined_at, 'dd MMMM yyyy')}</p>}
+                  <p>
+                    {e.meeting_count} pertemuan tercatat
+                    {e.last_meeting ? ` · terakhir ${safeFormatDate(e.last_meeting, 'dd MMM yyyy')}` : ''}
+                  </p>
+                  {e.notes && <p className="italic">{e.notes}</p>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyState icon={Users} title="Belum mengikuti ekstrakurikuler" subtitle="Hubungi pembina atau kesiswaan untuk mendaftar" />
+      )}
+    </div>
+  );
+
   const renderAnnouncementsTab = () => (
     <div className="p-4 space-y-4">
       <h2 className="text-lg font-bold">Pengumuman</h2>
@@ -1493,6 +1553,7 @@ const StudentDashboardPage = () => {
       case 'attendance': return renderAttendanceTab();
       case 'violations': return renderViolationsTab();
       case 'achievements': return renderAchievementsTab();
+      case 'ekskul': return renderEkskulTab();
       case 'announcements': return renderAnnouncementsTab();
       case 'dispensasi': return renderDispensasiTab();
       case 'elearning':
@@ -1512,7 +1573,7 @@ const StudentDashboardPage = () => {
     <div className="min-h-screen bg-[#F1F6FD] dark:bg-slate-950 pb-28" style={{ fontFamily: FONT_STACK }}>
       {/* HEADER */}
       {(() => {
-        const isHome = activeTab === 'overview' || !['schedule', 'idcard', 'grades', 'elearning', 'profile', 'attendance', 'violations', 'achievements', 'announcements', 'dispensasi', 'uploads', 'settings'].includes(activeTab);
+        const isHome = activeTab === 'overview' || !['schedule', 'idcard', 'grades', 'elearning', 'profile', 'attendance', 'violations', 'achievements', 'ekskul', 'announcements', 'dispensasi', 'uploads', 'settings'].includes(activeTab);
         const bellBtn = (
           <button
             data-notif-btn
