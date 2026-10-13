@@ -277,3 +277,110 @@ export async function buildRkaPdf(opts: BuildRkaPdfOptions): Promise<jsPDF> {
   }
   return doc;
 }
+
+/* ================= REKAP SEMUA PENJAB (admin / bendahara) ================= */
+export interface PenjabBudgetRow {
+  code: string;
+  name: string;
+  penjab: string;
+  version: string;
+  count: number;
+  total: number;
+  /** anggaran per bulan, indeks 0..11, 12 = tanpa bulan */
+  months: number[];
+}
+
+export function exportAllRkaXlsx(opts: { rows: PenjabBudgetRow[]; fiscalYear?: string | null }) {
+  const { rows, fiscalYear } = opts;
+  const grand = rows.reduce((a, r) => a + r.total, 0);
+  const wb = XLSX.utils.book_new();
+  const s1: unknown[][] = [[`Rekap Anggaran Penanggung Jawab Standar${fiscalYear ? ' TA ' + fiscalYear : ''}`], [], ['No', 'Standar', 'Penjab', 'Versi RKA', 'Jumlah Rincian', 'Total Anggaran', '% dari Total']];
+  rows.forEach((r, i) => s1.push([i + 1, r.name, r.penjab || '-', r.version || '-', r.count, Math.round(r.total), grand > 0 ? Number(((r.total / grand) * 100).toFixed(2)) : 0]));
+  const f = 4; const l = 3 + rows.length;
+  s1.push(['', 'TOTAL', '', '', { t: 'n', v: rows.reduce((a, r) => a + r.count, 0), f: `SUM(E${f}:E${l})` }, { t: 'n', v: Math.round(grand), f: `SUM(F${f}:F${l})` }, '']);
+  const ws1 = XLSX.utils.aoa_to_sheet(s1);
+  ws1['!cols'] = [{ wch: 5 }, { wch: 36 }, { wch: 34 }, { wch: 26 }, { wch: 14 }, { wch: 18 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, ws1, 'Rekap per Standar');
+
+  const hasNo = rows.some((r) => r.months[12] > 0);
+  const head = ['Standar', ...MONTH_NAMES, ...(hasNo ? ['Tanpa Bulan'] : []), 'Total'];
+  const s2: unknown[][] = [head];
+  rows.forEach((r, i) => {
+    const vals = r.months.slice(0, hasNo ? 13 : 12).map((v) => Math.round(v));
+    s2.push([r.name, ...vals, { t: 'n', v: vals.reduce((a, b) => a + b, 0), f: `SUM(B${i + 2}:${XLSX.utils.encode_col(vals.length)}${i + 2})` }]);
+  });
+  const tot: unknown[] = ['TOTAL'];
+  for (let c = 1; c < head.length; c++) {
+    const L = XLSX.utils.encode_col(c);
+    const v = s2.slice(1).reduce((a, row) => { const x = row[c] as unknown; return a + (typeof x === 'object' && x ? Number((x as { v: number }).v) : Number(x) || 0); }, 0);
+    tot.push({ t: 'n', v, f: `SUM(${L}2:${L}${rows.length + 1})` });
+  }
+  s2.push(tot);
+  const ws2 = XLSX.utils.aoa_to_sheet(s2);
+  ws2['!cols'] = [{ wch: 36 }, ...new Array(head.length - 1).fill({ wch: 14 })];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Standar x Bulan');
+  XLSX.writeFile(wb, `rekap-anggaran-penjab${fiscalYear ? '-' + fiscalYear : ''}-${idDate()}.xlsx`);
+}
+
+export async function buildAllRkaPdf(opts: {
+  rows: PenjabBudgetRow[]; fiscalYear?: string | null; paper?: PaperSize;
+  settings?: (LetterheadSettings & Record<string, any>) | null; signerName?: string | null; signerRole?: string;
+}): Promise<jsPDF> {
+  const { rows, fiscalYear, settings } = opts;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: PAPER_FORMAT[opts.paper || 'a4'] });
+  const W = doc.internal.pageSize.getWidth();
+  const H = doc.internal.pageSize.getHeight();
+  const M = 12;
+  let y = await addLetterheadToPDF(doc, settings as any);
+  const grand = rows.reduce((a, r) => a + r.total, 0);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(0, 0, 0);
+  doc.text('REKAPITULASI ANGGARAN PENANGGUNG JAWAB STANDAR', W / 2, y, { align: 'center' }); y += 5;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(60, 60, 60);
+  doc.text(`${fiscalYear ? 'Tahun Anggaran ' + fiscalYear + ' · ' : ''}Dicetak ${formatTanggalPanjang(new Date())}`, W / 2, y, { align: 'center' }); y += 6;
+  const st = { font: 'helvetica', fontSize: 8, cellPadding: 1.8, lineColor: [209, 213, 219] as [number, number, number], lineWidth: 0.1, textColor: [17, 24, 39] as [number, number, number], valign: 'middle' as const };
+  const hs = { fillColor: [31, 41, 55] as [number, number, number], textColor: [255, 255, 255] as [number, number, number], fontStyle: 'bold' as const, halign: 'center' as const };
+  autoTable(doc, {
+    startY: y, theme: 'grid', margin: { left: M, right: M, bottom: 18 }, styles: st, headStyles: hs,
+    head: [['No', 'Standar', 'Penjab', 'Rincian', 'Total Anggaran', '%']],
+    body: rows.map((r, i) => [i + 1, r.name, r.penjab || '-', r.count, rp(r.total), grand > 0 ? `${((r.total / grand) * 100).toFixed(1)}%` : '0%']),
+    foot: [[{ content: 'TOTAL', colSpan: 3, styles: { halign: 'right' } }, String(rows.reduce((a, r) => a + r.count, 0)), rp(grand), '100%']],
+    footStyles: { fillColor: [229, 231, 235], textColor: [17, 24, 39], fontStyle: 'bold' },
+    columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 3: { halign: 'center', cellWidth: 18 }, 4: { halign: 'right', cellWidth: 36 }, 5: { halign: 'center', cellWidth: 16 } },
+  });
+  y = (doc as any).lastAutoTable.finalY + 8;
+  if (y > H - 70) { doc.addPage(); y = 16; }
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(0, 0, 0);
+  doc.text('Sebaran Anggaran per Bulan (dalam ribuan rupiah)', M, y); y += 2;
+  const k = (n: number) => (n ? Math.round(n / 1000).toLocaleString('id-ID') : '-');
+  const colTot = new Array(13).fill(0);
+  rows.forEach((r) => r.months.forEach((v, i) => { colTot[i] += v; }));
+  autoTable(doc, {
+    startY: y, theme: 'grid', margin: { left: M, right: M, bottom: 18 }, styles: { ...st, fontSize: 7, cellPadding: 1.4 }, headStyles: hs,
+    head: [['Standar', ...MONTH_SHORT_PDF, 'Total']],
+    body: rows.map((r) => [r.name, ...r.months.slice(0, 12).map(k), k(r.total)]),
+    foot: [['TOTAL', ...colTot.slice(0, 12).map(k), k(grand)]],
+    footStyles: { fillColor: [229, 231, 235], textColor: [17, 24, 39], fontStyle: 'bold' },
+    columnStyles: { 0: { cellWidth: 44 }, ...Object.fromEntries(Array.from({ length: 13 }, (_, i) => [i + 1, { halign: 'right' as const }])) },
+  });
+  y = (doc as any).lastAutoTable.finalY + 8;
+  const sigH = 46;
+  if (y + sigH > H - 16) { doc.addPage(); y = 20; }
+  const rx = W - M - 32;
+  const lx = M + 32;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+  doc.text(formatTanggalPanjang(new Date()), rx, y, { align: 'center' });
+  doc.text('Mengetahui,', lx, y + 5, { align: 'center' });
+  doc.text(settings?.headmaster_position || 'Kepala Sekolah', lx, y + 10, { align: 'center' });
+  doc.text(opts.signerRole || 'Bendahara', rx, y + 10, { align: 'center' });
+  doc.setLineWidth(0.3); doc.line(lx - 27, y + 34, lx + 27, y + 34); doc.line(rx - 27, y + 34, rx + 27, y + 34);
+  doc.setFont('helvetica', 'bold');
+  doc.text(settings?.headmaster_name || 'Nama Kepala Sekolah', lx, y + 39, { align: 'center' });
+  doc.text(opts.signerName || '..............................', rx, y + 39, { align: 'center' });
+  const pages = doc.getNumberOfPages();
+  for (let p = 1; p <= pages; p++) {
+    doc.setPage(p); doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(107, 114, 128);
+    doc.text('Rekap Anggaran Penjab', M, H - 8); doc.text(`Halaman ${p} dari ${pages}`, W - M, H - 8, { align: 'right' });
+  }
+  return doc;
+}
+const MONTH_SHORT_PDF = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];

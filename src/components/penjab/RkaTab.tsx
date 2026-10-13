@@ -5,7 +5,7 @@ import * as XLSX from 'xlsx';
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { Download, FileSpreadsheet, Loader2, Trash2, Upload } from 'lucide-react';
+import { Download, FileSpreadsheet, Loader2, Plus, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -15,6 +15,8 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { RkaCrudPanel } from '@/components/penjab/RkaCrudPanel';
 import { RkaDetailPanel } from '@/components/penjab/RkaDetailPanel';
 import { snpDb, type SnpRkaBatch, type SnpRkaItem } from '@/hooks/usePenjabSnp';
 import {
@@ -138,8 +140,27 @@ export function RkaTab({ standardId, standardName }: { standardId: string; stand
       if (id) setBatchId(id);
       queryClient.invalidateQueries({ queryKey: ['snp-rka-batches'] });
       queryClient.invalidateQueries({ queryKey: ['snp-overview'] });
+      queryClient.invalidateQueries({ queryKey: ['anggaran-penjab'] });
     },
     onError: () => toast.error('Gagal mengimport RKA'),
+  });
+
+  const createManual = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await snpDb.from('snp_rka_batches')
+        .insert({ standard_id: standardId, fiscal_year: fiscalYear.trim() || null, file_name: 'Input manual', row_count: 0, total_amount: 0 })
+        .select('*').single();
+      if (error) throw error;
+      return data.id as string;
+    },
+    onSuccess: (id) => {
+      toast.success('RKA kosong dibuat. Buka tab "Kelola Rincian" untuk menambah rincian.');
+      setBatchId(id);
+      queryClient.invalidateQueries({ queryKey: ['snp-rka-batches'] });
+      queryClient.invalidateQueries({ queryKey: ['snp-overview'] });
+      queryClient.invalidateQueries({ queryKey: ['anggaran-penjab'] });
+    },
+    onError: () => toast.error('Gagal membuat RKA'),
   });
 
   const deleteMutation = useMutation({
@@ -154,6 +175,7 @@ export function RkaTab({ standardId, standardName }: { standardId: string; stand
       queryClient.invalidateQueries({ queryKey: ['snp-rka-batches'] });
       queryClient.invalidateQueries({ queryKey: ['snp-rka-items'] });
       queryClient.invalidateQueries({ queryKey: ['snp-overview'] });
+      queryClient.invalidateQueries({ queryKey: ['anggaran-penjab'] });
     },
     onError: () => toast.error('Gagal menghapus data RKA'),
   });
@@ -290,6 +312,7 @@ export function RkaTab({ standardId, standardName }: { standardId: string; stand
           />
           <Button onClick={() => fileRef.current?.click()} className="gap-2"><Upload className="h-4 w-4" /> Pilih File Excel</Button>
           <Button variant="outline" onClick={downloadTemplate} className="gap-2"><Download className="h-4 w-4" /> Unduh Template</Button>
+          <Button variant="outline" onClick={() => createManual.mutate()} disabled={createManual.isPending} className="gap-2"><Plus className="h-4 w-4" /> Buat RKA Manual</Button>
         </CardContent>
       </Card>
 
@@ -421,7 +444,14 @@ export function RkaTab({ standardId, standardName }: { standardId: string; stand
                 </Card>
               </div>
 
-              <RkaDetailPanel items={items} standardName={standardName} fiscalYear={activeBatch.fiscal_year} />
+              <Tabs defaultValue="analisis" className="space-y-4">
+                <TabsList>
+                  <TabsTrigger value="analisis">Analisis & Rincian</TabsTrigger>
+                  <TabsTrigger value="kelola">Kelola Rincian</TabsTrigger>
+                </TabsList>
+                <TabsContent value="analisis"><RkaDetailPanel items={items} standardName={standardName} fiscalYear={activeBatch.fiscal_year} /></TabsContent>
+                <TabsContent value="kelola"><RkaCrudPanel batch={activeBatch} items={items} /></TabsContent>
+              </Tabs>
             </>
           )}
         </>
