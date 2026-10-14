@@ -91,7 +91,7 @@ export default function PenjabSnpDetail() {
           <TabsList className="h-auto w-full justify-start">
             <TabsTrigger value="ringkasan">Ringkasan</TabsTrigger>
             <TabsTrigger value="rka">RKA</TabsTrigger>
-            <TabsTrigger value="dokumen">Dokumen</TabsTrigger>
+            <TabsTrigger value="dokumen">Repositori</TabsTrigger>
             {subtasks.map((s) => (
               <TabsTrigger key={s.id} value={`sub-${s.id}`} className="max-w-[180px]">
                 <span className="truncate">{s.title}</span>
@@ -135,7 +135,7 @@ export default function PenjabSnpDetail() {
                     </span>
                   </div>
                 ))}
-                {recentDocs.length > 0 && <button type="button" className="text-xs text-primary hover:underline" onClick={() => setTab('dokumen')}>Lihat semua dokumen →</button>}
+                {recentDocs.length > 0 && <button type="button" className="text-xs text-primary hover:underline" onClick={() => setTab('dokumen')}>Buka repositori →</button>}
               </CardContent>
             </Card>
           </TabsContent>
