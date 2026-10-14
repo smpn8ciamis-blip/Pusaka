@@ -305,6 +305,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
       label: 'Standar Pendidikan',
       items: [
         { icon: ClipboardList, label: 'Penjab Standar (SNP)', href: '/penjab-snp' },
+        { icon: FolderOpen, label: 'Repositori Penjab', href: '/repositori-penjab' },
         { icon: Wallet, label: 'Anggaran Penjab', href: '/anggaran-penjab' },
       ],
     },
@@ -462,6 +463,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   // Guru yang ditugaskan admin sebagai penjab Standar Nasional Pendidikan
   const snpPenjabMenuItems: MenuItem[] = [
     { icon: ClipboardList, label: 'Penjab Standar (SNP)', href: '/penjab-snp' },
+    { icon: FolderOpen, label: 'Repositori Penjab', href: '/repositori-penjab' },
   ];
 
   const teacherExtraItems: MenuItem[] = [

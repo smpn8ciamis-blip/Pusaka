@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import { Download, FileText, Loader2, Plus, Settings2, Trash2, Upload } from 'lucide-react';
+import { Download, FileText, Loader2, Plus, Search, Settings2, Trash2, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -23,6 +24,22 @@ import {
 const ALLOWED_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'zip', 'rar', 'txt', 'csv'];
 const ALL = '__all__';
 const NONE = '__none__';
+
+/** Berkas disimpan di database sebagai potongan base64 (tidak melewati storage.objects). */
+const RAW_CHUNK = 384 * 1024;   // 384 KB mentah ≈ 512 KB base64
+const CHUNKS_PER_REQUEST = 4;
+
+const bytesToBase64 = (bytes: Uint8Array): string => {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+};
+const base64ToBytes = (b64: string): Uint8Array => {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+};
 
 const safeName = (n: string) => n.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(-80);
 
@@ -41,6 +58,8 @@ export function DocumentsPanel({
   const [manageOpen, setManageOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SnpDocument | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [search, setSearch] = useState('');
 
   const [form, setForm] = useState({ title: '', description: '', categoryId: NONE, typeId: NONE });
   const [file, setFile] = useState<File | null>(null);
@@ -65,7 +84,7 @@ export function DocumentsPanel({
   const { data: docs = [], isLoading } = useQuery({
     queryKey: ['snp-documents', standardId, subtaskId ?? 'all'],
     queryFn: async (): Promise<SnpDocument[]> => {
-      let q = snpDb.from('snp_documents').select('*').eq('standard_id', standardId).order('created_at', { ascending: false });
+      let q = snpDb.from('snp_documents').select('*').eq('standard_id', standardId).eq('ready', true).order('created_at', { ascending: false });
       if (subtaskId) q = q.eq('subtask_id', subtaskId);
       const { data, error } = await q;
       if (error) throw error;
@@ -77,10 +96,12 @@ export function DocumentsPanel({
   const typeName = (id: string | null) => types.find((t) => t.id === id)?.name;
   const typesOf = (catId: string) => types.filter((t) => t.category_id === catId);
 
-  const filtered = useMemo(
-    () => docs.filter((d) => (filterCat === ALL || d.category_id === filterCat) && (filterType === ALL || d.type_id === filterType)),
-    [docs, filterCat, filterType],
-  );
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return docs.filter((d) =>
+      (filterCat === ALL || d.category_id === filterCat) && (filterType === ALL || d.type_id === filterType) &&
+      (!q || `${d.title} ${d.file_name} ${d.description ?? ''} ${d.uploader_name ?? ''}`.toLowerCase().includes(q)));
+  }, [docs, filterCat, filterType, search]);
 
   const resetForm = () => {
     setForm({ title: '', description: '', categoryId: NONE, typeId: NONE });
@@ -100,43 +121,58 @@ export function DocumentsPanel({
   const uploadMutation = useMutation({
     mutationFn: async () => {
       if (!file) throw new Error('Pilih file terlebih dahulu');
-      const school = schoolId ?? authSchoolId;
-      if (!school) throw new Error('Sekolah tidak ditemukan');
-      const path = `${school}/${standardId}/${crypto.randomUUID()}-${safeName(file.name)}`;
-      const { error: upErr } = await snpDb.storage.from(SNP_BUCKET).upload(path, file, { contentType: file.type || undefined });
-      if (upErr) throw upErr;
-      const { error } = await snpDb.from('snp_documents').insert({
+      setProgress(0);
+      const buf = new Uint8Array(await file.arrayBuffer());
+      const total = Math.max(1, Math.ceil(buf.length / RAW_CHUNK));
+      // 1) catat dokumen (belum siap dipakai sampai semua potongan masuk)
+      const { data: doc, error } = await snpDb.from('snp_documents').insert({
         standard_id: standardId,
         subtask_id: subtaskId ?? null,
         category_id: form.categoryId === NONE ? null : form.categoryId,
         type_id: form.typeId === NONE ? null : form.typeId,
         title: form.title.trim() || file.name,
         description: form.description.trim() || null,
-        file_path: path, file_name: file.name, file_size: file.size, mime_type: file.type || null,
-      });
-      if (error) {
-        await snpDb.storage.from(SNP_BUCKET).remove([path]); // jangan tinggalkan file yatim
-        throw error;
+        file_path: `db:${crypto.randomUUID()}`, file_name: file.name, file_size: file.size, mime_type: file.type || null,
+        storage_kind: 'db', chunk_count: total, ready: false,
+      }).select('id').single();
+      if (error) throw error;
+      try {
+        // 2) kirim potongan berkas
+        for (let i = 0; i < total; i += CHUNKS_PER_REQUEST) {
+          const rows = [];
+          for (let k = i; k < Math.min(total, i + CHUNKS_PER_REQUEST); k++) {
+            rows.push({ document_id: doc.id, idx: k, standard_id: standardId, data: bytesToBase64(buf.subarray(k * RAW_CHUNK, (k + 1) * RAW_CHUNK)) });
+          }
+          const { error: e2 } = await snpDb.from('snp_file_chunks').insert(rows);
+          if (e2) throw e2;
+          setProgress(Math.round((Math.min(total, i + CHUNKS_PER_REQUEST) / total) * 100));
+        }
+        // 3) tandai siap
+        const { error: e3 } = await snpDb.from('snp_documents').update({ ready: true }).eq('id', doc.id);
+        if (e3) throw e3;
+      } catch (e) {
+        await snpDb.from('snp_documents').delete().eq('id', doc.id); // potongan ikut terhapus (cascade)
+        throw e;
       }
     },
     onSuccess: () => {
-      toast.success('Dokumen berhasil diunggah');
+      toast.success('Berkas berhasil diunggah ke repositori');
       setUploadOpen(false);
       resetForm();
       queryClient.invalidateQueries({ queryKey: ['snp-documents'] });
       queryClient.invalidateQueries({ queryKey: ['snp-overview'] });
     },
-    onError: (e: unknown) => toast.error(e instanceof Error && e.message ? `Gagal mengunggah: ${e.message}` : 'Gagal mengunggah dokumen'),
+    onError: (e: unknown) => toast.error(e instanceof Error && e.message ? `Gagal mengunggah: ${e.message}` : 'Gagal mengunggah berkas'),
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (d: SnpDocument) => {
       const { error } = await snpDb.from('snp_documents').delete().eq('id', d.id);
       if (error) throw error;
-      await snpDb.storage.from(SNP_BUCKET).remove([d.file_path]);
+      if (d.storage_kind !== 'db') await snpDb.storage.from(SNP_BUCKET).remove([d.file_path]);
     },
     onSuccess: () => {
-      toast.success('Dokumen dihapus');
+      toast.success('Berkas dihapus');
       setDeleteTarget(null);
       queryClient.invalidateQueries({ queryKey: ['snp-documents'] });
       queryClient.invalidateQueries({ queryKey: ['snp-overview'] });
@@ -147,11 +183,28 @@ export function DocumentsPanel({
   const download = async (d: SnpDocument) => {
     setDownloading(d.id);
     try {
-      const { data, error } = await snpDb.storage.from(SNP_BUCKET).createSignedUrl(d.file_path, 120, { download: d.file_name });
-      if (error || !data?.signedUrl) throw error ?? new Error('no url');
-      window.open(data.signedUrl, '_blank', 'noopener');
+      if (d.storage_kind === 'db') {
+        const parts: Uint8Array[] = [];
+        const total = d.chunk_count ?? 0;
+        for (let from = 0; from < total; from += 8) {
+          const { data, error } = await snpDb.from('snp_file_chunks').select('idx, data').eq('document_id', d.id)
+            .gte('idx', from).lt('idx', from + 8).order('idx', { ascending: true });
+          if (error) throw error;
+          (data ?? []).forEach((r: { data: string }) => parts.push(base64ToBytes(r.data)));
+        }
+        if (parts.length !== total) throw new Error('Potongan berkas tidak lengkap');
+        const blob = new Blob(parts as BlobPart[], { type: d.mime_type || 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = d.file_name; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+      } else {
+        const { data, error } = await snpDb.storage.from(SNP_BUCKET).createSignedUrl(d.file_path, 120, { download: d.file_name });
+        if (error || !data?.signedUrl) throw error ?? new Error('no url');
+        window.open(data.signedUrl, '_blank', 'noopener');
+      }
     } catch {
-      toast.error('Gagal membuka dokumen');
+      toast.error('Gagal membuka berkas');
     } finally {
       setDownloading(null);
     }
@@ -182,6 +235,13 @@ export function DocumentsPanel({
             </SelectContent>
           </Select>
         </div>
+        <div className="relative min-w-[180px] flex-1 sm:max-w-xs">
+          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari berkas…" className="pl-8 pr-8" />
+          {search && (
+            <button type="button" aria-label="Hapus pencarian" onClick={() => setSearch('')} className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+          )}
+        </div>
         <div className="ml-auto flex flex-wrap gap-2">
           {isAdmin && (
             <Button variant="outline" size="sm" className="gap-1" onClick={() => setManageOpen(true)}>
@@ -189,7 +249,7 @@ export function DocumentsPanel({
             </Button>
           )}
           <Button size="sm" className="gap-1" onClick={() => { resetForm(); setUploadOpen(true); }}>
-            <Plus className="h-4 w-4" /> Unggah Dokumen
+            <Plus className="h-4 w-4" /> Unggah Berkas
           </Button>
         </div>
       </div>
@@ -197,7 +257,7 @@ export function DocumentsPanel({
       {isLoading ? (
         <div className="py-10 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></div>
       ) : filtered.length === 0 ? (
-        <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">Belum ada dokumen.</CardContent></Card>
+        <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">{search ? 'Tidak ada berkas yang cocok.' : 'Belum ada berkas di repositori.'}</CardContent></Card>
       ) : (
         <div className="space-y-2">
           {filtered.map((d) => (
@@ -238,7 +298,7 @@ export function DocumentsPanel({
       <Dialog open={uploadOpen} onOpenChange={(o) => { if (!uploadMutation.isPending) setUploadOpen(o); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Unggah Dokumen</DialogTitle>
+            <DialogTitle>Unggah ke Repositori</DialogTitle>
             <DialogDescription>Maksimal {SNP_MAX_FILE_MB} MB. Format: {ALLOWED_EXT.join(', ')}.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -282,6 +342,9 @@ export function DocumentsPanel({
               <Label>Keterangan (opsional)</Label>
               <Textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
             </div>
+            {uploadMutation.isPending && (
+              <div className="space-y-1"><Progress value={progress} /><p className="text-xs text-muted-foreground">Mengunggah… {progress}%</p></div>
+            )}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setUploadOpen(false)} disabled={uploadMutation.isPending}>Batal</Button>
               <Button onClick={() => uploadMutation.mutate()} disabled={!file || uploadMutation.isPending} className="gap-2">
@@ -297,7 +360,7 @@ export function DocumentsPanel({
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Hapus dokumen?</AlertDialogTitle>
+            <AlertDialogTitle>Hapus berkas?</AlertDialogTitle>
             <AlertDialogDescription>"{deleteTarget?.title}" akan dihapus permanen.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

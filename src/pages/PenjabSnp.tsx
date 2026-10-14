@@ -91,7 +91,7 @@ export default function PenjabSnp() {
                         <Progress value={pct} className="h-1.5" />
                       </div>
                       <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1"><FileText className="h-3.5 w-3.5" /> {docCount} dokumen</span>
+                        <span className="flex items-center gap-1"><FileText className="h-3.5 w-3.5" /> {docCount} berkas</span>
                         <span className="flex items-center gap-1"><Wallet className="h-3.5 w-3.5" /> {latest ? formatRupiah(Number(latest.total_amount)) : 'RKA belum diimport'}</span>
                       </div>
                     </CardContent>

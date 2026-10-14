@@ -21,6 +21,7 @@ export interface SnpDocument {
   id: string; standard_id: string; subtask_id: string | null; category_id: string | null; type_id: string | null;
   title: string; description: string | null; file_path: string; file_name: string; file_size: number | null;
   mime_type: string | null; uploaded_by: string | null; uploader_name: string | null; from_admin: boolean; created_at: string;
+  storage_kind?: 'bucket' | 'db'; chunk_count?: number; ready?: boolean;
 }
 export interface SnpRkaBatch {
   id: string; standard_id: string; fiscal_year: string | null; file_name: string | null;
