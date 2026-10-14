@@ -99,6 +99,8 @@ const GuruPiketDashboard = lazy(() => import("./pages/GuruPiketDashboard"));
 const EkskulJournal = lazy(() => import("./pages/EkskulJournal"));
 const PenjabSnp = lazy(() => import("./pages/PenjabSnp"));
 const PenjabSnpDetail = lazy(() => import("./pages/PenjabSnpDetail"));
+const AnggaranPenjab = lazy(() => import("./pages/AnggaranPenjab"));
+const AnggaranPenjabDetail = lazy(() => import("./pages/AnggaranPenjabDetail"));
 const EkskulMembers = lazy(() => import("./pages/EkskulMembers"));
 const EkskulCoaches = lazy(() => import("./pages/EkskulCoaches"));
 const EkskulTypes = lazy(() => import("./pages/EkskulTypes"));
@@ -339,6 +341,8 @@ const App = () => (
               <Route path="/buku-tamu" element={<ProtectedRoute allowedRoles={['guru_piket', 'admin']}><BukuTamu /></ProtectedRoute>} />
               <Route path="/penjab-snp" element={<PenjabSnpRoute><PenjabSnp /></PenjabSnpRoute>} />
               <Route path="/penjab-snp/:code" element={<PenjabSnpRoute><PenjabSnpDetail /></PenjabSnpRoute>} />
+              <Route path="/anggaran-penjab" element={<ProtectedRoute allowedRoles={['admin', 'bendahara', 'super_admin']}><AnggaranPenjab /></ProtectedRoute>} />
+              <Route path="/anggaran-penjab/:code" element={<ProtectedRoute allowedRoles={['admin', 'bendahara', 'super_admin']}><AnggaranPenjabDetail /></ProtectedRoute>} />
               <Route path="/ekskul-journal" element={<EkskulAccessRoute><EkskulJournal /></EkskulAccessRoute>} />
               <Route path="/ekskul-members" element={<EkskulAccessRoute><EkskulMembers /></EkskulAccessRoute>} />
               <Route path="/ekskul-coaches" element={<ProtectedRoute allowedRoles={['kesiswaan', 'admin']}><EkskulCoaches /></ProtectedRoute>} />

@@ -305,6 +305,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
       label: 'Standar Pendidikan',
       items: [
         { icon: ClipboardList, label: 'Penjab Standar (SNP)', href: '/penjab-snp' },
+        { icon: Wallet, label: 'Anggaran Penjab', href: '/anggaran-penjab' },
       ],
     },
     {
@@ -486,6 +487,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: Landmark, label: 'Manajemen Pajak', href: '/tax-management' },
     { icon: FileCheck, label: 'Pemeriksaan Kas', href: '/cash-audit' },
     { icon: Wallet, label: 'RKAS', href: '/rkas' },
+    { icon: ClipboardList, label: 'Anggaran Penjab', href: '/anggaran-penjab' },
     { icon: FileBarChart, label: 'SPJ / BKU', href: '/spj' },
     { icon: BarChart3, label: 'Kode Anggaran', href: '/kode-label-settings' },
     { icon: Settings, label: 'Pengaturan Bendahara', href: '/bendahara-settings' },
