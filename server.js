@@ -1160,10 +1160,28 @@ app.post('/admin/backup/run', requireAdmin, function(req, res) {
     res.json({ status: 'success', message: 'Backup dimulai. Hasilnya muncul di riwayat di bawah.' });
 });
 
+// ===== Snapshot jumlah siswa akhir bulan (riwayat per rombel/tingkat) =====
+// Dijalankan pada hari terakhir tiap bulan pukul 23:50 WIB; RPC bersifat idempotent (menimpa snapshot periode yang sama).
+let studentSnapshotDoneDate = '';
+async function checkStudentSnapshot() {
+    try {
+        const now = wibNow();
+        if (studentSnapshotDoneDate === now.date || now.minutes < 23 * 60 + 50) return;
+        const y = parseInt(now.date.slice(0, 4), 10), m = parseInt(now.date.slice(5, 7), 10), d = parseInt(now.date.slice(8, 10), 10);
+        const lastDay = new Date(y, m, 0).getDate();
+        if (d !== lastDay) return;
+        studentSnapshotDoneDate = now.date;
+        const r = await supabase.rpc('capture_all_student_snapshots', { _period: now.date });
+        if (r.error) { studentSnapshotDoneDate = ''; console.error('[SNAPSHOT SISWA] gagal:', r.error.message); return; }
+        console.log('[SNAPSHOT SISWA] ' + now.date + ': ' + r.data + ' rombel direkam');
+    } catch (e) { studentSnapshotDoneDate = ''; console.error('[SNAPSHOT SISWA ERROR]:', e.message); }
+}
+
 const PORT = parseInt(process.env.PORT || '3000', 10);
 app.listen(PORT, () => {
     console.log('Server API berjalan di port ' + PORT);
     startBot();
     setInterval(runTeacherReminders, 60 * 1000);
     setInterval(checkBackupSchedule, 60 * 1000);
+    setInterval(checkStudentSnapshot, 60 * 1000);
 });

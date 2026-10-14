@@ -11,6 +11,9 @@ import {
   Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
+import { StudentHistoryPanel } from "@/components/dashboard/StudentHistoryPanel";
+import { useEnsureStudentSnapshots } from "@/hooks/useStudentSnapshots";
 
 // =====================================================================
 // TYPES
@@ -93,7 +96,10 @@ export const StudentGenderStatsCard = memo(function StudentGenderStatsCard({
   byClass = [],
   byGrade = [],
 }: Props) {
-  const [tab, setTab] = useState<"rombel" | "tingkat">("rombel");
+  const [tab, setTab] = useState<"rombel" | "tingkat" | "riwayat">("rombel");
+  const { userRole } = useAuth();
+  const showHistory = !!userRole && !["teacher", "siswa", "guru_piket"].includes(userRole);
+  useEnsureStudentSnapshots(userRole === "admin" || userRole === "super_admin" || userRole === "kesiswaan");
 
   const malePercent = totalStudents > 0
     ? Math.round((totalMale / totalStudents) * 1000) / 10
@@ -240,6 +246,14 @@ export const StudentGenderStatsCard = memo(function StudentGenderStatsCard({
             >
               Per Tingkat
             </TabsTrigger>
+            {showHistory && (
+              <TabsTrigger
+                value="riwayat"
+                className="flex-1 h-9 rounded-lg text-xs sm:text-sm font-semibold data-[state=active]:bg-background data-[state=active]:shadow-md data-[state=active]:text-primary transition-all"
+              >
+                Riwayat Bulanan
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <AnimatePresence mode="wait">
@@ -268,6 +282,12 @@ export const StudentGenderStatsCard = memo(function StudentGenderStatsCard({
                   emptyMessage="Belum ada data tingkat"
                 />
               </TabsContent>
+
+              {showHistory && (
+                <TabsContent value="riwayat" className="mt-0">
+                  <StudentHistoryPanel />
+                </TabsContent>
+              )}
             </motion.div>
           </AnimatePresence>
         </Tabs>
