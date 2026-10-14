@@ -99,7 +99,11 @@ Deno.serve(async (req) => {
         school_id: schoolId
       });
 
-    if (roleError) throw roleError;
+    if (roleError) {
+      // Batalkan akun yang sudah terbuat agar tidak menjadi akun yatim (email "sudah terdaftar" saat dicoba ulang)
+      await supabaseClient.auth.admin.deleteUser(userData.user.id);
+      throw roleError;
+    }
 
     console.log('Staff created successfully:', email, 'with role:', role, 'school_id:', schoolId);
 

@@ -49,6 +49,17 @@ const roleLabels: Record<StaffRole, { label: string; description: string; icon: 
   },
 };
 
+/** Terjemahkan pesan error server ke bahasa yang jelas bagi admin. */
+const friendlyStaffError = (msg: string): string => {
+  const m = msg.toLowerCase();
+  if (m.includes('already been registered') || m.includes('already registered') || m.includes('email_exists')) return 'Email sudah terdaftar. Gunakan email lain.';
+  if (m.includes('invalid input value for enum') || m.includes('app_role')) return 'Peran ini belum tersedia di database. Jalankan migrasi role terbaru (pembina_ekskul / kesiswaan), lalu coba lagi.';
+  if (m.includes('password') && (m.includes('least') || m.includes('weak') || m.includes('short'))) return 'Password terlalu pendek/lemah. Gunakan minimal 6 karakter.';
+  if (m.includes('unable to validate email') || m.includes('invalid format')) return 'Format email tidak valid.';
+  if (m.includes('admin access required') || m.includes('no authorization')) return 'Hanya admin yang dapat membuat akun staff. Silakan login ulang.';
+  return msg;
+};
+
 export default function StaffRegistration() {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -92,11 +103,20 @@ export default function StaffRegistration() {
       });
 
       if (response.error) {
-        throw new Error(response.error.message || 'Gagal membuat akun staff');
+        // Edge function mengembalikan status non-2xx: ambil pesan asli dari body respons
+        let msg = response.error.message || 'Gagal membuat akun staff';
+        try {
+          const ctx = (response.error as any).context;
+          if (ctx && typeof ctx.json === 'function') {
+            const body = await ctx.json();
+            if (body?.error) msg = String(body.error);
+          }
+        } catch { /* abaikan, pakai pesan bawaan */ }
+        throw new Error(friendlyStaffError(msg));
       }
 
       if (response.data?.error) {
-        throw new Error(response.data.error);
+        throw new Error(friendlyStaffError(String(response.data.error)));
       }
 
       toast({
