@@ -19,6 +19,7 @@ import { z } from 'zod';
 import { ImportStudents } from '@/components/ImportStudents';
 import { ClassPromotionDialog } from '@/components/ClassPromotionDialog';
 import { GraduateStudentsDialog } from '@/components/GraduateStudentsDialog';
+import { ClassHistoryReportDialog, StudentClassHistoryButton } from '@/components/StudentClassHistory';
 import * as XLSX from 'xlsx';
 import { useNavigate } from 'react-router-dom';
 import { HighlightText } from '@/components/HighlightText';
@@ -1076,6 +1077,7 @@ function StudentsPage() {
             <Button variant="outline" onClick={handleExportStudents}><Download className="mr-2 h-4 w-4" /> Export</Button>
             <ClassPromotionDialog />
             <GraduateStudentsDialog />
+            <ClassHistoryReportDialog />
             <Dialog open={isDialogOpen} onOpenChange={handleDialogClose}>
               <DialogTrigger asChild>
                 <Button><Plus className="mr-2 h-4 w-4" /> Tambah Siswa</Button>
@@ -1554,6 +1556,7 @@ function StudentsPage() {
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-2">
+                              <StudentClassHistoryButton studentId={student.id} studentName={student.full_name} />
                               <Button variant="ghost" size="icon" onClick={() => { setEditingStudent(student); setIsDialogOpen(true); }}><Pencil className="h-4 w-4" /></Button>
                               <Button variant="ghost" size="icon" onClick={() => { if (confirm('Yakin ingin menghapus siswa ini?')) deleteStudentMutation.mutate(student.id); }}>
                                 <Trash2 className="h-4 w-4 text-destructive" />

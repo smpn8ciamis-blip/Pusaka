@@ -69,15 +69,12 @@ export function GraduateStudentsDialog() {
     mutationFn: async (studentIds: string[]) => {
       const today = new Date().toISOString().split("T")[0];
 
-      // Update students to alumni
-      const { error: updateError } = await supabase
-        .from("students")
-        .update({
-          is_alumni: true,
-          graduation_date: today,
-          class_id: null,
-        })
-        .in("id", studentIds);
+      // Luluskan lewat RPC agar riwayat rombel (outcome 'lulus') ikut tercatat
+      const { error: updateError } = await (supabase as any).rpc("promote_students", {
+        _student_ids: studentIds,
+        _target_class_id: null,
+        _outcome: "lulus",
+      });
 
       if (updateError) throw updateError;
 

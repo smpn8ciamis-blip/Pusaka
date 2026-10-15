@@ -27,6 +27,8 @@ export const ClassPromotionDialog = () => {
   const [sourceClassId, setSourceClassId] = useState<string>('');
   const [targetClassId, setTargetClassId] = useState<string>('');
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
+  const [stayIds, setStayIds] = useState<string[]>([]);          // siswa tinggal kelas (tidak ikut naik)
+  const [expandedClass, setExpandedClass] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const { data: academicYears } = useQuery({
@@ -84,25 +86,20 @@ export const ClassPromotionDialog = () => {
       if (selectedStudents.length === 0 || (!isGraduating && !targetClassId)) {
         throw new Error('Pilih siswa dan kelas tujuan');
       }
-      const today = new Date().toISOString().split('T')[0];
-      const patch = isGraduating
-        ? { class_id: null, is_alumni: true, graduation_date: today }   // sama dengan menu Luluskan Siswa
-        : { class_id: targetClassId };
-      // hanya siswa aktif & bukan alumni yang diproses
-      const { data, error } = await supabase
-        .from('students')
-        .update(patch)
-        .in('id', selectedStudents)
-        .eq('status', 'aktif')
-        .eq('is_alumni', false)
-        .select('id');
+      // RPC mencatat riwayat rombel sekaligus memindahkan siswa (hanya siswa aktif & bukan alumni)
+      const { data, error } = await (supabase as any).rpc('promote_students', {
+        _student_ids: selectedStudents,
+        _target_class_id: isGraduating ? null : targetClassId,
+        _outcome: isGraduating ? 'lulus' : 'naik',
+      });
       if (error) throw error;
-      return data?.length ?? 0;
+      return (data as number) ?? 0;
     },
     onSuccess: (n) => {
       queryClient.invalidateQueries({ queryKey: ['students'] });
       queryClient.invalidateQueries({ queryKey: ['students-for-promotion'] });
-      queryClient.invalidateQueries({ queryKey: ['promotion-active-counts'] });
+      queryClient.invalidateQueries({ queryKey: ['promotion-active-students'] });
+      queryClient.invalidateQueries({ queryKey: ['student-class-history'] });
       const sourceClass = classes?.find(c => c.id === sourceClassId);
       const isGraduating = sourceClass?.grade === 9;
       toast.success(
@@ -120,38 +117,53 @@ export const ClassPromotionDialog = () => {
     },
   });
 
-  // Jumlah siswa aktif per kelas tahun aktif (untuk pratinjau kenaikan massal)
-  const { data: activeCounts } = useQuery({
-    queryKey: ['promotion-active-counts', activeYear?.year],
+  // Siswa aktif di kelas tahun aktif (untuk pratinjau & pengecualian tinggal kelas)
+  const { data: activeStudents } = useQuery({
+    queryKey: ['promotion-active-students', activeYear?.year],
     enabled: isOpen && !!activeYear?.year && hasNewYear && !!classes,
     queryFn: async () => {
       const ids = (classes ?? []).filter(c => c.academic_year === activeYear!.year).map(c => c.id);
-      const counts = new Map<string, number>();
+      const rows: { id: string; nis: string; full_name: string; class_id: string }[] = [];
       for (let from = 0; ids.length > 0; from += 1000) {
         const { data, error } = await supabase
-          .from('students').select('class_id')
+          .from('students').select('id, nis, full_name, class_id')
           .in('class_id', ids).eq('status', 'aktif').eq('is_alumni', false)
+          .order('full_name')
           .range(from, from + 999);
         if (error) throw error;
-        (data ?? []).forEach(r => counts.set(r.class_id as string, (counts.get(r.class_id as string) ?? 0) + 1));
+        rows.push(...((data ?? []) as any));
         if (!data || data.length < 1000) break;
       }
-      return counts;
+      return rows;
     },
+  });
+  const studentsByClass = new Map<string, { id: string; nis: string; full_name: string }[]>();
+  (activeStudents ?? []).forEach(st => {
+    const arr = studentsByClass.get(st.class_id) ?? [];
+    arr.push(st);
+    studentsByClass.set(st.class_id, arr);
   });
 
   // Rencana kenaikan massal: tiap kelas aktif -> kelas tahun baru (tingkat+1, rombel sama) / lulus
   const plan = (classes ?? [])
     .filter(c => c.academic_year === activeYear?.year)
     .map(c => {
-      const count = activeCounts?.get(c.id) ?? 0;
-      if (c.grade === 9) return { cls: c, count, kind: 'lulus' as const, target: null };
+      const list = studentsByClass.get(c.id) ?? [];
+      const count = list.length;
+      const staying = list.filter(st => stayIds.includes(st.id));
+      const moving = list.filter(st => !stayIds.includes(st.id));
+      // kelas untuk siswa tinggal kelas: tingkat sama, rombel sama, tahun baru (jika ada tepat satu)
+      const repeatCand = (classes ?? []).filter(t =>
+        t.academic_year === newYear && t.grade === c.grade && classSection(t.name) === classSection(c.name));
+      const repeatTarget = repeatCand.length === 1 ? repeatCand[0] : null;
+      if (c.grade === 9) return { cls: c, count, kind: 'lulus' as const, target: null, staying, moving, repeatTarget };
       const cand = (classes ?? []).filter(t =>
         t.academic_year === newYear && t.grade === c.grade + 1 && classSection(t.name) === classSection(c.name));
-      return { cls: c, count, kind: cand.length === 1 ? ('naik' as const) : ('tidak-cocok' as const), target: cand.length === 1 ? cand[0] : null, ambiguous: cand.length > 1 };
+      return { cls: c, count, kind: cand.length === 1 ? ('naik' as const) : ('tidak-cocok' as const), target: cand.length === 1 ? cand[0] : null, ambiguous: cand.length > 1, staying, moving, repeatTarget };
     })
     .filter(p => p.count > 0)
     .sort((a, b) => a.cls.grade - b.cls.grade || a.cls.name.localeCompare(b.cls.name, 'id', { numeric: true }));
+  const totalStaying = plan.filter(p => p.kind !== 'tidak-cocok').reduce((a, p) => a + p.staying.length, 0);
   const unmatched = plan.filter(p => p.kind === 'tidak-cocok');
 
   const promoteAllMutation = useMutation({
@@ -159,41 +171,55 @@ export const ClassPromotionDialog = () => {
       if (!activeYear?.year || !newYear) {
         throw new Error('Tahun ajaran tidak valid');
       }
-      const today = new Date().toISOString().split('T')[0];
       let totalPromoted = 0;
       let totalGraduated = 0;
+      let totalRepeated = 0;
       const failed: string[] = [];
 
       for (const item of plan) {
         if (item.kind === 'tidak-cocok') continue; // dilaporkan di pratinjau; siswa dibiarkan di kelas asal
-        const patch = item.kind === 'lulus'
-          ? { class_id: null, is_alumni: true, graduation_date: today }
-          : { class_id: item.target!.id };
-        const { data, error } = await supabase
-          .from('students')
-          .update(patch)
-          .eq('class_id', item.cls.id)
-          .eq('status', 'aktif')        // siswa mutasi/keluar tidak ikut dinaikkan
-          .eq('is_alumni', false)
-          .select('id');
-        if (error) { failed.push(`${item.cls.name}: ${error.message}`); continue; }
-        if (item.kind === 'lulus') totalGraduated += data?.length ?? 0;
-        else totalPromoted += data?.length ?? 0;
+        try {
+          if (item.moving.length > 0) {
+            const { data, error } = await (supabase as any).rpc('promote_students', {
+              _student_ids: item.moving.map(st => st.id),
+              _target_class_id: item.kind === 'lulus' ? null : item.target!.id,
+              _outcome: item.kind === 'lulus' ? 'lulus' : 'naik',
+            });
+            if (error) throw error;
+            if (item.kind === 'lulus') totalGraduated += (data as number) ?? 0;
+            else totalPromoted += (data as number) ?? 0;
+          }
+          if (item.staying.length > 0) {
+            const { data, error } = await (supabase as any).rpc('promote_students', {
+              _student_ids: item.staying.map(st => st.id),
+              _target_class_id: item.repeatTarget?.id ?? null,   // null = tetap di kelas lama
+              _outcome: 'tinggal',
+            });
+            if (error) throw error;
+            totalRepeated += (data as number) ?? 0;
+          }
+        } catch (e: any) {
+          failed.push(`${item.cls.name}: ${e.message}`);
+        }
       }
-      return { totalPromoted, totalGraduated, failed, skipped: unmatched.reduce((a, p) => a + p.count, 0) };
+      return { totalPromoted, totalGraduated, totalRepeated, failed, skipped: unmatched.reduce((a, p) => a + p.count, 0) };
     },
-    onSuccess: ({ totalPromoted, totalGraduated, failed, skipped }) => {
+    onSuccess: ({ totalPromoted, totalGraduated, totalRepeated, failed, skipped }) => {
       queryClient.invalidateQueries({ queryKey: ['students'] });
       queryClient.invalidateQueries({ queryKey: ['students-for-promotion'] });
-      queryClient.invalidateQueries({ queryKey: ['promotion-active-counts'] });
+      queryClient.invalidateQueries({ queryKey: ['promotion-active-students'] });
+      queryClient.invalidateQueries({ queryKey: ['student-class-history'] });
 
       const messages = [];
       if (totalPromoted > 0) messages.push(`${totalPromoted} siswa naik kelas`);
       if (totalGraduated > 0) messages.push(`${totalGraduated} siswa lulus sebagai alumni`);
+      if (totalRepeated > 0) messages.push(`${totalRepeated} siswa tinggal kelas`);
       toast.success(messages.join(' dan ') || 'Tidak ada siswa yang diproses');
       if (skipped > 0) toast.warning(`${skipped} siswa tidak diproses karena kelas tujuan tidak ditemukan. Buat kelas tahun ${newYear} lalu ulangi.`);
       if (failed.length > 0) toast.error(`Sebagian kelas gagal diproses: ${failed.join('; ')}`);
       setShowConfirmDialog(false);
+      setStayIds([]);
+      setExpandedClass(null);
       setIsOpen(false);
       setSourceClassId('');
       setTargetClassId('');
@@ -288,18 +314,49 @@ export const ClassPromotionDialog = () => {
                         ⚠️ Siswa kelas 9 akan otomatis ditandai sebagai alumni dan lulus.
                       </p>
                       <p>Hanya siswa <strong>aktif</strong> yang diproses (siswa mutasi/keluar tidak ikut).</p>
-                      <div className="max-h-52 overflow-y-auto rounded-md border text-xs">
+                      <p className="text-xs">Klik kelas untuk menandai siswa yang <strong>tinggal kelas</strong> (tidak naik). Mereka dipindahkan ke rombel tingkat yang sama di tahun {newYear} (atau tetap di kelas lama bila rombel itu belum ada) dan dicatat di riwayat.</p>
+                      <div className="max-h-64 overflow-y-auto rounded-md border text-xs">
                         {plan.length === 0 ? (
                           <p className="p-2 text-muted-foreground">Tidak ada siswa aktif di kelas tahun {activeYear?.year}.</p>
                         ) : plan.map((p) => (
-                          <div key={p.cls.id} className="flex items-center justify-between gap-2 border-b px-2 py-1.5 last:border-b-0">
-                            <span className="font-medium">{p.cls.name} <span className="text-muted-foreground">({p.count})</span></span>
-                            <span className={p.kind === 'tidak-cocok' ? 'text-destructive' : 'text-muted-foreground'}>
-                              {p.kind === 'lulus' ? 'Lulus (alumni)' : p.kind === 'naik' ? `→ ${p.target!.name}` : (p as any).ambiguous ? 'Kelas tujuan ganda' : 'Kelas tujuan tidak ada'}
-                            </span>
+                          <div key={p.cls.id} className="border-b last:border-b-0">
+                            <button
+                              type="button"
+                              className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-muted/50"
+                              onClick={() => setExpandedClass(expandedClass === p.cls.id ? null : p.cls.id)}
+                            >
+                              <span className="font-medium">
+                                {p.cls.name} <span className="text-muted-foreground">({p.count})</span>
+                                {p.staying.length > 0 && <span className="ml-1 text-yellow-700">· {p.staying.length} tinggal</span>}
+                              </span>
+                              <span className={p.kind === 'tidak-cocok' ? 'text-destructive' : 'text-muted-foreground'}>
+                                {p.kind === 'lulus' ? 'Lulus (alumni)' : p.kind === 'naik' ? `→ ${p.target!.name}` : (p as any).ambiguous ? 'Kelas tujuan ganda' : 'Kelas tujuan tidak ada'}
+                              </span>
+                            </button>
+                            {expandedClass === p.cls.id && p.kind !== 'tidak-cocok' && (
+                              <div className="max-h-40 overflow-y-auto bg-muted/30 px-2 py-1.5 space-y-1">
+                                {(studentsByClass.get(p.cls.id) ?? []).map(st => (
+                                  <label key={st.id} className="flex cursor-pointer items-center gap-2">
+                                    <Checkbox
+                                      checked={stayIds.includes(st.id)}
+                                      onCheckedChange={() => setStayIds(prev => prev.includes(st.id) ? prev.filter(i => i !== st.id) : [...prev, st.id])}
+                                    />
+                                    <span>{st.nis} - {st.full_name}</span>
+                                    {stayIds.includes(st.id) && <span className="text-yellow-700">tinggal kelas</span>}
+                                  </label>
+                                ))}
+                                <p className="pt-1 text-muted-foreground">
+                                  {p.kind === 'lulus' ? 'Siswa yang dicentang tidak lulus' : 'Siswa yang dicentang tidak naik'}
+                                  {p.repeatTarget ? ` dan dipindah ke ${p.repeatTarget.name}.` : ' dan tetap di kelas lama (rombel tahun baru belum ada).'}
+                                </p>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
+                      {totalStaying > 0 && (
+                        <p className="text-xs text-yellow-700">{totalStaying} siswa ditandai tinggal kelas.</p>
+                      )}
                       {unmatched.length > 0 && (
                         <p className="text-destructive text-xs">
                           {unmatched.reduce((a, p) => a + p.count, 0)} siswa di {unmatched.length} kelas TIDAK akan diproses karena kelas tujuan belum ada di tahun {newYear}.
