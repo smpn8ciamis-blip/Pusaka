@@ -12,6 +12,15 @@ import { ArrowUpCircle, AlertCircle, AlertTriangle } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
+/** "9B_2026/2027" -> "B"; "VIII-C 2025/2026" -> "C" (bagian rombel tanpa tingkat & tahun ajaran) */
+const classSection = (name: string): string =>
+  String(name ?? '')
+    .replace(/[\s_-]*\d{4}\s*[/-]\s*\d{4}\s*$/, '')
+    .trim()
+    .replace(/^(?:\d+|[IVX]+)[\s._-]*/i, '')
+    .trim()
+    .toUpperCase();
+
 export const ClassPromotionDialog = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
@@ -59,6 +68,8 @@ export const ClassPromotionDialog = () => {
         .from('students')
         .select('id, nis, full_name')
         .eq('class_id', sourceClassId)
+        .eq('status', 'aktif')
+        .eq('is_alumni', false)
         .order('full_name');
       if (error) throw error;
       return data;
@@ -68,44 +79,36 @@ export const ClassPromotionDialog = () => {
 
   const promoteMutation = useMutation({
     mutationFn: async () => {
-      if (selectedStudents.length === 0 || !targetClassId) {
-        throw new Error('Pilih siswa dan kelas tujuan');
-      }
-      
-      // Check if source class is grade 9 (graduating students)
       const sourceClass = classes?.find(c => c.id === sourceClassId);
       const isGraduating = sourceClass?.grade === 9;
-      
-      if (isGraduating) {
-        // Mark grade 9 students as alumni with graduation date
-        const { error } = await supabase
-          .from('students')
-          .update({ 
-            class_id: targetClassId,
-            is_alumni: true,
-            graduation_date: new Date().toISOString().split('T')[0]
-          })
-          .in('id', selectedStudents);
-        
-        if (error) throw error;
-      } else {
-        // Regular promotion for other grades
-        const { error } = await supabase
-          .from('students')
-          .update({ class_id: targetClassId })
-          .in('id', selectedStudents);
-        
-        if (error) throw error;
+      if (selectedStudents.length === 0 || (!isGraduating && !targetClassId)) {
+        throw new Error('Pilih siswa dan kelas tujuan');
       }
+      const today = new Date().toISOString().split('T')[0];
+      const patch = isGraduating
+        ? { class_id: null, is_alumni: true, graduation_date: today }   // sama dengan menu Luluskan Siswa
+        : { class_id: targetClassId };
+      // hanya siswa aktif & bukan alumni yang diproses
+      const { data, error } = await supabase
+        .from('students')
+        .update(patch)
+        .in('id', selectedStudents)
+        .eq('status', 'aktif')
+        .eq('is_alumni', false)
+        .select('id');
+      if (error) throw error;
+      return data?.length ?? 0;
     },
-    onSuccess: () => {
+    onSuccess: (n) => {
       queryClient.invalidateQueries({ queryKey: ['students'] });
+      queryClient.invalidateQueries({ queryKey: ['students-for-promotion'] });
+      queryClient.invalidateQueries({ queryKey: ['promotion-active-counts'] });
       const sourceClass = classes?.find(c => c.id === sourceClassId);
       const isGraduating = sourceClass?.grade === 9;
       toast.success(
-        isGraduating 
-          ? `${selectedStudents.length} siswa berhasil lulus dan ditandai sebagai alumni`
-          : `${selectedStudents.length} siswa berhasil naik kelas`
+        isGraduating
+          ? `${n} siswa berhasil lulus dan ditandai sebagai alumni`
+          : `${n} siswa berhasil naik kelas`
       );
       setIsOpen(false);
       setSourceClassId('');
@@ -117,76 +120,79 @@ export const ClassPromotionDialog = () => {
     },
   });
 
+  // Jumlah siswa aktif per kelas tahun aktif (untuk pratinjau kenaikan massal)
+  const { data: activeCounts } = useQuery({
+    queryKey: ['promotion-active-counts', activeYear?.year],
+    enabled: isOpen && !!activeYear?.year && hasNewYear && !!classes,
+    queryFn: async () => {
+      const ids = (classes ?? []).filter(c => c.academic_year === activeYear!.year).map(c => c.id);
+      const counts = new Map<string, number>();
+      for (let from = 0; ids.length > 0; from += 1000) {
+        const { data, error } = await supabase
+          .from('students').select('class_id')
+          .in('class_id', ids).eq('status', 'aktif').eq('is_alumni', false)
+          .range(from, from + 999);
+        if (error) throw error;
+        (data ?? []).forEach(r => counts.set(r.class_id as string, (counts.get(r.class_id as string) ?? 0) + 1));
+        if (!data || data.length < 1000) break;
+      }
+      return counts;
+    },
+  });
+
+  // Rencana kenaikan massal: tiap kelas aktif -> kelas tahun baru (tingkat+1, rombel sama) / lulus
+  const plan = (classes ?? [])
+    .filter(c => c.academic_year === activeYear?.year)
+    .map(c => {
+      const count = activeCounts?.get(c.id) ?? 0;
+      if (c.grade === 9) return { cls: c, count, kind: 'lulus' as const, target: null };
+      const cand = (classes ?? []).filter(t =>
+        t.academic_year === newYear && t.grade === c.grade + 1 && classSection(t.name) === classSection(c.name));
+      return { cls: c, count, kind: cand.length === 1 ? ('naik' as const) : ('tidak-cocok' as const), target: cand.length === 1 ? cand[0] : null, ambiguous: cand.length > 1 };
+    })
+    .filter(p => p.count > 0)
+    .sort((a, b) => a.cls.grade - b.cls.grade || a.cls.name.localeCompare(b.cls.name, 'id', { numeric: true }));
+  const unmatched = plan.filter(p => p.kind === 'tidak-cocok');
+
   const promoteAllMutation = useMutation({
     mutationFn: async () => {
       if (!activeYear?.year || !newYear) {
         throw new Error('Tahun ajaran tidak valid');
       }
-
+      const today = new Date().toISOString().split('T')[0];
       let totalPromoted = 0;
       let totalGraduated = 0;
+      const failed: string[] = [];
 
-      // Get all classes from active year
-      const activeClasses = classes?.filter(c => c.academic_year === activeYear.year) || [];
-      
-      for (const sourceClass of activeClasses) {
-        // Get all students in this class
-        const { data: studentsInClass, error: studentsError } = await supabase
+      for (const item of plan) {
+        if (item.kind === 'tidak-cocok') continue; // dilaporkan di pratinjau; siswa dibiarkan di kelas asal
+        const patch = item.kind === 'lulus'
+          ? { class_id: null, is_alumni: true, graduation_date: today }
+          : { class_id: item.target!.id };
+        const { data, error } = await supabase
           .from('students')
-          .select('id')
-          .eq('class_id', sourceClass.id);
-
-        if (studentsError || !studentsInClass || studentsInClass.length === 0) continue;
-
-        const studentIds = studentsInClass.map(s => s.id);
-
-        if (sourceClass.grade === 9) {
-          // Grade 9 students become alumni
-          const { error } = await supabase
-            .from('students')
-            .update({ 
-              class_id: null,
-              is_alumni: true,
-              graduation_date: new Date().toISOString().split('T')[0]
-            })
-            .in('id', studentIds);
-
-          if (!error) {
-            totalGraduated += studentIds.length;
-          }
-        } else {
-          // Find target class in new year (same grade + 1)
-          const targetGrade = sourceClass.grade + 1;
-          const targetClass = classes?.find(c => 
-            c.academic_year === newYear && 
-            c.grade === targetGrade &&
-            c.name.includes(sourceClass.name.replace(/\d+/, String(targetGrade)))
-          );
-
-          if (targetClass) {
-            const { error } = await supabase
-              .from('students')
-              .update({ class_id: targetClass.id })
-              .in('id', studentIds);
-
-            if (!error) {
-              totalPromoted += studentIds.length;
-            }
-          }
-        }
+          .update(patch)
+          .eq('class_id', item.cls.id)
+          .eq('status', 'aktif')        // siswa mutasi/keluar tidak ikut dinaikkan
+          .eq('is_alumni', false)
+          .select('id');
+        if (error) { failed.push(`${item.cls.name}: ${error.message}`); continue; }
+        if (item.kind === 'lulus') totalGraduated += data?.length ?? 0;
+        else totalPromoted += data?.length ?? 0;
       }
-
-      return { totalPromoted, totalGraduated };
+      return { totalPromoted, totalGraduated, failed, skipped: unmatched.reduce((a, p) => a + p.count, 0) };
     },
-    onSuccess: ({ totalPromoted, totalGraduated }) => {
+    onSuccess: ({ totalPromoted, totalGraduated, failed, skipped }) => {
       queryClient.invalidateQueries({ queryKey: ['students'] });
       queryClient.invalidateQueries({ queryKey: ['students-for-promotion'] });
-      
+      queryClient.invalidateQueries({ queryKey: ['promotion-active-counts'] });
+
       const messages = [];
       if (totalPromoted > 0) messages.push(`${totalPromoted} siswa naik kelas`);
       if (totalGraduated > 0) messages.push(`${totalGraduated} siswa lulus sebagai alumni`);
-      
-      toast.success(messages.join(' dan '));
+      toast.success(messages.join(' dan ') || 'Tidak ada siswa yang diproses');
+      if (skipped > 0) toast.warning(`${skipped} siswa tidak diproses karena kelas tujuan tidak ditemukan. Buat kelas tahun ${newYear} lalu ulangi.`);
+      if (failed.length > 0) toast.error(`Sebagian kelas gagal diproses: ${failed.join('; ')}`);
       setShowConfirmDialog(false);
       setIsOpen(false);
       setSourceClassId('');
@@ -281,7 +287,24 @@ export const ClassPromotionDialog = () => {
                       <p className="text-yellow-600 font-medium">
                         ⚠️ Siswa kelas 9 akan otomatis ditandai sebagai alumni dan lulus.
                       </p>
-                      <p>Operasi ini akan memproses seluruh siswa di semua kelas secara otomatis.</p>
+                      <p>Hanya siswa <strong>aktif</strong> yang diproses (siswa mutasi/keluar tidak ikut).</p>
+                      <div className="max-h-52 overflow-y-auto rounded-md border text-xs">
+                        {plan.length === 0 ? (
+                          <p className="p-2 text-muted-foreground">Tidak ada siswa aktif di kelas tahun {activeYear?.year}.</p>
+                        ) : plan.map((p) => (
+                          <div key={p.cls.id} className="flex items-center justify-between gap-2 border-b px-2 py-1.5 last:border-b-0">
+                            <span className="font-medium">{p.cls.name} <span className="text-muted-foreground">({p.count})</span></span>
+                            <span className={p.kind === 'tidak-cocok' ? 'text-destructive' : 'text-muted-foreground'}>
+                              {p.kind === 'lulus' ? 'Lulus (alumni)' : p.kind === 'naik' ? `→ ${p.target!.name}` : (p as any).ambiguous ? 'Kelas tujuan ganda' : 'Kelas tujuan tidak ada'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      {unmatched.length > 0 && (
+                        <p className="text-destructive text-xs">
+                          {unmatched.reduce((a, p) => a + p.count, 0)} siswa di {unmatched.length} kelas TIDAK akan diproses karena kelas tujuan belum ada di tahun {newYear}.
+                        </p>
+                      )}
                       <p className="font-semibold">Apakah Anda yakin ingin melanjutkan?</p>
                     </AlertDialogDescription>
                   </AlertDialogHeader>
@@ -291,7 +314,7 @@ export const ClassPromotionDialog = () => {
                     </AlertDialogCancel>
                     <AlertDialogAction
                       onClick={() => promoteAllMutation.mutate()}
-                      disabled={promoteAllMutation.isPending}
+                      disabled={promoteAllMutation.isPending || plan.length === 0 || plan.every(p => p.kind === 'tidak-cocok')}
                       className="bg-primary"
                     >
                       {promoteAllMutation.isPending ? 'Memproses...' : 'Ya, Naikkan Semua Siswa'}
@@ -368,6 +391,12 @@ export const ClassPromotionDialog = () => {
                 </ScrollArea>
               </div>
 
+              {sourceClass?.grade === 9 ? (
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>Siswa kelas 9 yang dipilih akan <strong>lulus</strong> dan ditandai sebagai alumni (tanpa kelas tujuan).</AlertDescription>
+                </Alert>
+              ) : (
               <div className="space-y-2">
                 <Label>Kelas Tujuan (Tahun Ajaran {newYear})</Label>
                 <Select value={targetClassId} onValueChange={setTargetClassId}>
@@ -393,13 +422,14 @@ export const ClassPromotionDialog = () => {
                   </SelectContent>
                 </Select>
               </div>
+              )}
 
                 <Button
                   onClick={() => promoteMutation.mutate()}
-                  disabled={promoteMutation.isPending || selectedStudents.length === 0 || !targetClassId}
+                  disabled={promoteMutation.isPending || selectedStudents.length === 0 || (sourceClass?.grade !== 9 && !targetClassId)}
                   className="w-full"
                 >
-                  {promoteMutation.isPending ? 'Memproses...' : `Naikkan ${selectedStudents.length} Siswa ke Tahun Ajaran ${newYear}`}
+                  {promoteMutation.isPending ? 'Memproses...' : sourceClass?.grade === 9 ? `Luluskan ${selectedStudents.length} Siswa` : `Naikkan ${selectedStudents.length} Siswa ke Tahun Ajaran ${newYear}`}
                 </Button>
               </>
             )}
