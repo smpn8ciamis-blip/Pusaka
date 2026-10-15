@@ -9,6 +9,7 @@ interface DataPaginationProps {
   pageSize: number;
   onPageChange: (page: number) => void;
   onPageSizeChange?: (size: number) => void;
+  pageSizeOptions?: number[];
 }
 
 export function DataPagination({
@@ -18,6 +19,7 @@ export function DataPagination({
   pageSize,
   onPageChange,
   onPageSizeChange,
+  pageSizeOptions = [5, 10, 25, 50],
 }: DataPaginationProps) {
   if (totalItems === 0) return null;
 
@@ -64,10 +66,9 @@ export function DataPagination({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="5">5</SelectItem>
-                <SelectItem value="10">10</SelectItem>
-                <SelectItem value="25">25</SelectItem>
-                <SelectItem value="50">50</SelectItem>
+                {Array.from(new Set([...pageSizeOptions, pageSize])).sort((a, b) => a - b).map((n) => (
+                  <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
