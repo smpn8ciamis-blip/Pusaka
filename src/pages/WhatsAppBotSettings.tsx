@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Loader2, Link2, Unlink, RefreshCw, Send, RotateCcw, Save, Copy } from 'lucide-react';
+import { Loader2, Link2, Unlink, RefreshCw, Send, RotateCcw, Save, Copy, Wand2 } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -598,6 +598,189 @@ function GroupRecapTab() {
   );
 }
 
+/* --------------------- Grup Kelas (rekap per kelas) --------------------- */
+interface ClassRow { id: string; name: string }
+interface ClassGroupRow { class_id: string; group_jid: string; group_name: string | null; enabled: boolean }
+
+/** "VIII A" / "8A" / "Kelas 8-A" -> "8A" (kunci pencocokan nama kelas dengan nama grup) */
+function classKey(raw: string): string {
+  const m = String(raw).toUpperCase().match(/\b(VIII|VII|IX|7|8|9)\s*[-_./]?\s*([A-Z0-9]{1,2})\b/);
+  if (!m) return '';
+  const grade = ({ VII: '7', VIII: '8', IX: '9' } as Record<string, string>)[m[1]] ?? m[1];
+  return grade + m[2];
+}
+
+function ClassGroupsTab() {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  const [enabled, setEnabled] = useState(false);
+  const [groups, setGroups] = useState<WaGroup[]>([]);
+  const [map, setMap] = useState<Record<string, { jid: string; name: string }>>({});
+
+  const settings = useQuery({
+    queryKey: ['wa-bot-settings'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('wa_bot_settings').select('*').eq('id', 1).maybeSingle();
+      if (error) throw error;
+      return data as any;
+    },
+  });
+
+  const classes = useQuery({
+    queryKey: ['wa-class-list'],
+    queryFn: async (): Promise<ClassRow[]> => {
+      const { data: st } = await supabase.from('school_settings').select('academic_year').limit(1).maybeSingle();
+      let q = supabase.from('classes').select('id, name').order('name');
+      if (st?.academic_year) q = q.eq('academic_year', st.academic_year);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []) as ClassRow[];
+    },
+  });
+
+  const saved = useQuery({
+    queryKey: ['wa-class-groups'],
+    queryFn: async (): Promise<ClassGroupRow[]> => {
+      const { data, error } = await (supabase as any).from('wa_class_groups').select('class_id, group_jid, group_name, enabled');
+      if (error) throw error;
+      return (data ?? []) as ClassGroupRow[];
+    },
+  });
+
+  useEffect(() => { if (settings.data) setEnabled(!!settings.data.class_group_recap_enabled); }, [settings.data]);
+  useEffect(() => {
+    if (!saved.data) return;
+    const m: Record<string, { jid: string; name: string }> = {};
+    saved.data.forEach((r) => { m[r.class_id] = { jid: r.group_jid, name: r.group_name || '' }; });
+    setMap(m);
+  }, [saved.data]);
+
+  const loadGroups = useMutation({
+    mutationFn: () => waAdminFetch<{ groups: WaGroup[] }>('/admin/groups'),
+    onSuccess: (r) => { setGroups(r.groups); toast.success(`${r.groups.length} grup ditemukan`); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const autoMatch = () => {
+    const byKey = new Map<string, WaGroup[]>();
+    groups.forEach((g) => { const k = classKey(g.name); if (k) byKey.set(k, [...(byKey.get(k) ?? []), g]); });
+    const next = { ...map };
+    let hit = 0;
+    (classes.data ?? []).forEach((c) => {
+      const cands = byKey.get(classKey(c.name)) ?? [];
+      if (cands.length === 1) { next[c.id] = { jid: cands[0].id, name: cands[0].name }; hit++; }
+    });
+    setMap(next);
+    toast.success(`${hit} dari ${(classes.data ?? []).length} kelas dicocokkan. Periksa lalu klik Simpan.`);
+  };
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const rows = Object.entries(map).filter(([, v]) => v.jid)
+        .map(([class_id, v]) => ({ class_id, group_jid: v.jid, group_name: v.name || null, enabled: true, updated_at: new Date().toISOString(), updated_by: user?.id ?? null }));
+      const keep = new Set(rows.map((r) => r.class_id));
+      const remove = (saved.data ?? []).map((r) => r.class_id).filter((id) => !keep.has(id));
+      if (rows.length) { const { error } = await (supabase as any).from('wa_class_groups').upsert(rows); if (error) throw error; }
+      if (remove.length) { const { error } = await (supabase as any).from('wa_class_groups').delete().in('class_id', remove); if (error) throw error; }
+      const { error: e2 } = await supabase.from('wa_bot_settings').upsert({
+        id: 1, class_group_recap_enabled: enabled, updated_at: new Date().toISOString(), updated_by: user?.id ?? null,
+      } as any);
+      if (e2) throw e2;
+      waAdminFetch('/admin/reload-config', { method: 'POST' }).catch(() => {});
+    },
+    onSuccess: () => {
+      toast.success('Pengaturan grup kelas disimpan');
+      qc.invalidateQueries({ queryKey: ['wa-class-groups'] });
+      qc.invalidateQueries({ queryKey: ['wa-bot-settings'] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const sendNow = useMutation({
+    mutationFn: (force: boolean) => waAdminFetch<{ queued: string[]; already_sent: string[]; not_filled: string[]; no_group: string[] }>(
+      '/admin/send-class-group-recaps', { method: 'POST', body: { force } }),
+    onSuccess: (r) => toast.success(
+      `Masuk antrian: ${r.queued.length} kelas. Sudah terkirim: ${r.already_sent.length}. Absen belum terisi: ${r.not_filled.length}.`),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (settings.isLoading || classes.isLoading || saved.isLoading) return <Loader2 className="h-5 w-5 animate-spin" />;
+  const list = classes.data ?? [];
+  const mapped = list.filter((c) => map[c.id]?.jid).length;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Rekap Absensi ke Grup Kelas</CardTitle>
+        <CardDescription>
+          Setiap kelas dihubungkan ke grup WhatsApp-nya sendiri. Begitu absen sebuah kelas tersimpan, bot mengirim ke grup kelas itu:
+          jumlah hadir/sakit/izin/alfa dan nama siswa yang tidak masuk. Tiap kelas dikirim satu kali per hari, tanpa menunggu kelas lain.
+          Nomor bot harus sudah menjadi anggota semua grup tujuan.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center justify-between max-w-md">
+          <Label htmlFor="cg-en">Aktifkan rekap ke grup kelas</Label>
+          <Switch id="cg-en" checked={enabled} onCheckedChange={setEnabled} />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => loadGroups.mutate()} disabled={loadGroups.isPending}>
+            {loadGroups.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />} Ambil daftar grup dari bot
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={autoMatch} disabled={groups.length === 0}>
+            <Wand2 className="h-4 w-4 mr-1" /> Cocokkan otomatis dari nama grup
+          </Button>
+          <Badge variant="secondary">{mapped}/{list.length} kelas sudah punya grup</Badge>
+        </div>
+
+        <div className="rounded-md border divide-y">
+          {list.map((c) => {
+            const cur = map[c.id];
+            const options = groups.some((g) => g.id === cur?.jid) || !cur?.jid
+              ? groups : [{ id: cur.jid, name: cur.name || cur.jid, size: 0 }, ...groups];
+            return (
+              <div key={c.id} className="flex flex-col sm:flex-row sm:items-center gap-2 p-2">
+                <div className="sm:w-32 font-medium">{c.name}</div>
+                <Select
+                  value={cur?.jid || '__none__'}
+                  onValueChange={(v) => setMap((m) => {
+                    const n = { ...m };
+                    if (v === '__none__') delete n[c.id];
+                    else n[c.id] = { jid: v, name: options.find((g) => g.id === v)?.name || '' };
+                    return n;
+                  })}
+                >
+                  <SelectTrigger className="flex-1"><SelectValue placeholder="Pilih grup" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— Tanpa grup —</SelectItem>
+                    {options.map((g) => (<SelectItem key={g.id} value={g.id}>{g.name}{g.size ? ` (${g.size})` : ''}</SelectItem>))}
+                  </SelectContent>
+                </Select>
+              </div>
+            );
+          })}
+          {list.length === 0 && <p className="p-3 text-sm text-muted-foreground">Belum ada data kelas.</p>}
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => save.mutate()} disabled={save.isPending}>
+            {save.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />} Simpan
+          </Button>
+          <Button variant="outline" onClick={() => sendNow.mutate(false)} disabled={sendNow.isPending || !enabled}>
+            {sendNow.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />} Kirim rekap hari ini sekarang
+          </Button>
+          <Button variant="ghost" onClick={() => sendNow.mutate(true)} disabled={sendNow.isPending || !enabled}>Kirim ulang semua</Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          &quot;Kirim rekap hari ini sekarang&quot; hanya mengirim kelas yang absennya sudah terisi dan belum pernah terkirim hari ini.
+          Simpan pengaturan dulu sebelum menekan tombol kirim. Isi pesan bisa diubah di tab Template Pesan.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function WhatsAppBotSettings() {
   return (
     <DashboardLayout>
@@ -612,11 +795,13 @@ export default function WhatsAppBotSettings() {
             <TabsTrigger value="templates">Template Pesan</TabsTrigger>
             <TabsTrigger value="reminder">Pengingat Guru</TabsTrigger>
             <TabsTrigger value="group-recap">Rekap Grup</TabsTrigger>
+            <TabsTrigger value="class-groups">Grup Kelas</TabsTrigger>
           </TabsList>
           <TabsContent value="connection"><ConnectionTab /></TabsContent>
           <TabsContent value="templates"><TemplatesTab /></TabsContent>
           <TabsContent value="reminder"><ReminderTab /></TabsContent>
           <TabsContent value="group-recap"><GroupRecapTab /></TabsContent>
+          <TabsContent value="class-groups"><ClassGroupsTab /></TabsContent>
         </Tabs>
       </div>
     </DashboardLayout>
