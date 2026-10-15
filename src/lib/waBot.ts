@@ -117,6 +117,16 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     defaultBody: `📅 *REKAP JADWAL MENGAJAR*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\nJadwal mengajar Anda hari *{{hari}}, {{tanggal}}* ({{jumlah_jam}} sesi):\n\n{{rekap}}\n\nJangan lupa mengisi *absensi* dan *jurnal mengajar*.\n_Pusaka - SMP Negeri 8 Ciamis_`,
   },
   {
+    key: 'teacher_saturday_greeting',
+    title: 'Ucapan Akhir Pekan (Sabtu) untuk Guru',
+    description: 'Dikirim hari Sabtu ke guru yang tidak punya jadwal mengajar hari itu (jam kirim diatur di tab Pengingat Guru).',
+    variables: [
+      { name: 'nama_guru', sample: 'Budi Santoso, S.Pd', hint: 'Nama guru' },
+      { name: 'hari', sample: 'Sabtu', hint: 'Nama hari' },
+    ],
+    defaultBody: `🌿 *SELAMAT AKHIR PEKAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\n\nTerima kasih atas dedikasi dan kerja keras Bapak/Ibu dalam mendidik anak-anak kita sepanjang pekan ini.\n\nHari {{hari}} adalah waktu untuk berhenti sejenak. Nikmatilah akhir pekan bersama keluarga, karena keluarga adalah sumber kekuatan terbesar seorang pendidik. Istirahatlah yang cukup dan siapkan energi terbaik untuk mengajar kembali di hari Senin.\n\nSemoga sehat dan bahagia selalu. 🙏\n_Pusaka - SMP Negeri 8 Ciamis_`,
+  },
+  {
     key: 'test_connection',
     title: 'Tes Koneksi ke Guru',
     description: 'Dikirim lewat tombol "Kirim Tes Koneksi ke Semua Guru" di tab Koneksi, agar guru menyimpan nomor bot.',

@@ -91,6 +91,7 @@ const DEFAULT_TEMPLATES = {
     class_attendance_recap: `📊 *REKAP ABSENSI SISWA PER KELAS*\n{{hari}}, {{tanggal}}\n\n{{tabel_rekap}}\nKls=Kelas, Sis=Siswa, H=Hadir, S=Sakit, I=Izin, A=Alfa, Jml=Jumlah tidak sekolah\n\n*REKAP SEMUA KELAS* ({{jumlah_kelas}} kelas, {{total_siswa}} siswa)\n• Hadir: *{{total_hadir}}* ({{persen_hadir}}%)\n• Sakit: *{{total_sakit}}*\n• Izin: *{{total_izin}}*\n• Alfa: *{{total_alfa}}*\n• Jml tidak hadir: *{{total_tidak_hadir}}*\n\n_Pusaka - SMP Negeri 8 Ciamis_`
 };
 DEFAULT_TEMPLATES.class_group_recap = `📊 *ABSENSI KELAS {{kelas}}*\n{{hari}}, {{tanggal}}\n\nJumlah siswa: *{{total_siswa}}*\n✅ Hadir: *{{hadir}}*\n🤒 Sakit: *{{sakit}}*\n📝 Izin: *{{izin}}*\n❌ Alfa: *{{alpa}}*\n\n{{daftar_tidak_hadir}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.teacher_saturday_greeting = `🌿 *SELAMAT AKHIR PEKAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\n\nTerima kasih atas dedikasi dan kerja keras Bapak/Ibu dalam mendidik anak-anak kita sepanjang pekan ini.\n\nHari {{hari}} adalah waktu untuk berhenti sejenak. Nikmatilah akhir pekan bersama keluarga, karena keluarga adalah sumber kekuatan terbesar seorang pendidik. Istirahatlah yang cukup dan siapkan energi terbaik untuk mengajar kembali di hari Senin.\n\nSemoga sehat dan bahagia selalu. 🙏\n_Pusaka - SMP Negeri 8 Ciamis_`;
 const DEFAULT_BOT_SETTINGS = {
     teacher_reminder_enabled: true, reminder_lead_min: 10, reminder_followup_min: 15,
     reminder_scope: 'all',            // 'first' = jam pertama saja, 'all' = semua jam mengajar
@@ -101,7 +102,9 @@ const DEFAULT_BOT_SETTINGS = {
     daily_recap_time: '06:00',        // jam kirim rekap (WIB)
     class_recap_enabled: false,       // kirim rekap absensi per kelas ke grup saat semua kelas sudah terabsen
     class_recap_group_jid: '',        // JID grup tujuan (xxx@g.us)
-    class_group_recap_enabled: false  // kirim rekap ke grup MASING-MASING kelas (tabel wa_class_groups)
+    class_group_recap_enabled: false, // kirim rekap ke grup MASING-MASING kelas (tabel wa_class_groups)
+    saturday_greeting_enabled: true,  // ucapan akhir pekan ke guru yang tidak mengajar hari Sabtu
+    saturday_greeting_time: '07:00'   // jam kirim (WIB)
 };
 const CONFIG_TTL_MS = 30 * 1000;
 let templateCache = { at: 0, rows: new Map() };
@@ -468,6 +471,47 @@ async function runTeacherReminders() {
     } catch (e) { console.error('[REMINDER ERROR]:', e.message); }
     finally { reminderRunning = false; }
 }
+// Ucapan akhir pekan: hari Sabtu dikirim ke guru yang TIDAK punya jadwal mengajar hari itu (sekali per guru per hari)
+let saturdayRunning = false;
+async function runSaturdayGreeting() {
+    if (!isReady || saturdayRunning) return;
+    saturdayRunning = true;
+    try {
+        const cfg = await getBotSettings();
+        if (!cfg.saturday_greeting_enabled) return;
+        const now = wibNow();
+        if (now.dow !== 6) return;
+        const startMin = hhmmToMin(cfg.saturday_greeting_time || '07:00');
+        if (now.minutes < startMin || now.minutes >= 12 * 60) return; // lewat tengah hari tidak dikirim lagi
+        if (reminderSentDate !== now.date) loadReminderState(now.date);
+        if (reminderSent.has('sat:done')) return;
+        const stRes = await supabase.from('school_settings').select('academic_year, active_semester').limit(1).maybeSingle();
+        const st = stRes.data;
+        let q = supabase.from('schedules').select('teacher_id').eq('is_active', true).eq('day_of_week', 6);
+        if (st && st.academic_year) q = q.eq('academic_year', st.academic_year);
+        if (st && st.active_semester) q = q.eq('semester', st.active_semester);
+        const sRes = await q;
+        if (sRes.error) throw sRes.error;
+        const teaching = new Set((sRes.data || []).map(function(r) { return r.teacher_id; }));
+        const tRes = await supabase.from('teachers').select('id, user_id');
+        if (tRes.error) throw tRes.error;
+        const targets = (tRes.data || []).filter(function(t) { return !teaching.has(t.id) && t.user_id; });
+        const pRes = await supabase.from('profiles').select('id, full_name, phone').in('id', targets.map(function(t) { return t.user_id; }));
+        if (pRes.error) throw pRes.error;
+        const profById = new Map((pRes.data || []).map(function(p) { return [p.id, p]; }));
+        for (const t of targets) {
+            const prof = profById.get(t.user_id);
+            if (!prof || !prof.phone) continue;
+            const key = 'sat:' + t.id; if (reminderSent.has(key)) continue; markReminderSent(key);
+            const vars = { nama_guru: prof.full_name, hari: 'Sabtu' };
+            const jid = formatToInternational(prof.phone) + '@s.whatsapp.net';
+            enqueueTask(async () => { const text = await renderMessage('teacher_saturday_greeting', vars); if (text) await sendSafeMessage(jid, { text: text }); });
+        }
+        markReminderSent('sat:done');
+    } catch (e) { console.error('[SATURDAY GREETING ERROR]:', e.message); }
+    finally { saturdayRunning = false; }
+}
+app.post('/run-saturday-greeting', async (req, res) => { runSaturdayGreeting(); res.json({ status: 'started' }); });
 app.post('/run-teacher-reminders', async (req, res) => { runTeacherReminders(); res.json({ status: 'started' }); });
 
 function verifyJwtLocal(token, secret) {
@@ -1274,6 +1318,7 @@ app.listen(PORT, () => {
     console.log('Server API berjalan di port ' + PORT);
     startBot();
     setInterval(runTeacherReminders, 60 * 1000);
+    setInterval(runSaturdayGreeting, 60 * 1000);
     setInterval(checkBackupSchedule, 60 * 1000);
     setInterval(checkStudentSnapshot, 60 * 1000);
 });

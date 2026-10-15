@@ -358,6 +358,8 @@ function ReminderTab() {
   const [remindNext, setRemindNext] = useState(true);
   const [recap, setRecap] = useState(false);
   const [recapTime, setRecapTime] = useState('06:00');
+  const [satGreet, setSatGreet] = useState(true);
+  const [satTime, setSatTime] = useState('07:00');
 
   const { data, isLoading } = useQuery({
     queryKey: ['wa-bot-settings'],
@@ -379,6 +381,8 @@ function ReminderTab() {
       setRemindNext(data.followup_attendance_next_teachers !== false);
       setRecap(data.daily_recap_enabled);
       setRecapTime(String(data.daily_recap_time || '06:00').slice(0, 5));
+      setSatGreet(data.saturday_greeting_enabled !== false);
+      setSatTime(String(data.saturday_greeting_time || '07:00').slice(0, 5));
     }
   }, [data]);
 
@@ -394,6 +398,8 @@ function ReminderTab() {
         followup_attendance_next_teachers: remindNext,
         daily_recap_enabled: recap,
         daily_recap_time: /^\d{2}:\d{2}$/.test(recapTime) ? recapTime : '06:00',
+        saturday_greeting_enabled: satGreet,
+        saturday_greeting_time: /^\d{2}:\d{2}$/.test(satTime) ? satTime : '07:00',
         updated_at: new Date().toISOString(), updated_by: user?.id ?? null,
       });
       if (error) throw error;
@@ -469,6 +475,19 @@ function ReminderTab() {
             <div className="space-y-1">
               <Label>Jam kirim (WIB)</Label>
               <Input type="time" value={recapTime} onChange={(e) => setRecapTime(e.target.value)} className="w-32" />
+            </div>
+          )}
+        </div>
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="sat-en">Ucapan akhir pekan hari Sabtu</Label>
+            <Switch id="sat-en" checked={satGreet} onCheckedChange={setSatGreet} />
+          </div>
+          <p className="text-xs text-muted-foreground">Ucapan terima kasih dan pesan menikmati akhir pekan bersama keluarga untuk guru yang tidak mengajar hari Sabtu. Isi pesan bisa diubah di tab Template Pesan.</p>
+          {satGreet && (
+            <div className="space-y-1">
+              <Label>Jam kirim (WIB)</Label>
+              <Input type="time" value={satTime} onChange={(e) => setSatTime(e.target.value)} className="w-32" />
             </div>
           )}
         </div>
