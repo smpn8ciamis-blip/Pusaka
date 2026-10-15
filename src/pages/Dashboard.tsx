@@ -164,7 +164,7 @@ export default function Dashboard() {
   const { data: profile } = useUserProfile(user?.id);
   const { data: stats } = useDashboardStats(userRole, selectedYear, selectedSemester);
   const { data: genderStats } = useStudentGenderStats(selectedYear, userRole, user?.id);
-  const { data: todaySchedules } = useTodaySchedules(
+  const { data: todaySchedules, isLoading: schedulesLoading } = useTodaySchedules(
     user?.id,
     userRole,
     selectedYear,
@@ -332,6 +332,7 @@ export default function Dashboard() {
                 <DashboardTodaySchedule
                   todaySchedules={todaySchedules || []}
                   userRole={userRole}
+                  isLoading={schedulesLoading}
                 />
               </div>
             </Section>
@@ -423,7 +424,7 @@ export default function Dashboard() {
         <div className="grid gap-6 md:grid-cols-2">
           <Section delay={200}>
             <div className="p-4 sm:p-5">
-              <DashboardTodaySchedule todaySchedules={todaySchedules || []} userRole={userRole} />
+              <DashboardTodaySchedule todaySchedules={todaySchedules || []} userRole={userRole} isLoading={schedulesLoading} />
             </div>
           </Section>
           <Section delay={240}>
