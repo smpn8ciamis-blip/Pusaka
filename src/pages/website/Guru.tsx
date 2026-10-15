@@ -2,17 +2,24 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { PageHero } from "./Profil";
 import { GraduationCap } from "lucide-react";
+import { Navigate } from "react-router-dom";
+import { useWebsiteSettings } from "@/components/website/PublicLayout";
 
 export default function Guru() {
   const [rows, setRows] = useState<any[]>([]);
+  const settings = useWebsiteSettings();
+  const enabled = settings?.show_guru_page === true;
   useEffect(() => {
+    if (!enabled) return;
     (async () => {
       const { data } = await (supabase.from("teachers" as any) as any)
         .select("id, subject, jabatan, nip, photo_url, user_id, profiles:profiles(full_name)")
         .order("id");
       setRows(data ?? []);
     })();
-  }, []);
+  }, [enabled]);
+  if (!settings) return <div className="py-32 text-center text-slate-400 text-sm">Memuat...</div>;
+  if (!enabled) return <Navigate to="/" replace />;
   return (
     <div>
       <PageHero title="Guru & Staff" subtitle="Tenaga pendidik dan kependidikan profesional." />
