@@ -29,6 +29,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { ImportViolationTypes } from '@/components/ImportViolationTypes';
 import { StudentSearchSelect } from '@/components/StudentSearchSelect';
 import { HighlightText } from '@/components/HighlightText';
+import { DataPagination } from '@/components/ui/data-pagination';
 import { cn } from '@/lib/utils';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -175,6 +176,18 @@ const VIOLATION_PALETTE: Record<
   sedang: { bg: [255, 237, 213], fg: [154, 52, 18] },
   berat:  { bg: [255, 228, 230], fg: [159, 18, 57] },
 };
+
+// Pencarian pelanggaran: semua kata harus cocok (nama, NIS, kelas, jenis, kategori, pelapor, catatan)
+const normSearch = (v: unknown) => String(v ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+function matchesViolationSearch(v: any, query: string): boolean {
+  const tokens = normSearch(query).split(' ').filter(Boolean);
+  if (tokens.length === 0) return true;
+  const hay = normSearch([
+    v.students?.full_name, v.students?.nis, v.students?.classes?.name,
+    v.violation_types?.name, v.violation_types?.category, v.reporter?.full_name, v.notes,
+  ].filter(Boolean).join(' '));
+  return tokens.every((t) => hay.includes(t));
+}
 
 // ============================================================
 // Searchable Select untuk Jenis Pelanggaran
@@ -326,7 +339,14 @@ export default function Violations() {
   const [currentPage, setCurrentPage] = useState(1);
   const [sortField, setSortField] = useState<'date' | 'student' | 'class' | 'points'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const itemsPerPage = 30;
+  const [itemsPerPage, setItemsPerPage] = useState<number>(() => {
+    try { const n = Number(localStorage.getItem('violations-page-size')); return n > 0 ? n : 25; } catch { return 25; }
+  });
+  const changePageSize = (n: number) => {
+    setItemsPerPage(n);
+    setCurrentPage(1);
+    try { localStorage.setItem('violations-page-size', String(n)); } catch { /* abaikan */ }
+  };
 
   // State filter waktu
   const [datePreset, setDatePreset] = useState<DatePreset>('all');
@@ -459,57 +479,44 @@ export default function Violations() {
     gcTime: 5 * 60 * 1000,
   });
 
-  // Fetch total count dengan filter tanggal
-  const { data: totalViolationsCount } = useQuery({
-    queryKey: ['student-violations-count', dateFrom, dateTo],
-    queryFn: async () => {
-      let query = supabase
-        .from('student_violations')
-        .select('*', { count: 'exact', head: true });
-
-      if (dateFrom) query = query.gte('violation_date', dateFrom);
-      if (dateTo) query = query.lte('violation_date', dateTo);
-
-      const { count, error } = await query;
-      if (error) throw error;
-      return count || 0;
-    },
-    staleTime: 1 * 60 * 1000,
-  });
-
-  // Fetch violations dengan filter tanggal + pagination
+  // Ambil SEMUA pelanggaran pada periode (per 1000 baris) agar pencarian mencakup seluruh data,
+  // lalu urut & halaman diproses di sisi klien.
   const { data: violations = [], isLoading: violationsLoading } = useQuery({
-    queryKey: ['student-violations', currentPage, dateFrom, dateTo],
+    queryKey: ['student-violations', dateFrom, dateTo],
     queryFn: async () => {
-      const from = (currentPage - 1) * itemsPerPage;
-      const to = from + itemsPerPage - 1;
+      const rows: any[] = [];
+      const PAGE = 1000;
+      for (let from = 0; ; from += PAGE) {
+        let query = supabase
+          .from('student_violations')
+          .select(`
+            *,
+            students(full_name, nis, classes(name)),
+            violation_types(name, category)
+          `)
+          .order('violation_date', { ascending: false })
+          .order('created_at', { ascending: false });
 
-      let query = supabase
-        .from('student_violations')
-        .select(`
-          *,
-          students(full_name, nis, classes(name)),
-          violation_types(name, category)
-        `)
-        .order('violation_date', { ascending: false });
+        if (dateFrom) query = query.gte('violation_date', dateFrom);
+        if (dateTo) query = query.lte('violation_date', dateTo);
 
-      if (dateFrom) query = query.gte('violation_date', dateFrom);
-      if (dateTo) query = query.lte('violation_date', dateTo);
-
-      const { data, error } = await query.range(from, to);
-      if (error) throw error;
-
-      if (data && data.length > 0) {
-        const reporterIds = [...new Set(data.map(v => v.reported_by).filter(Boolean))];
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, full_name')
-          .in('id', reporterIds);
-
-        const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
-        return data.map(v => ({ ...v, reporter: profileMap.get(v.reported_by) }));
+        const { data, error } = await query.range(from, from + PAGE - 1);
+        if (error) throw error;
+        rows.push(...(data ?? []));
+        if (!data || data.length < PAGE) break;
       }
-      return data || [];
+
+      if (rows.length > 0) {
+        const reporterIds = [...new Set(rows.map(v => v.reported_by).filter(Boolean))];
+        const profiles: any[] = [];
+        for (let i = 0; i < reporterIds.length; i += 200) {
+          const { data } = await supabase.from('profiles').select('id, full_name').in('id', reporterIds.slice(i, i + 200));
+          profiles.push(...(data ?? []));
+        }
+        const profileMap = new Map(profiles.map(p => [p.id, p]));
+        return rows.map(v => ({ ...v, reporter: profileMap.get(v.reported_by) }));
+      }
+      return rows;
     },
     staleTime: 1 * 60 * 1000,
     enabled: canAccessPage,
@@ -559,21 +566,13 @@ export default function Violations() {
     (a: any, b: any) => b.totalPoints - a.totalPoints
   );
 
-  const totalViolationsPages = Math.ceil((totalViolationsCount || 0) / itemsPerPage);
 
   const filteredAndSortedViolations = useMemo(() => {
     if (!violations) return [];
 
-    let filtered = violations;
-    if (violationSearch.trim()) {
-      const search = violationSearch.toLowerCase();
-      filtered = violations.filter(v =>
-        v.students?.full_name?.toLowerCase().includes(search) ||
-        v.students?.nis?.toLowerCase().includes(search) ||
-        v.students?.classes?.name?.toLowerCase().includes(search) ||
-        v.violation_types?.name?.toLowerCase().includes(search)
-      );
-    }
+    const filtered = violationSearch.trim()
+      ? violations.filter((v: any) => matchesViolationSearch(v, violationSearch))
+      : violations;
 
     return [...filtered].sort((a, b) => {
       let compareA: any;
@@ -605,6 +604,19 @@ export default function Violations() {
       return 0;
     });
   }, [violations, sortField, sortOrder, violationSearch]);
+
+  const totalViolationsCount = violations.length;
+  const filteredCount = filteredAndSortedViolations.length;
+  const totalViolationsPages = Math.max(1, Math.ceil(filteredCount / itemsPerPage));
+  const safePage = Math.min(currentPage, totalViolationsPages);
+  const pagedViolations = useMemo(
+    () => filteredAndSortedViolations.slice((safePage - 1) * itemsPerPage, safePage * itemsPerPage),
+    [filteredAndSortedViolations, safePage, itemsPerPage],
+  );
+  const filteredPoints = useMemo(
+    () => filteredAndSortedViolations.reduce((a: number, v: any) => a + (Number(v.points) || 0), 0),
+    [filteredAndSortedViolations],
+  );
 
   const handleSort = (field: 'date' | 'student' | 'class' | 'points') => {
     if (sortField === field) {
@@ -808,13 +820,7 @@ export default function Violations() {
 
       // Terapkan search box (jika ada)
       if (violationSearch.trim()) {
-        const s = violationSearch.toLowerCase();
-        exportData = exportData.filter(v =>
-          v.students?.full_name?.toLowerCase().includes(s) ||
-          v.students?.nis?.toLowerCase().includes(s) ||
-          v.students?.classes?.name?.toLowerCase().includes(s) ||
-          v.violation_types?.name?.toLowerCase().includes(s)
-        );
+        exportData = exportData.filter(v => matchesViolationSearch(v, violationSearch));
       }
 
       // ==== LETTERHEAD RAPAT ====
@@ -1340,12 +1346,14 @@ export default function Violations() {
                   <CardTitle className="flex items-center justify-between">
                     <span>Data Pelanggaran</span>
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <span>Halaman {currentPage} dari {totalViolationsPages || 1}</span>
+                      <span>Halaman {safePage} dari {totalViolationsPages}</span>
                     </div>
                   </CardTitle>
                   <CardDescription>
-                    Menampilkan {filteredAndSortedViolations.length} dari {totalViolationsCount} total pelanggaran
-                    {isDateFilterActive && ` (${dateFilterLabel})`}
+                    {violationSearch.trim()
+                      ? <>Ditemukan {filteredCount} pelanggaran untuk "{violationSearch.trim()}" · total poin {filteredPoints}{' '}</>
+                      : <>Total {totalViolationsCount} pelanggaran{' '}</>}
+                    {isDateFilterActive && `(${dateFilterLabel})`}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1404,9 +1412,9 @@ export default function Violations() {
                             </TableCell>
                           </TableRow>
                         ) : (
-                          filteredAndSortedViolations.map((violation: any, index: number) => (
+                          pagedViolations.map((violation: any, index: number) => (
                             <TableRow key={violation.id}>
-                              <TableCell>{(currentPage - 1) * itemsPerPage + index + 1}</TableCell>
+                              <TableCell>{(safePage - 1) * itemsPerPage + index + 1}</TableCell>
                               <TableCell>
                                 {format(new Date(violation.violation_date), 'dd MMM yyyy', { locale: idLocale })}
                               </TableCell>
@@ -1454,50 +1462,15 @@ export default function Violations() {
                     </Table>
                   </div>
 
-                  {totalViolationsPages > 1 && (
-                    <div className="flex items-center justify-between mt-4">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                        disabled={currentPage === 1}
-                      >
-                        Previous
-                      </Button>
-                      <div className="flex items-center gap-1">
-                        {Array.from({ length: Math.min(5, totalViolationsPages) }, (_, i) => {
-                          let pageNum;
-                          if (totalViolationsPages <= 5) {
-                            pageNum = i + 1;
-                          } else if (currentPage <= 3) {
-                            pageNum = i + 1;
-                          } else if (currentPage >= totalViolationsPages - 2) {
-                            pageNum = totalViolationsPages - 4 + i;
-                          } else {
-                            pageNum = currentPage - 2 + i;
-                          }
-                          return (
-                            <Button
-                              key={pageNum}
-                              variant={currentPage === pageNum ? 'default' : 'outline'}
-                              size="sm"
-                              onClick={() => setCurrentPage(pageNum)}
-                            >
-                              {pageNum}
-                            </Button>
-                          );
-                        })}
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCurrentPage(Math.min(totalViolationsPages, currentPage + 1))}
-                        disabled={currentPage === totalViolationsPages}
-                      >
-                        Next
-                      </Button>
-                    </div>
-                  )}
+                  <DataPagination
+                    currentPage={safePage}
+                    totalPages={totalViolationsPages}
+                    totalItems={filteredCount}
+                    pageSize={itemsPerPage}
+                    onPageChange={setCurrentPage}
+                    onPageSizeChange={changePageSize}
+                    pageSizeOptions={[10, 25, 50, 100, 200]}
+                  />
                 </CardContent>
               </Card>
             </TabsContent>
