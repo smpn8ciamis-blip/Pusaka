@@ -144,6 +144,24 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     ],
     defaultBody: `📊 *REKAP ABSENSI SISWA PER KELAS*\n{{hari}}, {{tanggal}}\n\n{{tabel_rekap}}\nKls=Kelas, Sis=Siswa, H=Hadir, S=Sakit, I=Izin, A=Alfa, Jml=Jumlah tidak sekolah\n\n*REKAP SEMUA KELAS* ({{jumlah_kelas}} kelas, {{total_siswa}} siswa)\n• Hadir: *{{total_hadir}}* ({{persen_hadir}}%)\n• Sakit: *{{total_sakit}}*\n• Izin: *{{total_izin}}*\n• Alfa: *{{total_alfa}}*\n• Jml tidak hadir: *{{total_tidak_hadir}}*\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
   },
+  {
+    key: 'class_group_recap',
+    title: 'Rekap Absensi ke Grup Kelas (per kelas)',
+    description: 'Dikirim ke grup WhatsApp masing-masing kelas setelah absen kelas itu terisi (diatur di tab Grup Kelas). Berisi jumlah hadir/sakit/izin/alfa dan nama siswa yang tidak masuk.',
+    variables: [
+      { name: 'kelas', sample: 'VIII A', hint: 'Nama kelas' },
+      { name: 'hari', sample: 'Senin', hint: 'Nama hari' },
+      { name: 'tanggal', sample: '12/10/2026', hint: 'Tanggal' },
+      { name: 'total_siswa', sample: '32', hint: 'Jumlah siswa aktif di kelas' },
+      { name: 'hadir', sample: '29', hint: 'Jumlah hadir' },
+      { name: 'sakit', sample: '1', hint: 'Jumlah sakit' },
+      { name: 'izin', sample: '1', hint: 'Jumlah izin' },
+      { name: 'alpa', sample: '1', hint: 'Jumlah alfa' },
+      { name: 'jumlah_tidak_hadir', sample: '3', hint: 'Sakit + izin + alfa' },
+      { name: 'daftar_tidak_hadir', sample: '*Siswa yang tidak masuk (3):*\n1. Ahmad Fauzi (Sakit)\n2. Siti Aisyah (Izin)\n3. Rudi Hartono (Alfa)', hint: 'Daftar bernomor beserta judulnya (otomatis berisi ucapan syukur bila semua hadir)' },
+    ],
+    defaultBody: `📊 *ABSENSI KELAS {{kelas}}*\n{{hari}}, {{tanggal}}\n\nJumlah siswa: *{{total_siswa}}*\n✅ Hadir: *{{hadir}}*\n🤒 Sakit: *{{sakit}}*\n📝 Izin: *{{izin}}*\n❌ Alfa: *{{alpa}}*\n\n{{daftar_tidak_hadir}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
+  },
 ];
 
 /** Tanggal hari ini (WIB) format YYYY-MM-DD */
@@ -152,11 +170,26 @@ export function wibToday(): string {
 }
 
 /**
+ * Beri tahu bot bahwa absen baru saja disimpan. Bot mengirim rekap ke grup KELAS yang absennya sudah terisi
+ * (satu kali per kelas per hari; diatur server). Gagal diam-diam agar tidak mengganggu proses simpan absen.
+ */
+export async function notifyBotClassGroups(): Promise<void> {
+  try {
+    const res = await waAdminFetch<{ status: string; queued?: string[] }>('/attendance-class-saved', { method: 'POST', body: {} });
+    if (res.queued && res.queued.length) console.info('[Rekap grup kelas] dikirim ke:', res.queued.join(', '));
+  } catch (e) {
+    console.warn('[Rekap grup kelas] tidak dapat memberi tahu bot:', (e as Error)?.message);
+  }
+}
+
+/**
  * Dipanggil setelah absensi disimpan. Frontend memeriksa (1 query ringan) apakah absen jam pertama
  * SEMUA kelas hari ini sudah terisi; hanya jika sudah lengkap bot WA diberi tahu untuk mengirim rekap ke grup.
  * Bot tidak melakukan pengecekan berulang. Gagal diam-diam agar tidak mengganggu proses simpan absen.
  */
 export async function notifyBotIfAttendanceComplete(savedDate?: string): Promise<void> {
+  // Rekap per kelas ke grup masing-masing: tidak perlu menunggu semua kelas terisi.
+  if (!savedDate || savedDate === wibToday()) void notifyBotClassGroups();
   try {
     const today = wibToday();
     if (savedDate && savedDate !== today) return;
