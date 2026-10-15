@@ -95,6 +95,13 @@ export default function AdminSettings() {
         </div>
         <div className="flex items-center justify-between rounded-lg border p-3">
           <div>
+            <Label className="mb-0.5">Halaman Guru &amp; Staff (Guru dan Tata Usaha)</Label>
+            <p className="text-xs text-slate-500">Tampilkan menu dan halaman Guru &amp; Staff di website publik. Default: disembunyikan.</p>
+          </div>
+          <Switch checked={form.show_guru_page ?? false} onCheckedChange={(v) => setForm({ ...form, show_guru_page: v })} />
+        </div>
+        <div className="flex items-center justify-between rounded-lg border p-3">
+          <div>
             <Label className="mb-0.5">Chatbot Asisten Sekolah</Label>
             <p className="text-xs text-slate-500">Tampilkan chatbot mengambang di seluruh halaman website.</p>
           </div>

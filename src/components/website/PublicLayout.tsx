@@ -6,14 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Menu, X, Facebook, Instagram, Youtube, Phone, Mail, MapPin } from "lucide-react";
 import ChatbotWidget from "./ChatbotWidget";
 
-const NAV = [
+const ALL_NAV: { to: string; label: string; end?: boolean; key?: string }[] = [
   { to: "/", label: "Beranda", end: true },
   { to: "/website/profil", label: "Profil" },
   { to: "/website/akademik", label: "Akademik" },
   { to: "/website/ekstrakurikuler", label: "Ekstrakurikuler" },
   { to: "/website/berita", label: "Berita" },
   { to: "/website/galeri", label: "Galeri" },
-  { to: "/website/guru", label: "Guru & Staff" },
+  { to: "/website/guru", label: "Guru & Staff", key: "show_guru_page" },
   { to: "/website/kontak", label: "Kontak" },
 ];
 
@@ -33,6 +33,7 @@ export type WebsiteSettings = {
   meta_title?: string;
   meta_description?: string;
   show_lapor_button?: boolean;
+  show_guru_page?: boolean;
   chatbot_enabled?: boolean;
   chatbot_name?: string;
   chatbot_welcome?: string;
@@ -66,6 +67,8 @@ export default function PublicLayout() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  // Halaman Guru & Staff disembunyikan secara default; admin web mengaktifkannya di Pengaturan Website
+  const NAV = ALL_NAV.filter((n) => !n.key || (settings as any)?.[n.key] === true);
 
   useEffect(() => {
     if (settings?.meta_title) document.title = settings.meta_title;
