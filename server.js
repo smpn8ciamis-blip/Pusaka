@@ -5,6 +5,38 @@ const express = require('express');
 const pino = require('pino');
 const fs = require('fs');
 const crypto = require('crypto');
+const path = require('path');
+
+// Baca file .env (tanpa dependensi tambahan). Variabel yang sudah diset di environment/systemd/docker TIDAK ditimpa.
+// Dicari berurutan: ENV_FILE, .env di folder server.js, lalu .env di folder kerja saat ini.
+(function loadDotEnv() {
+    const candidates = [process.env.ENV_FILE, path.join(__dirname, '.env'), path.join(process.cwd(), '.env')].filter(Boolean);
+    const seen = new Set();
+    for (const file of candidates) {
+        const abs = path.resolve(file);
+        if (seen.has(abs)) continue;
+        seen.add(abs);
+        let text;
+        try { text = fs.readFileSync(abs, 'utf-8'); } catch (e) { continue; }
+        let n = 0;
+        for (const rawLine of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+            const line = rawLine.trim();
+            if (!line || line.startsWith('#')) continue;
+            const m = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+            if (!m) continue;
+            let val = m[2].trim();
+            if ((val.startsWith('"') && val.endsWith('"') && val.length >= 2) || (val.startsWith("'") && val.endsWith("'") && val.length >= 2)) {
+                const q = val[0];
+                val = val.slice(1, -1);
+                if (q === '"') val = val.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+            } else {
+                val = val.replace(/\s+#.*$/, ''); // komentar di akhir baris
+            }
+            if (process.env[m[1]] === undefined) { process.env[m[1]] = val; n++; }
+        }
+        console.log('[ENV] ' + abs + ' dimuat (' + n + ' variabel)');
+    }
+})();
 
 process.on('unhandledRejection', (err) => console.error('[CRASH] Unhandled Rejection:', err));
 process.on('uncaughtException', (err) => console.error('[CRASH] Uncaught Exception:', err));
@@ -978,7 +1010,6 @@ app.post('/admin/fingerprint/reload', requireAdmin, (req, res) => { fpSeen.clear
 // Env: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI (opsional), BACKUP_DB_COMMAND / BACKUP_DATABASE_URL / BACKUP_DB_CONTAINER (opsional).
 const { spawn } = require('child_process');
 const os = require('os');
-const path = require('path');
 const zlib = require('zlib');
 const { pipeline } = require('stream/promises');
 
