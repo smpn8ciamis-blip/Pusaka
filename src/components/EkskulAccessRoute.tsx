@@ -27,5 +27,5 @@ export const EkskulAccessRoute = ({ children }: { children: React.ReactNode }) =
     userRole === 'pembina_ekskul' ||
     (userRole === 'teacher' && isCoach);
 
-  return allowed ? <>{children}</> : <Navigate to="/" replace />;
+  return allowed ? <>{children}</> : <Navigate to="/dashboard" replace />;
 };

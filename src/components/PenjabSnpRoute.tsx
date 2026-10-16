@@ -17,5 +17,5 @@ export const PenjabSnpRoute = ({ children }: { children: React.ReactNode }) => {
   }
   if (!user) return <Navigate to="/auth" replace />;
   const allowed = userRole === 'admin' || userRole === 'super_admin' || (userRole === 'teacher' && isPenjab);
-  return allowed ? <>{children}</> : <Navigate to="/" replace />;
+  return allowed ? <>{children}</> : <Navigate to="/dashboard" replace />;
 };
