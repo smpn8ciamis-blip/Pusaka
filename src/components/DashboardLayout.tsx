@@ -11,7 +11,7 @@ import {
   ChevronUp, AlertTriangle, BarChart3, FolderOpen, MessageSquare, Database,
   Award, FileSignature, Plane, Receipt, FileSpreadsheet, Wallet, FileBarChart,
   Inbox, Send, Hammer, Vote, Upload, Bell, Lock, Landmark, Server, UserMinus,
-  Sparkles, CreditCard, ScanLine, LayoutDashboard, Search, Star, Moon, CalendarDays, KeyRound, Fingerprint
+  Sparkles, CreditCard, ScanLine, LayoutDashboard, Search, Star, Moon, CalendarDays, KeyRound, Fingerprint, Briefcase
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -55,6 +55,7 @@ const roleLabels: Record<string, string> = {
   siswa: 'Siswa',
   polling: 'Polling',
   billing: 'Billing',
+  staf: 'Staf',
   teacher: 'Guru',
 };
 
@@ -267,6 +268,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
       label: 'Master Data',
       items: [
         { icon: UserCircle, label: 'Guru', href: '/teachers' },
+        { icon: Briefcase, label: 'Staf', href: '/staff' },
         { icon: Users, label: 'Siswa', href: '/students' },
         { icon: BookOpen, label: 'Kelas', href: '/classes' },
         { icon: UserMinus, label: 'Mutasi Keluar', href: '/student-mutations' },
@@ -537,6 +539,11 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: Award, label: 'Honorarium Ekskul', href: '/extracurricular-honorarium' },
   ];
 
+  const stafMenuItems: MenuItem[] = [
+    { icon: LayoutDashboard, label: 'Dashboard', href: '/staff-dashboard' },
+    { icon: FileCheck, label: 'Surat Tugas Saya', href: '/my-letters' },
+  ];
+
   const kesiswaanMenuItems: MenuItem[] = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/kesiswaan-dashboard' },
     { icon: ClipboardList, label: 'Absensi', href: '/attendance' },
@@ -594,6 +601,8 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
       ? superAdminMenuItems
       : userRole === 'bendahara'
         ? bendaharaMenuItems
+        : userRole === 'staf'
+          ? stafMenuItems
         : userRole === 'tata_usaha'
           ? tataUsahaMenuItems
           : userRole === 'kesiswaan'

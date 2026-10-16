@@ -73,6 +73,8 @@ const NarasumberHonorarium = lazy(() => import("./pages/NarasumberHonorarium"));
 const StaffAccounts = lazy(() => import("./pages/StaffAccounts"));
 const SuratMasuk = lazy(() => import("./pages/SuratMasuk"));
 const SuratKeluar = lazy(() => import("./pages/SuratKeluar"));
+const Staff = lazy(() => import("./pages/Staff"));
+const StaffDashboard = lazy(() => import("./pages/StaffDashboard"));
 const TataUsahaDashboard = lazy(() => import("./pages/TataUsahaDashboard"));
 const ImportantEventNotes = lazy(() => import("./pages/ImportantEventNotes"));
 const StudentRegistration = lazy(() => import("./pages/StudentRegistration"));
@@ -238,6 +240,8 @@ const App = () => (
                 <Route path="pengaturan" element={<AdminSettings />} />
               </Route>
               <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+              <Route path="/staff" element={<Staff />} />
+              <Route path="/staff-dashboard" element={<StaffDashboard />} />
               <Route path="/teachers" element={<ProtectedRoute><Teachers /></ProtectedRoute>} />
               <Route path="/students" element={<ProtectedRoute><Students /></ProtectedRoute>} />
               <Route path="/student-mutations" element={<ProtectedRoute allowedRoles={['admin', 'kesiswaan']}><StudentMutations /></ProtectedRoute>} />
