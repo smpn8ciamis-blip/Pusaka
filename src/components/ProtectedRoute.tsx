@@ -27,12 +27,12 @@ export const ProtectedRoute = ({ children, requireRole, allowedRoles }: Protecte
 
   // Check allowedRoles array first
   if (allowedRoles && userRole && !allowedRoles.includes(userRole)) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   // Then check requireRole for backward compatibility
   if (requireRole && userRole !== requireRole) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <>{children}</>;

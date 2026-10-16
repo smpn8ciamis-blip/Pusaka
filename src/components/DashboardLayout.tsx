@@ -420,7 +420,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   ];
 
   const baseTeacherMenuItems: MenuItem[] = [
-    { icon: LayoutDashboard, label: 'Dashboard', href: '/' },
+    { icon: LayoutDashboard, label: 'Dashboard', href: '/dashboard' },
     { icon: Calendar, label: 'Jadwal', href: '/schedules' },
     { icon: ClipboardList, label: 'Absensi', href: '/attendance' },
     { icon: FileText, label: 'Jurnal Mengajar', href: '/journals' },
@@ -534,7 +534,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
 
   // ⭐ BARU: Menu OSIS — hanya dashboard & poin pelanggaran
   const osisMenuItems: MenuItem[] = [
-    { icon: LayoutDashboard, label: 'Dashboard', href: '/' },
+    { icon: LayoutDashboard, label: 'Dashboard', href: '/dashboard' },
     { icon: AlertTriangle, label: 'Poin Pelanggaran', href: '/violations' },
   ];
 
@@ -947,7 +947,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
           >
             {userRole === 'admin' ? (
               <>
-                {renderMenuItem({ icon: LayoutDashboard, label: 'Dashboard', href: '/' })}
+                {renderMenuItem({ icon: LayoutDashboard, label: 'Dashboard', href: '/dashboard' })}
                 {renderGroupedMenu(adminMenuGroups)}
               </>
             ) : userRole === 'siswa' ? (
