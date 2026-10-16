@@ -124,11 +124,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
 
     // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
+      // Tunggu peran terbaca SEBELUM loading selesai; kalau tidak, saat reload userRole masih null
+      // sehingga ProtectedRoute (requireRole) mengira peran tidak cocok lalu melempar ke dashboard.
       if (session?.user) {
-        fetchUserRole(session.user.id);
+        await fetchUserRole(session.user.id);
       }
       setLoading(false);
     });

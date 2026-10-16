@@ -79,12 +79,14 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     'Master Data': false,
     'Akademik': false,
-    'Kehadiran & Laporan': false,
+    'Kehadiran': false,
     'Kesiswaan': false,
     'Ekstrakurikuler': false,
+    'Standar Pendidikan': false,
     'Informasi': false,
-    'Keuangan': false,
     'Surat & Perjalanan': false,
+    'Anggaran & Keuangan': false,
+    'Honorarium & Upah': false,
     'Manajemen Akun': false,
     'Sistem': false,
     'Akademik Siswa': true,
@@ -241,8 +243,20 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     });
   };
 
+  const ADMIN_GROUP_LABELS = [
+    'Master Data', 'Akademik', 'Kehadiran', 'Kesiswaan', 'Ekstrakurikuler', 'Standar Pendidikan',
+    'Informasi', 'Surat & Perjalanan', 'Anggaran & Keuangan', 'Honorarium & Upah', 'Manajemen Akun', 'Sistem',
+  ];
+  // Menu admin berbentuk akordeon: membuka satu grup menutup grup lain agar sidebar tetap ringkas
   const toggleGroup = (label: string) => {
-    setOpenGroups(prev => ({ ...prev, [label]: !prev[label] }));
+    setOpenGroups(prev => {
+      const opening = !(prev[label] ?? true);
+      if (!opening || !ADMIN_GROUP_LABELS.includes(label)) return { ...prev, [label]: opening };
+      const next = { ...prev };
+      ADMIN_GROUP_LABELS.forEach(l => { next[l] = false; });
+      next[label] = true;
+      return next;
+    });
   };
 
   // ============================
@@ -254,8 +268,8 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
       items: [
         { icon: UserCircle, label: 'Guru', href: '/teachers' },
         { icon: Users, label: 'Siswa', href: '/students' },
-        { icon: UserMinus, label: 'Mutasi Keluar', href: '/student-mutations' },
         { icon: BookOpen, label: 'Kelas', href: '/classes' },
+        { icon: UserMinus, label: 'Mutasi Keluar', href: '/student-mutations' },
         { icon: Award, label: 'Alumni', href: '/alumni' },
         { icon: CalendarClock, label: 'Tahun Pelajaran', href: '/academic-year-settings' },
       ],
@@ -267,38 +281,40 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         { icon: BarChart3, label: 'Beban Mengajar', href: '/teacher-workload' },
         { icon: FileText, label: 'Jurnal Mengajar', href: '/journals' },
         { icon: GraduationCap, label: 'Nilai', href: '/grades' },
+        { icon: TrendingUp, label: 'Analytics Nilai', href: '/grade-analytics' },
         { icon: FileCheck, label: 'Administrasi Ujian', href: '/exam-administration' },
         { icon: FileCheck, label: 'Ujian CBT', href: '/cbt-management' },
       ],
     },
     {
-      label: 'Kehadiran & Laporan',
+      label: 'Kehadiran',
       items: [
         { icon: ClipboardList, label: 'Absensi', href: '/attendance' },
         { icon: CreditCard, label: 'Absensi RFID', href: '/rfid-attendance' },
+        { icon: Fingerprint, label: 'Mesin Fingerprint', href: '/fingerprint' },
         { icon: FileText, label: 'Rekap Absensi Siswa', href: '/student-attendance-report' },
         { icon: TrendingUp, label: 'Analytics Kehadiran', href: '/analytics' },
-        { icon: TrendingUp, label: 'Analytics Nilai', href: '/grade-analytics' },
       ],
     },
     {
       label: 'Kesiswaan',
       items: [
-        { icon: Mail, label: 'Surat Izin Kegiatan', href: '/permission-letters' },
         { icon: AlertTriangle, label: 'Poin Pelanggaran', href: '/violations' },
         { icon: Award, label: 'Penghargaan & Prestasi', href: '/achievements' },
+        { icon: Mail, label: 'Surat Izin Kegiatan', href: '/permission-letters' },
         { icon: FileText, label: 'Dispensasi Siswa', href: '/dispensasi-siswa' },
         { icon: Shield, label: 'Dashboard Guru Piket', href: '/guru-piket-dashboard' },
         { icon: BookOpen, label: 'Buku Tamu', href: '/buku-tamu' },
+        { icon: FileText, label: 'Catatan Kejadian', href: '/important-event-notes' },
       ],
     },
     {
       label: 'Ekstrakurikuler',
       items: [
         { icon: ClipboardList, label: 'Jenis Ekskul', href: '/ekskul-types' },
-        { icon: BookOpen, label: 'Jurnal Ekskul', href: '/ekskul-journal' },
-        { icon: Users, label: 'Anggota Ekskul', href: '/ekskul-members' },
         { icon: UserCheck, label: 'Pembina Ekskul', href: '/ekskul-coaches' },
+        { icon: Users, label: 'Anggota Ekskul', href: '/ekskul-members' },
+        { icon: BookOpen, label: 'Jurnal Ekskul', href: '/ekskul-journal' },
       ],
     },
     {
@@ -314,7 +330,6 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
       items: [
         { icon: Megaphone, label: 'Pengumuman', href: '/announcements' },
         { icon: FolderOpen, label: 'Repositori', href: '/repository' },
-        { icon: FileText, label: 'Catatan Kejadian', href: '/important-event-notes' },
         { icon: MessageSquare, label: 'Pengaduan', href: '/manajemen-pengaduan' },
         { icon: Vote, label: 'Manajemen Polling', href: '/polling' },
         { icon: Sparkles, label: 'Nedelcis Hub', href: '/nedelcis-hub' },
@@ -323,51 +338,55 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     {
       label: 'Surat & Perjalanan',
       items: [
+        { icon: Inbox, label: 'Surat Masuk', href: '/surat-masuk' },
+        { icon: Send, label: 'Surat Keluar', href: '/surat-keluar' },
         { icon: FileSignature, label: 'Surat Tugas', href: '/assignment-letters' },
         { icon: Plane, label: 'SPPD', href: '/official-travel' },
         { icon: FileCheck, label: 'Bukti Kunjungan Guru', href: '/my-letters' },
-        { icon: Inbox, label: 'Surat Masuk', href: '/surat-masuk' },
-        { icon: Send, label: 'Surat Keluar', href: '/surat-keluar' },
       ],
     },
     {
-      label: 'Keuangan',
+      label: 'Anggaran & Keuangan',
       items: [
+        { icon: Wallet, label: 'RKAS', href: '/rkas' },
+        { icon: BarChart3, label: 'Kode Anggaran', href: '/kode-label-settings' },
+        { icon: FileBarChart, label: 'SPJ / BKU', href: '/spj' },
         { icon: Receipt, label: 'Kwitansi', href: '/payment-receipts' },
-        { icon: Hammer, label: 'Upah Tukang', href: '/worker-payments' },
-        { icon: Moon, label: 'Piket Malam', href: '/night-shift-payments' },
-        { icon: CalendarDays, label: 'Piket Sabtu Minggu', href: '/weekend-shift-payments' },
+        { icon: Landmark, label: 'Manajemen Pajak', href: '/tax-management' },
+        { icon: FileCheck, label: 'Pemeriksaan Kas', href: '/cash-audit' },
+      ],
+    },
+    {
+      label: 'Honorarium & Upah',
+      items: [
         { icon: GraduationCap, label: 'Honorarium GTT/PTT', href: '/gtt-ptt-honorarium' },
         { icon: Award, label: 'Honorarium Ekskul', href: '/extracurricular-honorarium' },
         { icon: Receipt, label: 'Kwitansi Narasumber', href: '/narasumber-honorarium' },
-        { icon: Landmark, label: 'Manajemen Pajak', href: '/tax-management' },
-        { icon: FileCheck, label: 'Pemeriksaan Kas', href: '/cash-audit' },
-        { icon: Wallet, label: 'RKAS', href: '/rkas' },
-        { icon: FileBarChart, label: 'SPJ / BKU', href: '/spj' },
-        { icon: BarChart3, label: 'Kode Anggaran', href: '/kode-label-settings' },
+        { icon: Moon, label: 'Piket Malam', href: '/night-shift-payments' },
+        { icon: CalendarDays, label: 'Piket Sabtu Minggu', href: '/weekend-shift-payments' },
+        { icon: Hammer, label: 'Upah Tukang', href: '/worker-payments' },
       ],
     },
     {
       label: 'Manajemen Akun',
       items: [
-        { icon: UserCheck, label: 'Registrasi Staff', href: '/staff-registration' },
-        { icon: GraduationCap, label: 'Registrasi Siswa', href: '/student-registration' },
         { icon: Users, label: 'Akun Staff', href: '/staff-accounts' },
+        { icon: UserCheck, label: 'Registrasi Staff', href: '/staff-registration' },
         { icon: Users, label: 'Akun Siswa', href: '/student-accounts' },
+        { icon: GraduationCap, label: 'Registrasi Siswa', href: '/student-registration' },
       ],
     },
     {
       label: 'Sistem',
       items: [
+        { icon: Settings, label: 'Pengaturan', href: '/settings' },
+        { icon: Send, label: 'WhatsApp Bot', href: '/whatsapp-bot' },
         { icon: Database, label: 'Backup Database', href: '/database-backup' },
         { icon: FileSpreadsheet, label: 'Edit Data Massal', href: '/bulk-data-editor' },
         { icon: Upload, label: 'Upload Foto Massal', href: '/bulk-photo-upload' },
         { icon: Upload, label: 'Manajemen Upload Berkas', href: '/file-upload-management' },
         { icon: Bell, label: 'Billing Dashboard', href: '/billing-dashboard' },
-        { icon: Send, label: 'WhatsApp Bot', href: '/whatsapp-bot' },
-        { icon: Fingerprint, label: 'Mesin Fingerprint', href: '/fingerprint' },
         { icon: Server, label: 'Sistem Informasi', href: '/system-info' },
-        { icon: Settings, label: 'Pengaturan', href: '/settings' },
       ],
     },
   ];
@@ -614,10 +633,12 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   };
 
   const filteredSiswaMenuGroups = filterMenuGroups(siswaMenuGroups);
+  const filteredAdminMenuGroups = filterMenuGroups(adminMenuGroups);
   const filteredMenuItems = filterMenuItems(menuItems);
 
   // ⭐ BARU: izinkan osis & tata_usaha & bendahara untuk search menu
   const canSearchMenu =
+    userRole === 'admin' ||
     userRole === 'siswa' ||
     userRole === 'teacher' ||
     userRole === 'osis' ||
@@ -633,7 +654,13 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     if (userRole !== 'admin') return;
     const active = adminMenuGroups.find((g) => g.items.some((i) => isItemActive(i.href)));
     if (active) {
-      setOpenGroups((prev) => (prev[active.label] ? prev : { ...prev, [active.label]: true }));
+      setOpenGroups((prev) => {
+        if (prev[active.label]) return prev;
+        const next = { ...prev };
+        ADMIN_GROUP_LABELS.forEach((l) => { next[l] = false; });
+        next[active.label] = true;
+        return next;
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname, location.search, userRole]);
@@ -751,7 +778,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   // ============================
   const renderGroupedMenu = (groups: MenuGroup[]) => {
     return groups.map((group) => {
-      const isOpen = openGroups[group.label] ?? true;
+      const isOpen = menuSearch.trim() ? true : (openGroups[group.label] ?? true);
       const hasActiveItem = group.items.some(item => isItemActive(item.href));
 
       if (collapsed) {
@@ -780,8 +807,12 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
                 hasActiveItem && 'text-violet-600 dark:text-violet-400'
               )}
             >
-              <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                {hasActiveItem && !isOpen && <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />}
                 {group.label}
+                <span className="rounded-full bg-slate-100 px-1.5 text-[9px] font-semibold tracking-normal text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                  {group.items.length}
+                </span>
               </span>
               {isOpen ? (
                 <ChevronUp className="h-3.5 w-3.5 text-slate-400" />
@@ -948,7 +979,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
             {userRole === 'admin' ? (
               <>
                 {renderMenuItem({ icon: LayoutDashboard, label: 'Dashboard', href: '/dashboard' })}
-                {renderGroupedMenu(adminMenuGroups)}
+                {renderGroupedMenu(filteredAdminMenuGroups)}
               </>
             ) : userRole === 'siswa' ? (
               <>
