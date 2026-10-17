@@ -22,7 +22,7 @@ import * as XLSX from 'xlsx';
 const db = supabase as any;
 
 const RESULT_LABEL: Record<string, string> = {
-  check_in: 'Masuk', late: 'Terlambat', check_out: 'Pulang', already: 'Sudah tercatat',
+  check_in: 'Masuk', late: 'Terlambat', check_out: 'Pulang', already: 'Sudah tercatat', staff: 'Staf (dipakai piket)',
   unmapped: 'PIN belum dipetakan', outside_hours: 'Di luar jam', duplicate: 'Duplikat',
 };
 const fmt = (iso?: string | null) =>

@@ -24,7 +24,7 @@ import { format } from "date-fns";
 import { id } from "date-fns/locale";
 import {
   Plus, Trash2, CalendarIcon, Settings, FileDown, Pencil, CopyPlus,
-  Users, Wallet, Receipt, Percent, ClipboardList, Eye, Moon
+  Users, Wallet, Receipt, Percent, ClipboardList, Eye, Moon, Fingerprint
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -33,6 +33,7 @@ import { numberToWords, formatCurrency, capitalizeFirst } from "@/lib/terbilang"
 import { NightShiftReceiptPreview } from "@/components/night-shift/NightShiftReceiptPreview";
 import { NightShiftAttendancePreview } from "@/components/night-shift/NightShiftAttendancePreview";
 import type { NightShiftRate, NightShiftBatch, SchoolSettings, TaxType } from "@/types/nightShift";
+import { PiketAttendanceImport, ImportedWorker } from "@/components/piket/PiketAttendanceImport";
 import { TAX_TYPE_LABELS } from "@/types/nightShift";
 
 // ⭐ MODUL PENGGajian — role yang diizinkan full CRUD
@@ -48,6 +49,8 @@ interface TempWorker {
   tax_amount: number;
   net_amount: number;
   notes: string;
+  start_date?: string;
+  end_date?: string;
 }
 
 const NightShiftPayments = () => {
@@ -93,6 +96,7 @@ const NightShiftPayments = () => {
     notes: "",
   });
   const [tempWorkers, setTempWorkers] = useState<TempWorker[]>([]);
+  const [importOpen, setImportOpen] = useState(false);
 
   // ============================================
   // QUERIES
@@ -253,8 +257,8 @@ const NightShiftPayments = () => {
         batch_id: batchData.id,
         worker_name: w.worker_name,
         position_type: w.position_type,
-        start_date: today,
-        end_date: today,
+        start_date: w.start_date ?? today,
+        end_date: w.end_date ?? today,
         shift_count: w.shift_count,
         nightly_rate: w.nightly_rate,
         gross_amount: w.gross_amount,
@@ -321,8 +325,8 @@ const NightShiftPayments = () => {
         batch_id: editingBatch.id,
         worker_name: w.worker_name,
         position_type: w.position_type,
-        start_date: today,
-        end_date: today,
+        start_date: w.start_date ?? today,
+        end_date: w.end_date ?? today,
         shift_count: w.shift_count,
         nightly_rate: w.nightly_rate,
         gross_amount: w.gross_amount,
@@ -475,6 +479,8 @@ const NightShiftPayments = () => {
 
     const workers: TempWorker[] = (batch.night_shift_payments || []).map((w) => ({
       id: w.id,
+      start_date: w.start_date,
+      end_date: w.end_date,
       worker_name: w.worker_name,
       position_type: w.position_type,
       shift_count: w.shift_count,
@@ -502,6 +508,30 @@ const NightShiftPayments = () => {
     const net_amount = gross_amount - tax_amount;
 
     return { shift_count, nightly_rate, gross_amount, tax_amount, net_amount };
+  };
+
+  const importFromAttendance = (rows: ImportedWorker[]) => {
+    const mapped: TempWorker[] = rows.map((r) => {
+      const rate = rates.find((x) => x.position_type === r.position_type)?.nightly_rate ?? 0;
+      const gross_amount = r.shift_count * rate;
+      const tax_amount = (gross_amount * batchForm.tax_rate) / 100;
+      return {
+        worker_name: r.worker_name, position_type: r.position_type, shift_count: r.shift_count,
+        nightly_rate: rate, gross_amount, tax_amount, net_amount: gross_amount - tax_amount,
+        notes: r.notes, start_date: r.start_date, end_date: r.end_date,
+      };
+    });
+    setTempWorkers((prev) => {
+      const byName = new Map(mapped.map((m) => [m.worker_name, m]));
+      const kept = prev.map((w) => {
+        const m = byName.get(w.worker_name);
+        if (!m) return w;
+        byName.delete(w.worker_name);
+        return { ...m, id: w.id };
+      });
+      return [...kept, ...byName.values()];
+    });
+    toast.success(`${rows.length} petugas diambil dari daftar hadir fingerprint`);
   };
 
   const addWorkerToList = () => {
@@ -996,7 +1026,21 @@ const NightShiftPayments = () => {
                       {/* Workers List */}
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
-                          <Label className="text-base font-semibold">Daftar Petugas Piket</Label>
+                          <div className="flex items-center gap-2">
+                            <Label className="text-base font-semibold">Daftar Petugas Piket</Label>
+                            <Button type="button" variant="secondary" size="sm" onClick={() => setImportOpen(true)}>
+                              <Fingerprint className="mr-2 h-4 w-4" /> Ambil dari Fingerprint
+                            </Button>
+                            <PiketAttendanceImport
+                              open={importOpen}
+                              onClose={() => setImportOpen(false)}
+                              shift="malam"
+                              month={batchForm.receipt_date}
+                              rates={rates}
+                              existingNames={tempWorkers.map((w) => w.worker_name)}
+                              onApply={importFromAttendance}
+                            />
+                          </div>
                           <Dialog open={isWorkerDialogOpen} onOpenChange={(open) => {
                             setIsWorkerDialogOpen(open);
                             if (!open) {
