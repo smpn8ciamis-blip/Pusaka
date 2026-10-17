@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { FileDown, X } from "lucide-react";
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
+import { usePiketAttendance } from "@/components/piket/PiketAttendanceImport";
 import type { NightShiftBatch, SchoolSettings } from "@/types/nightShift";
 
 interface WakasekSarpras {
@@ -27,6 +28,8 @@ export function NightShiftAttendancePreview({
   wakasekSarpras,
   onDownload,
 }: NightShiftAttendancePreviewProps) {
+  const firstStart = batch?.night_shift_payments?.[0]?.start_date ?? batch?.receipt_date ?? null;
+  const { data: hadir } = usePiketAttendance("malam", firstStart, isOpen && !!batch);
   if (!batch) return null;
 
   const workers = batch.night_shift_payments || [];
@@ -34,7 +37,14 @@ export function NightShiftAttendancePreview({
   const city = schoolSettings?.city || "";
 
   const allDates: Date[] = [];
+  // Petugas yang ada di daftar hadir fingerprint: pakai tanggal hadir sebenarnya.
+  const attended = (name: string) => hadir?.get(name)?.map((d) => d.duty_date);
   workers.forEach((w) => {
+    const real = attended(w.worker_name);
+    if (real?.length) {
+      real.forEach((d) => allDates.push(new Date(d)));
+      return;
+    }
     const start = new Date(w.start_date);
     const end = new Date(w.end_date);
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
@@ -86,6 +96,7 @@ export function NightShiftAttendancePreview({
                 {workers.map((w, i) => {
                   const workerStart = new Date(w.start_date);
                   const workerEnd = new Date(w.end_date);
+                  const real = attended(w.worker_name);
                   return (
                     <tr key={w.id}>
                       <td className="border border-gray-400 p-1 text-center">{i + 1}</td>
@@ -93,7 +104,9 @@ export function NightShiftAttendancePreview({
                       <td className="border border-gray-400 p-1 text-center">{w.position_type}</td>
                       {uniqueDates.map((d, idx) => (
                         <td key={idx} className="border border-gray-400 p-1 text-center">
-                          {d >= workerStart && d <= workerEnd ? "✓" : ""}
+                          {(real?.length
+                            ? real.includes(d.toISOString().split("T")[0])
+                            : d >= workerStart && d <= workerEnd) ? "✓" : ""}
                         </td>
                       ))}
                       <td className="border border-gray-400 p-1 text-center font-bold">{w.shift_count}</td>
