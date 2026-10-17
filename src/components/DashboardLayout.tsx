@@ -1,5 +1,6 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsEkskulCoach } from '@/hooks/useEkskul';
+import { useHasPiketDuty } from '@/hooks/usePiket';
 import { useMySnpStandardIds } from '@/hooks/usePenjabSnp';
 import { SubscriptionBanner } from '@/components/SubscriptionBanner';
 import { Button } from '@/components/ui/button';
@@ -68,6 +69,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isHomeroomTeacher, setIsHomeroomTeacher] = useState(false);
   const { isCoach: isEkskulCoach } = useIsEkskulCoach();
+  const hasPiketDuty = useHasPiketDuty();
   const { isPenjab: isSnpPenjab } = useMySnpStandardIds();
   const [menuSearch, setMenuSearch] = useState('');
   const [favorites, setFavorites] = useState<string[]>(() => {
@@ -492,6 +494,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const teacherExtraItems: MenuItem[] = [
     ...(isEkskulCoach ? ekskulCoachMenuItems : []),
     ...(isSnpPenjab ? snpPenjabMenuItems : []),
+    ...(hasPiketDuty ? [{ icon: Fingerprint, label: 'Log Piket Saya', href: '/my-piket' }] : []),
   ];
   const teacherMenuItems: MenuItem[] = teacherExtraItems.length > 0
     ? [...teacherMenuItemsBase.slice(0, -1), ...teacherExtraItems, ...teacherMenuItemsBase.slice(-1)]
@@ -546,6 +549,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const stafMenuItems: MenuItem[] = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/staff-dashboard' },
     { icon: FileCheck, label: 'Surat Tugas Saya', href: '/my-letters' },
+    ...(hasPiketDuty ? [{ icon: Fingerprint, label: 'Log Piket Saya', href: '/my-piket' }] : []),
   ];
 
   const kesiswaanMenuItems: MenuItem[] = [

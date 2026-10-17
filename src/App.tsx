@@ -76,6 +76,7 @@ const SuratKeluar = lazy(() => import("./pages/SuratKeluar"));
 const Staff = lazy(() => import("./pages/Staff"));
 const StaffDashboard = lazy(() => import("./pages/StaffDashboard"));
 const PiketManagement = lazy(() => import("./pages/PiketManagement"));
+const MyPiket = lazy(() => import("./pages/MyPiket"));
 const TataUsahaDashboard = lazy(() => import("./pages/TataUsahaDashboard"));
 const ImportantEventNotes = lazy(() => import("./pages/ImportantEventNotes"));
 const StudentRegistration = lazy(() => import("./pages/StudentRegistration"));
@@ -274,6 +275,7 @@ const App = () => (
               <Route path="/database-backup" element={<ProtectedRoute allowedRoles={['admin', 'super_admin']}><DatabaseBackup /></ProtectedRoute>} />
               <Route path="/assignment-letters" element={<ProtectedRoute><AssignmentLetters /></ProtectedRoute>} />
               <Route path="/official-travel" element={<ProtectedRoute><OfficialTravel /></ProtectedRoute>} />
+              <Route path="/my-piket" element={<MyPiket />} />
               <Route path="/my-letters" element={<ProtectedRoute><MyLetters /></ProtectedRoute>} />
               <Route path="/payment-receipts" element={<ProtectedRoute><PaymentReceipts /></ProtectedRoute>} />
 
