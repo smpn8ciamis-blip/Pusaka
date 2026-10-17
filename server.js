@@ -964,12 +964,38 @@ app.get('/iclock/cdata', async (req, res) => {
         ].join('\n') + '\n');
     } catch (e) { res.status(500).send('ERROR'); }
 });
-// Detak jantung mesin
+// Detak jantung mesin + pengiriman perintah dari antrean (fingerprint_commands), mis. DATA UPDATE USERINFO
 app.get('/iclock/getrequest', async (req, res) => {
-    try { const sn = fpSn(req); if (sn) await fpDevice(sn, fpIp(req)); res.type('text/plain').send('OK'); }
-    catch (e) { res.status(500).send('ERROR'); }
+    try {
+        const sn = fpSn(req);
+        if (!sn) return res.type('text/plain').send('OK');
+        const active = await fpDevice(sn, fpIp(req));
+        if (!active) return res.type('text/plain').send('OK');
+        const q = await supabase.from('fingerprint_commands').select('id, command').eq('device_sn', sn).eq('status', 'pending').order('id').limit(20);
+        if (q.error || !q.data || !q.data.length) return res.type('text/plain').send('OK');
+        const ids = q.data.map(function(c) { return c.id; });
+        await supabase.from('fingerprint_commands').update({ status: 'sent', sent_at: new Date().toISOString() }).in('id', ids);
+        console.log('[FINGERPRINT] ' + sn + ': mengirim ' + ids.length + ' perintah');
+        res.type('text/plain').send(q.data.map(function(c) { return 'C:' + c.id + ':' + c.command; }).join('\n') + '\n');
+    } catch (e) { res.status(500).send('ERROR'); }
 });
-app.post('/iclock/devicecmd', rawText, (req, res) => res.type('text/plain').send('OK'));
+// Hasil perintah dari mesin: baris "ID=12&Return=0&CMD=DATA" (Return=0 berarti sukses)
+app.post('/iclock/devicecmd', rawText, async (req, res) => {
+    try {
+        const sn = fpSn(req);
+        const lines = String(req.body || '').split(/\r?\n/);
+        for (const line of lines) {
+            const m = line.match(/(?:^|&)ID=(\d+)/);
+            if (!m) continue;
+            const rc = line.match(/(?:^|&)Return=(-?\d+)/);
+            const code = rc ? parseInt(rc[1], 10) : 0;
+            await supabase.from('fingerprint_commands').update({
+                status: code === 0 ? 'done' : 'failed', return_code: code, done_at: new Date().toISOString()
+            }).eq('id', parseInt(m[1], 10)).eq('device_sn', sn);
+        }
+        res.type('text/plain').send('OK');
+    } catch (e) { console.error('[FINGERPRINT devicecmd]:', e.message); res.type('text/plain').send('OK'); }
+});
 app.get('/iclock/ping', (req, res) => res.type('text/plain').send('OK'));
 // Terima log absen: tiap baris "PIN \t YYYY-MM-DD HH:MM:SS \t Status \t Verify \t ..."
 app.post('/iclock/cdata', rawText, async (req, res) => {
