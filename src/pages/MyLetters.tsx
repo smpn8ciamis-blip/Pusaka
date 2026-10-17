@@ -25,6 +25,8 @@ interface LetterRow {
   subtitle: string;
   teacherIds: string[];
   teacherNames: string[];
+  staffIds: string[];
+  staffNames?: string[];
 }
 
 const fmt = (d?: string | null) =>
@@ -33,9 +35,11 @@ const fmt = (d?: string | null) =>
 export default function MyLetters() {
   const { user, userRole } = useAuth();
   const isTeacher = userRole === "teacher";
+  const isStaf = userRole === "staf";
 
   const [loading, setLoading] = useState(true);
   const [teacherId, setTeacherId] = useState<string | null>(null);
+  const [staffId, setStaffId] = useState<string | null>(null);
   const [assignments, setAssignments] = useState<LetterRow[]>([]);
   const [search, setSearch] = useState("");
 
@@ -55,10 +59,21 @@ export default function MyLetters() {
           setTeacherId(myTeacherId);
         }
 
+        let myStaffId: string | null = null;
+        if (isStaf) {
+          const { data: st } = await supabase
+            .from("staff" as any)
+            .select("id")
+            .eq("user_id", user.id)
+            .maybeSingle();
+          myStaffId = (st as any)?.id ?? null;
+          setStaffId(myStaffId);
+        }
+
         const { data: al, error: alErr } = await supabase
           .from("assignment_letters")
           .select(
-            "id, letter_number, letter_date, description, location, assignment_type, assignment_letter_teachers(teacher_id)"
+            "id, letter_number, letter_date, description, location, assignment_type, assignment_letter_teachers(teacher_id), assignment_letter_manual_executors(staff_id, full_name)"
           )
           .order("letter_date", { ascending: false });
         if (alErr) throw alErr;
@@ -77,6 +92,12 @@ export default function MyLetters() {
             subtitle: r.location || "",
             teacherIds: ids,
             teacherNames: [],
+            staffIds: (r.assignment_letter_manual_executors ?? [])
+              .map((x: any) => x.staff_id)
+              .filter(Boolean),
+            staffNames: (r.assignment_letter_manual_executors ?? [])
+              .filter((x: any) => x.staff_id)
+              .map((x: any) => x.full_name as string),
           };
         });
 
@@ -104,14 +125,18 @@ export default function MyLetters() {
           }
         }
 
-        const withNames = mapAl.map((r) => ({
+        const withNames = mapAl.map((r: any) => ({
           ...r,
-          teacherNames: r.teacherIds.map((i) => names.get(i) ?? "Guru"),
+          teacherNames: [
+            ...r.teacherIds.map((i: string) => names.get(i) ?? "Guru"),
+            ...(r.staffNames ?? []),
+          ],
         }));
 
-        const filtered =
-          isTeacher && myTeacherId
-            ? withNames.filter((r) => r.teacherIds.includes(myTeacherId!))
+        const filtered = isStaf
+          ? withNames.filter((r: any) => !!myStaffId && r.staffIds.includes(myStaffId))
+          : isTeacher && myTeacherId
+            ? withNames.filter((r: any) => r.teacherIds.includes(myTeacherId!))
             : withNames;
 
         setAssignments(filtered);
@@ -122,7 +147,7 @@ export default function MyLetters() {
       }
     };
     load();
-  }, [user, isTeacher]);
+  }, [user, isTeacher, isStaf]);
 
   const q = search.toLowerCase().trim();
   const filteredAssignments = useMemo(() => {
@@ -157,7 +182,7 @@ export default function MyLetters() {
                   {fmt(r.letter_date)} • {r.title}
                   {r.subtitle ? ` — ${r.subtitle}` : ""}
                 </span>
-                {!isTeacher && r.teacherNames.length > 0 && (
+                {!isTeacher && !isStaf && r.teacherNames.length > 0 && (
                   <div className="flex flex-wrap gap-1 pt-1">
                     {r.teacherNames.map((n, i) => (
                       <Badge key={i} variant="secondary" className="text-[10px]">
@@ -174,8 +199,9 @@ export default function MyLetters() {
                 letterId={r.id}
                 letterNumber={r.letter_number}
                 teacherId={isTeacher ? teacherId ?? undefined : undefined}
-                canUpload={isTeacher && !!teacherId}
-                teacherName={isTeacher ? undefined : r.teacherNames.join(", ")}
+                staffId={isStaf ? staffId ?? undefined : undefined}
+                canUpload={(isTeacher && !!teacherId) || (isStaf && !!staffId)}
+                teacherName={isTeacher || isStaf ? undefined : r.teacherNames.join(", ")}
                 destination={r.subtitle}
                 purpose={r.title}
               />
@@ -192,7 +218,7 @@ export default function MyLetters() {
         <div>
           <h1 className="text-2xl font-bold">Surat Tugas</h1>
           <p className="text-sm text-muted-foreground">
-            {isTeacher
+            {isTeacher || isStaf
               ? "Surat tugas yang menugaskan Anda. Unggah foto bukti kunjungan dan berkas PDF."
               : "Lihat, unduh, dan cetak lampiran bukti kunjungan serta berkas PDF yang diunggah guru."}
           </p>

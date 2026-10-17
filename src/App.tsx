@@ -75,6 +75,7 @@ const SuratMasuk = lazy(() => import("./pages/SuratMasuk"));
 const SuratKeluar = lazy(() => import("./pages/SuratKeluar"));
 const Staff = lazy(() => import("./pages/Staff"));
 const StaffDashboard = lazy(() => import("./pages/StaffDashboard"));
+const PiketManagement = lazy(() => import("./pages/PiketManagement"));
 const TataUsahaDashboard = lazy(() => import("./pages/TataUsahaDashboard"));
 const ImportantEventNotes = lazy(() => import("./pages/ImportantEventNotes"));
 const StudentRegistration = lazy(() => import("./pages/StudentRegistration"));
@@ -295,6 +296,8 @@ const App = () => (
                   <WeekendShiftPayments />
                 </ProtectedRoute>
               } />
+              <Route path="/piket-malam" element={<PiketManagement shift="malam" />} />
+              <Route path="/piket-sabtu-minggu" element={<PiketManagement shift="sabtu_minggu" />} />
               <Route path="/gtt-ptt-honorarium" element={
                 <ProtectedRoute allowedRoles={[...FINANCE_ROLES]}>
                   <GttPttHonorarium />

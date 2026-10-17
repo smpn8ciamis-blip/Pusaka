@@ -40,6 +40,7 @@ interface UnifiedExecutor {
   key: string;
   type: 'teacher' | 'manual';
   teacher_id?: string;
+  staff_id?: string;
   manual_index?: number;
   full_name: string;
   nip: string;
@@ -107,6 +108,18 @@ export default function AssignmentLetters() {
     },
   });
 
+  const { data: staffList } = useQuery({
+    queryKey: ["staff-for-assignment"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("staff" as any)
+        .select("id, full_name, nip, position, staff_type, status")
+        .order("full_name");
+      if (error) throw error;
+      return ((data as any[]) || []).filter((x) => x.status !== "nonaktif");
+    },
+  });
+
   const sortExecutors = (assignment: any) => {
     if (!assignment) return assignment;
     return {
@@ -126,7 +139,7 @@ export default function AssignmentLetters() {
         .select(`
           *,
           assignment_letter_teachers (teacher_id, order_index),
-          assignment_letter_manual_executors (id, full_name, nip, pangkat_golongan, jabatan, order_index)
+          assignment_letter_manual_executors (id, full_name, nip, pangkat_golongan, jabatan, order_index, staff_id)
         `)
         .order("letter_date", { ascending: false });
       if (error) throw error;
@@ -158,6 +171,7 @@ export default function AssignmentLetters() {
       key: `manual-${me.id || idx}`,
       type: 'manual',
       manual_index: idx,
+      staff_id: me.staff_id || undefined,
       full_name: me.full_name,
       nip: me.nip || "",
       pangkat_golongan: me.pangkat_golongan || "",
@@ -234,6 +248,7 @@ export default function AssignmentLetters() {
           nip: e.nip || null,
           pangkat_golongan: e.pangkat_golongan || null,
           jabatan: e.jabatan || null,
+          staff_id: e.staff_id ?? null,
           order_index: e.globalIdx,
         }));
         const { error } = await supabase.from("assignment_letter_manual_executors").insert(manualInserts);
@@ -335,6 +350,7 @@ export default function AssignmentLetters() {
           nip: e.nip || null,
           pangkat_golongan: e.pangkat_golongan || null,
           jabatan: e.jabatan || null,
+          staff_id: e.staff_id ?? null,
           order_index: e.globalIdx,
         }));
         const { error } = await supabase.from("assignment_letter_manual_executors").insert(manualInserts);
@@ -460,6 +476,29 @@ export default function AssignmentLetters() {
       },
     ]);
     setNewManualExecutor({ full_name: "", nip: "", pangkat_golongan: "", jabatan: "" });
+  };
+
+  const isStaffSelected = (staffId: string) =>
+    executorOrder.some((e) => e.type === 'manual' && e.staff_id === staffId);
+
+  const toggleStaff = (st: any) => {
+    setExecutorOrder((prev) => {
+      if (prev.some((e) => e.type === 'manual' && e.staff_id === st.id)) {
+        return prev.filter((e) => !(e.type === 'manual' && e.staff_id === st.id));
+      }
+      return [
+        ...prev,
+        {
+          key: `staff-${st.id}`,
+          type: 'manual',
+          staff_id: st.id,
+          full_name: st.full_name,
+          nip: st.nip || "",
+          pangkat_golongan: "",
+          jabatan: st.position || "Staf",
+        },
+      ];
+    });
   };
 
   const removeExecutor = (key: string) => {
@@ -620,7 +659,7 @@ export default function AssignmentLetters() {
       .select(`
         *,
         assignment_letter_teachers ( teacher_id, order_index ),
-        assignment_letter_manual_executors ( id, full_name, nip, pangkat_golongan, jabatan, order_index )
+        assignment_letter_manual_executors ( id, full_name, nip, pangkat_golongan, jabatan, order_index, staff_id )
       `)
       .eq("id", id)
       .single();
@@ -893,6 +932,28 @@ export default function AssignmentLetters() {
                         </div>
                       )}
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Pelaksana dari Data Staf (tata usaha & karyawan)</Label>
+                    <div className="border rounded-md p-2 max-h-40 overflow-y-auto space-y-1">
+                      {staffList && staffList.length > 0 ? (
+                        staffList.map((st: any) => (
+                          <label key={st.id} className="flex items-center gap-2 text-sm cursor-pointer rounded px-2 py-1 hover:bg-muted/50">
+                            <input
+                              type="checkbox"
+                              checked={isStaffSelected(st.id)}
+                              onChange={() => toggleStaff(st)}
+                            />
+                            <span className="font-medium">{st.full_name}</span>
+                            <span className="text-xs text-muted-foreground">{st.position || (st.staff_type === 'tata_usaha' ? 'Tata Usaha' : 'Karyawan')}</span>
+                          </label>
+                        ))
+                      ) : (
+                        <div className="text-center py-3 text-muted-foreground text-sm">Belum ada data staf.</div>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">Staf yang dipilih dapat melihat surat ini dan mengunggah bukti kunjungan dari akunnya.</p>
                   </div>
 
                   <div className="space-y-2">
