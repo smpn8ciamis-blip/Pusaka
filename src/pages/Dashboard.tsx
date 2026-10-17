@@ -38,6 +38,7 @@ const ROLE_REDIRECTS: Record<string, string> = {
   super_admin: '/super-admin',
   bendahara: '/bendahara-dashboard',
   tata_usaha: '/tata-usaha-dashboard',
+  staf: '/staff-dashboard',
   kesiswaan: '/kesiswaan-dashboard',
   siswa: '/student-dashboard',
   guru_piket: '/guru-piket-dashboard',
