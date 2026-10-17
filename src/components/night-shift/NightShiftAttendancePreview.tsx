@@ -34,7 +34,7 @@ export function NightShiftAttendancePreview({
 
   const workers = batch.night_shift_payments || [];
   const receiptDateFormatted = format(new Date(batch.receipt_date), "dd MMMM yyyy", { locale: id });
-  const city = schoolSettings?.city || "";
+  const city = schoolSettings?.city || "Ciamis";
 
   const allDates: Date[] = [];
   // Petugas yang ada di daftar hadir fingerprint: pakai tanggal hadir sebenarnya.

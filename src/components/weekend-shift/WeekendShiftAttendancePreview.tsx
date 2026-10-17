@@ -31,7 +31,7 @@ export function WeekendShiftAttendancePreview({
 
   const workers = batch.weekend_shift_payments || [];
   const receiptDateFormatted = format(new Date(batch.receipt_date), "dd MMMM yyyy", { locale: id });
-  const city = schoolSettings?.city || "";
+  const city = schoolSettings?.city || "Ciamis";
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>

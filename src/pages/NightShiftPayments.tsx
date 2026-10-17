@@ -702,7 +702,7 @@ const NightShiftPayments = () => {
 
     const signY = taxInfoY + 18;
     const receiptDateFormatted = format(new Date(batch.receipt_date), "dd MMMM yyyy", { locale: id });
-    const city = schoolSettings?.city || "";
+    const city = schoolSettings?.city || "Ciamis";
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
@@ -802,7 +802,7 @@ const NightShiftPayments = () => {
 
     const finalY = (doc as any).lastAutoTable.finalY + 15;
     const receiptDateFormatted = format(new Date(batch.receipt_date), "dd MMMM yyyy", { locale: id });
-    const city = schoolSettings?.city || "";
+    const city = schoolSettings?.city || "Ciamis";
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);

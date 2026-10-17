@@ -27,7 +27,7 @@ export function NightShiftReceiptPreview({
   const receiptDateFormatted = format(new Date(batch.receipt_date), "dd MMMM yyyy", { locale: id });
   const paymentDesc = batch.description || batch.job_title;
   const pph21 = batch.tax_rate > 0 ? formatCurrency(batch.total_tax) : "-";
-  const city = schoolSettings?.city || "";
+  const city = schoolSettings?.city || "Ciamis";
   const headmasterTitle = schoolSettings?.headmaster_position
     ? `${schoolSettings.headmaster_position} ${schoolSettings.school_name || ""}`.trim()
     : `Kepala ${schoolSettings?.school_name || "Sekolah"}`;
