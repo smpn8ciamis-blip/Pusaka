@@ -959,7 +959,7 @@ app.get('/iclock/cdata', async (req, res) => {
         if (!sn) return res.status(400).send('ERROR: SN required');
         await fpDevice(sn, fpIp(req));
         res.type('text/plain').send([
-            'GET OPTION FROM: ' + sn, 'ErrorDelay=60', 'Delay=30', 'TransTimes=00:00;12:00', 'TransInterval=1',
+            'GET OPTION FROM: ' + sn, 'ErrorDelay=60', 'Delay=10', 'TransTimes=00:00;12:00', 'TransInterval=1',
             'TransFlag=TransData AttLog', 'TimeZone=7', 'Realtime=1', 'Encrypt=0'
         ].join('\n') + '\n');
     } catch (e) { res.status(500).send('ERROR'); }
@@ -973,10 +973,22 @@ app.get('/iclock/getrequest', async (req, res) => {
         if (!active) return res.type('text/plain').send('OK');
         const q = await supabase.from('fingerprint_commands').select('id, command').eq('device_sn', sn).eq('status', 'pending').order('id').limit(20);
         if (q.error || !q.data || !q.data.length) return res.type('text/plain').send('OK');
-        const ids = q.data.map(function(c) { return c.id; });
+        // Perintah rekam (ENROLL_*) membuka layar rekam di mesin: dikirim SATU per satu, dan tidak ditumpuk
+        // sebelum rekam sebelumnya selesai (atau kedaluwarsa 3 menit), agar mesin tidak macet.
+        const isEnroll = function(c) { return /^ENROLL_/i.test(c.command); };
+        let batch = [];
+        if (isEnroll(q.data[0])) {
+            const since = new Date(Date.now() - 3 * 60 * 1000).toISOString();
+            const busy = await supabase.from('fingerprint_commands').select('id').eq('device_sn', sn).eq('status', 'sent').like('command', 'ENROLL_%').gte('sent_at', since).limit(1);
+            if (busy.data && busy.data.length) return res.type('text/plain').send('OK');
+            batch = [q.data[0]];
+        } else {
+            for (const c of q.data) { if (isEnroll(c)) break; batch.push(c); }
+        }
+        const ids = batch.map(function(c) { return c.id; });
         await supabase.from('fingerprint_commands').update({ status: 'sent', sent_at: new Date().toISOString() }).in('id', ids);
         console.log('[FINGERPRINT] ' + sn + ': mengirim ' + ids.length + ' perintah');
-        res.type('text/plain').send(q.data.map(function(c) { return 'C:' + c.id + ':' + c.command; }).join('\n') + '\n');
+        res.type('text/plain').send(batch.map(function(c) { return 'C:' + c.id + ':' + c.command; }).join('\n') + '\n');
     } catch (e) { res.status(500).send('ERROR'); }
 });
 // Hasil perintah dari mesin: baris "ID=12&Return=0&CMD=DATA" (Return=0 berarti sukses)
