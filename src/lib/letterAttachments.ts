@@ -14,7 +14,8 @@ export interface LetterAttachment {
   letter_type: LetterKind;
   assignment_letter_id: string | null;
   official_travel_id: string | null;
-  teacher_id: string;
+  teacher_id: string | null;
+  staff_id?: string | null;
   kind: "photo" | "document";
   file_url: string;
   file_path: string;
@@ -93,7 +94,8 @@ export async function signAttachments(rows: LetterAttachment[]): Promise<LetterA
 export async function fetchLetterAttachments(
   letterType: LetterKind,
   letterId: string,
-  teacherId?: string
+  teacherId?: string,
+  staffId?: string
 ): Promise<LetterAttachment[]> {
   let q = supabase
     .from("letter_attachments")
@@ -102,6 +104,7 @@ export async function fetchLetterAttachments(
     .eq(letterType === "assignment" ? "assignment_letter_id" : "official_travel_id", letterId)
     .order("created_at", { ascending: true });
   if (teacherId) q = q.eq("teacher_id", teacherId);
+  if (staffId) q = q.eq("staff_id", staffId);
   const { data, error } = await q;
   if (error) throw error;
   return signAttachments((data ?? []) as unknown as LetterAttachment[]);

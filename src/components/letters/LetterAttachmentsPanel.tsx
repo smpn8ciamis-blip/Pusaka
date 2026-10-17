@@ -34,6 +34,8 @@ interface Props {
   letterNumber: string;
   /** Batasi tampilan hanya pada lampiran guru ini (akun guru). */
   teacherId?: string;
+  /** Untuk akun staf (bukan guru): berkas disimpan atas nama staf */
+  staffId?: string;
   /** Izinkan unggah & hapus (akun guru pemilik). */
   canUpload?: boolean;
   teacherName?: string;
@@ -105,6 +107,7 @@ export function LetterAttachmentsPanel({
   letterId,
   letterNumber,
   teacherId,
+  staffId,
   canUpload = false,
   teacherName,
   destination,
@@ -122,13 +125,13 @@ export function LetterAttachmentsPanel({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setItems(await fetchLetterAttachments(letterType, letterId, teacherId));
+      setItems(await fetchLetterAttachments(letterType, letterId, teacherId, staffId));
     } catch (e: any) {
       toast.error(e.message ?? "Gagal memuat lampiran");
     } finally {
       setLoading(false);
     }
-  }, [letterType, letterId, teacherId]);
+  }, [letterType, letterId, teacherId, staffId]);
 
   useEffect(() => {
     load();
@@ -141,7 +144,7 @@ export function LetterAttachmentsPanel({
     files: FileList | null,
     kind: "photo" | "document"
   ) => {
-    if (!files?.length || !teacherId) return;
+    if (!files?.length || (!teacherId && !staffId)) return;
     const list = Array.from(files);
 
     if (kind === "photo") {
@@ -190,7 +193,8 @@ export function LetterAttachmentsPanel({
             letter_type: letterType,
             assignment_letter_id: letterType === "assignment" ? letterId : null,
             official_travel_id: letterType === "spd" ? letterId : null,
-            teacher_id: teacherId,
+            teacher_id: teacherId ?? null,
+            staff_id: staffId ?? null,
             kind,
             file_url: path,
             file_path: path,
