@@ -460,6 +460,175 @@ function SendUsersTab() {
   );
 }
 
+/* ------------- Rekam sidik jari / wajah dari komputer (ADMS ENROLL) ------------- */
+const FINGERS = [
+  { fid: 6, label: 'Telunjuk kanan' }, { fid: 3, label: 'Telunjuk kiri' },
+  { fid: 5, label: 'Jempol kanan' }, { fid: 4, label: 'Jempol kiri' },
+  { fid: 7, label: 'Jari tengah kanan' }, { fid: 2, label: 'Jari tengah kiri' },
+];
+// Sintaks mengikuti protokol Push ZKTeco; bisa berbeda antar firmware, jadi dapat diedit dan dilihat kode hasilnya.
+const DEFAULT_FACE_TEMPLATE = 'ENROLL_BIO PIN={PIN}\tTYPE=9\tNO=0\tRETRY=3\tOVERWRITE=1';
+const fpCmd = (pin: string, fid: number) => `ENROLL_FP PIN=${pin}\tFID=${fid}\tRETRY=3\tOVERWRITE=1`;
+
+function EnrollTab() {
+  const qc = useQueryClient();
+  const [sn, setSn] = useState('');
+  const [q, setQ] = useState('');
+  const [fid, setFid] = useState(6);
+  const [faceTpl, setFaceTpl] = useState(() => {
+    try { return localStorage.getItem('fp-face-template') || DEFAULT_FACE_TEMPLATE; } catch { return DEFAULT_FACE_TEMPLATE; }
+  });
+  const saveTpl = (v: string) => {
+    setFaceTpl(v);
+    try { localStorage.setItem('fp-face-template', v); } catch { /* abaikan */ }
+  };
+
+  const { data: devices = [] } = useQuery({
+    queryKey: ['fp-devices'],
+    queryFn: async () => {
+      const { data, error } = await db.from('fingerprint_devices').select('*').order('created_at');
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+  const activeDevices = devices.filter((d) => d.is_active);
+  const device = sn || activeDevices[0]?.serial_number || '';
+
+  const { data: people = [], isLoading } = useQuery({
+    queryKey: ['fp-enroll-people'],
+    queryFn: async () => {
+      const [students, teachers, staffRes] = await Promise.all([
+        fetchAllPeople('students'), fetchAllPeople('teachers'), db.from('staff').select('full_name, fingerprint_pin, status, staff_type'),
+      ]);
+      const mk = (a: any[], kind: string) => a.filter((p) => p.fingerprint_pin)
+        .map((p) => ({ name: (p.full_name || '') as string, pin: String(p.fingerprint_pin), kind, extra: (p.class_name || '') as string }));
+      return [
+        ...mk(teachers, 'Guru'),
+        ...mk(((staffRes.data as any[]) || []).filter((x) => x.status !== 'nonaktif'), 'Staf'),
+        ...mk(students, 'Siswa'),
+      ];
+    },
+  });
+
+  const { data: queue = [], refetch } = useQuery({
+    queryKey: ['fp-enroll-queue', device],
+    enabled: !!device,
+    refetchInterval: 5000,
+    queryFn: async () => {
+      const { data, error } = await db.from('fingerprint_commands').select('id, label, status, return_code, created_at')
+        .eq('device_sn', device).like('command', 'ENROLL_%').order('id', { ascending: false }).limit(15);
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
+  const enqueue = useMutation({
+    mutationFn: async ({ pin, name, mode }: { pin: string; name: string; mode: 'jari' | 'wajah' }) => {
+      const command = mode === 'jari' ? fpCmd(pin, fid) : faceTpl.replace('{PIN}', pin);
+      const { error } = await db.from('fingerprint_commands').insert({
+        device_sn: device, command, label: `${mode === 'jari' ? 'Rekam jari' : 'Rekam wajah'}: ${name}`,
+      });
+      if (error) throw error;
+    },
+    onSuccess: (_d, v) => {
+      toast.success(`Perintah rekam ${v.mode} untuk ${v.name} terkirim ke antrean. Layar rekam muncul di mesin dalam beberapa detik.`);
+      qc.invalidateQueries({ queryKey: ['fp-enroll-queue', device] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const cancel = useMutation({
+    mutationFn: async () => {
+      const { error } = await db.from('fingerprint_commands').delete().eq('device_sn', device).eq('status', 'pending').like('command', 'ENROLL_%');
+      if (error) throw error;
+    },
+    onSuccess: () => { toast.success('Antrean rekam yang menunggu dibatalkan'); refetch(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const term = q.trim().toLowerCase();
+  const shown = people.filter((p) => !term || p.name.toLowerCase().includes(term) || p.pin.includes(term) || p.extra.toLowerCase().includes(term)).slice(0, 50);
+  const statusLabel: Record<string, string> = { pending: 'Menunggu mesin', sent: 'Layar rekam dibuka di mesin', done: 'Selesai', failed: 'Gagal' };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Rekam sidik jari / wajah dari komputer</CardTitle>
+          <CardDescription>
+            Klik <b>Rekam jari</b> atau <b>Rekam wajah</b> pada nama, lalu orangnya menghadap mesin: layar rekam langsung terbuka untuk PIN itu,
+            tanpa mencari nama di menu mesin. Orang harus sudah ada di mesin (kirim dulu di tab Kirim ke Mesin). Perintah rekam dikirim satu per satu.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {activeDevices.length === 0 ? (
+            <p className="text-sm text-amber-600">Belum ada mesin aktif. Aktifkan mesin di tab Mesin terlebih dahulu.</p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <span>Mesin</span>
+              <select className="rounded-md border bg-background px-2 py-1" value={device} onChange={(e) => setSn(e.target.value)}>
+                {activeDevices.map((d) => <option key={d.serial_number} value={d.serial_number}>{d.name || d.serial_number}</option>)}
+              </select>
+              <span>Jari</span>
+              <select className="rounded-md border bg-background px-2 py-1" value={fid} onChange={(e) => setFid(Number(e.target.value))}>
+                {FINGERS.map((f) => <option key={f.fid} value={f.fid}>{f.label}</option>)}
+              </select>
+            </div>
+          )}
+          <Input placeholder="Cari nama, kelas, atau PIN…" value={q} onChange={(e) => setQ(e.target.value)} />
+          {isLoading ? <p className="text-sm text-muted-foreground">Memuat…</p> : (
+            <Table>
+              <TableHeader><TableRow><TableHead>Nama</TableHead><TableHead>PIN</TableHead><TableHead className="text-right">Rekam</TableHead></TableRow></TableHeader>
+              <TableBody>
+                {shown.length === 0 ? (
+                  <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground">Tidak ada data (hanya yang punya PIN yang tampil).</TableCell></TableRow>
+                ) : shown.map((p) => (
+                  <TableRow key={p.kind + p.pin}>
+                    <TableCell className="font-medium">{p.name}<div className="text-xs text-muted-foreground">{p.kind}{p.extra ? ` · ${p.extra}` : ''}</div></TableCell>
+                    <TableCell>{p.pin}</TableCell>
+                    <TableCell className="space-x-2 whitespace-nowrap text-right">
+                      <Button size="sm" variant="outline" disabled={!device || enqueue.isPending} onClick={() => enqueue.mutate({ pin: p.pin, name: p.name, mode: 'jari' })}>Rekam jari</Button>
+                      <Button size="sm" variant="outline" disabled={!device || enqueue.isPending} onClick={() => enqueue.mutate({ pin: p.pin, name: p.name, mode: 'wajah' })}>Rekam wajah</Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+          {people.length > 50 && <p className="text-xs text-muted-foreground">Menampilkan 50 teratas; gunakan pencarian.</p>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Antrean rekam</CardTitle>
+          <CardDescription>Diperbarui otomatis. Kode gagal ≠ 0 berarti mesin menolak perintah.</CardDescription></CardHeader>
+        <CardContent className="space-y-2">
+          {queue.length === 0 ? <p className="text-sm text-muted-foreground">Belum ada perintah rekam.</p> : queue.map((c) => (
+            <div key={c.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm">
+              <span>{c.label}</span>
+              <Badge variant={c.status === 'failed' ? 'destructive' : c.status === 'done' ? 'default' : 'outline'}>
+                {statusLabel[c.status] ?? c.status}{c.status === 'failed' ? ` (kode ${c.return_code})` : ''}
+              </Badge>
+            </div>
+          ))}
+          <Button variant="outline" size="sm" onClick={() => cancel.mutate()} disabled={!queue.some((c) => c.status === 'pending')}>Batalkan yang menunggu</Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Lanjutan: perintah rekam wajah</CardTitle>
+          <CardDescription>
+            Sintaks perintah wajah bisa berbeda antar firmware. Bila mesin menolak (kode gagal), sesuaikan di sini; <code>{'{PIN}'}</code> diganti PIN orangnya.
+          </CardDescription></CardHeader>
+        <CardContent className="space-y-2">
+          <Input className="font-mono text-xs" value={faceTpl.replace(/\t/g, '<TAB>')} onChange={(e) => saveTpl(e.target.value.replace(/<TAB>/g, '\t'))} />
+          <Button variant="ghost" size="sm" onClick={() => saveTpl(DEFAULT_FACE_TEMPLATE)}>Kembalikan bawaan</Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function MappingTab() {
   const [exporting, setExporting] = useState(false);
   const exportExcel = async () => {
@@ -617,12 +786,14 @@ export default function FingerprintSettings() {
             <TabsTrigger value="devices">Mesin</TabsTrigger>
             <TabsTrigger value="mapping">Pemetaan PIN</TabsTrigger>
             <TabsTrigger value="send">Kirim ke Mesin</TabsTrigger>
+            <TabsTrigger value="enroll">Rekam Jari / Wajah</TabsTrigger>
             <TabsTrigger value="logs">Log</TabsTrigger>
             <TabsTrigger value="teachers">Kehadiran Guru</TabsTrigger>
           </TabsList>
           <TabsContent value="devices"><DevicesTab /></TabsContent>
           <TabsContent value="mapping"><MappingTab /></TabsContent>
           <TabsContent value="send"><SendUsersTab /></TabsContent>
+          <TabsContent value="enroll"><EnrollTab /></TabsContent>
           <TabsContent value="logs"><LogsTab /></TabsContent>
           <TabsContent value="teachers"><TeacherPresenceTab /></TabsContent>
         </Tabs>
