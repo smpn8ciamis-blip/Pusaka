@@ -18,7 +18,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   PiketDuty, PiketShift, PiketStatus, SHIFT_LABEL, STATUS_LABEL, bulanLabel, buildPiketPdf, exportPiketExcel,
-  hariLabel, jamWIB, monthRange, parseISODate, toISODate, weekendDates,
+  hariLabel, jamWIB, monthRange, parseISODate, toISODate, weekendDates, PiketPunch, verifyLabel,
 } from "@/lib/piket";
 
 const ROLES = ["admin", "bendahara", "super_admin"] as const;
@@ -69,6 +69,17 @@ function PiketPage({ shift }: { shift: PiketShift }) {
     },
   });
 
+  const { data: punches = new Map<string, PiketPunch[]>() } = useQuery({
+    queryKey: ["piket-punches", shift, ym],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("piket_punches" as any, { p_from: from, p_to: to, p_shift: shift });
+      if (error) throw error;
+      const m = new Map<string, PiketPunch[]>();
+      ((data as any[]) as PiketPunch[]).forEach((p) => m.set(p.duty_id, [...(m.get(p.duty_id) ?? []), p]));
+      return m;
+    },
+  });
+
   const { data: school } = useQuery({
     queryKey: ["school-settings-piket"],
     queryFn: async () => (await supabase.from("school_settings").select("*").maybeSingle()).data as any,
@@ -96,7 +107,10 @@ function PiketPage({ shift }: { shift: PiketShift }) {
     },
   });
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ["piket-duties", shift] });
+  const refresh = async () => {
+    await qc.invalidateQueries({ queryKey: ["piket-duties", shift] });
+    await qc.invalidateQueries({ queryKey: ["piket-punches", shift] });
+  };
 
   const sync = async (opts?: { reset?: boolean; silent?: boolean }) => {
     setSyncing(true);
@@ -239,7 +253,7 @@ function PiketPage({ shift }: { shift: PiketShift }) {
   };
 
   const exportPdf = async () => {
-    const doc = await buildPiketPdf({ rows, shift, ym, school });
+    const doc = await buildPiketPdf({ rows, shift, ym, school, punches });
     doc.save(`daftar-hadir-${shift}-${ym}.pdf`);
   };
 
@@ -284,7 +298,7 @@ function PiketPage({ shift }: { shift: PiketShift }) {
                 )}
                 <Button size="sm" onClick={() => { setFromDate(from); setToDate(from); setAddOpen(true); }}><Plus className="mr-1 h-4 w-4" />Tambah</Button>
                 <Button variant="outline" size="sm" onClick={exportPdf} disabled={!rows.length}><FileDown className="mr-1 h-4 w-4" />PDF</Button>
-                <Button variant="outline" size="sm" onClick={() => exportPiketExcel(rows, shift, ym)} disabled={!rows.length}><FileSpreadsheet className="mr-1 h-4 w-4" />Excel</Button>
+                <Button variant="outline" size="sm" onClick={() => exportPiketExcel(rows, shift, ym, punches)} disabled={!rows.length}><FileSpreadsheet className="mr-1 h-4 w-4" />Excel</Button>
               </div>
             </div>
           </CardHeader>
@@ -294,14 +308,14 @@ function PiketPage({ shift }: { shift: PiketShift }) {
                 <TableRow>
                   <TableHead>Tanggal</TableHead><TableHead>Nama</TableHead>
                   <TableHead className="text-center">Datang</TableHead><TableHead className="text-center">Pulang</TableHead>
-                  <TableHead>Status</TableHead><TableHead>Sumber</TableHead><TableHead className="text-right">Aksi</TableHead>
+                  <TableHead>Ketukan (jenis absen)</TableHead><TableHead>Status</TableHead><TableHead>Sumber</TableHead><TableHead className="text-right">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
-                  <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">Memuat…</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">Memuat…</TableCell></TableRow>
                 ) : rows.length === 0 ? (
-                  <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">Belum ada jadwal pada bulan ini.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">Belum ada jadwal pada bulan ini.</TableCell></TableRow>
                 ) : rows.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="whitespace-nowrap">{hariLabel(r.duty_date)}, {r.duty_date.split("-").reverse().join("/")}</TableCell>
@@ -311,6 +325,18 @@ function PiketPage({ shift }: { shift: PiketShift }) {
                     </TableCell>
                     <TableCell className="text-center">{jamWIB(r.check_in_at)}</TableCell>
                     <TableCell className="text-center">{jamWIB(r.check_out_at)}</TableCell>
+                    <TableCell className="min-w-[12rem]">
+                      {(punches.get(r.id) ?? []).length === 0 ? <span className="text-xs text-muted-foreground">-</span> : (
+                        <div className="flex flex-wrap gap-1">
+                          {(punches.get(r.id) ?? []).map((p, i) => (
+                            <Badge key={i} variant="outline" className="gap-1 font-normal" title={`Mesin ${p.device_sn}`}>
+                              <span className="font-mono">{jamWIB(p.punched_at)}</span>
+                              <span className="text-muted-foreground">{verifyLabel(p.verify_type)}</span>
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell><Badge variant={STATUS_VARIANT[r.status]}>{STATUS_LABEL[r.status]}</Badge>{r.notes && <div className="text-xs text-muted-foreground">{r.notes}</div>}</TableCell>
                     <TableCell>{r.source === "fingerprint" ? <span className="inline-flex items-center gap-1 text-xs"><Fingerprint className="h-3.5 w-3.5" />Fingerprint</span> : <span className="text-xs">Manual</span>}</TableCell>
                     <TableCell className="text-right whitespace-nowrap">
