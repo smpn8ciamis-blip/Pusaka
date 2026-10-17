@@ -18,7 +18,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   PiketDuty, PiketShift, PiketStatus, SHIFT_LABEL, STATUS_LABEL, bulanLabel, buildPiketPdf, exportPiketExcel,
-  hariLabel, jamWIB, monthRange, parseISODate, toISODate, weekendDates, PiketPunch, verifyLabel,
+  hariLabel, jamWIB, monthRange, parseISODate, toISODate, weekendDates, PiketPunch, verifyLabel, PiketCfg, DEFAULT_CFG, autoRemark, recordedPunches,
 } from "@/lib/piket";
 
 const ROLES = ["admin", "bendahara", "super_admin"] as const;
@@ -77,6 +77,14 @@ function PiketPage({ shift }: { shift: PiketShift }) {
       const m = new Map<string, PiketPunch[]>();
       ((data as any[]) as PiketPunch[]).forEach((p) => m.set(p.duty_id, [...(m.get(p.duty_id) ?? []), p]));
       return m;
+    },
+  });
+
+  const { data: piketCfg = DEFAULT_CFG } = useQuery({
+    queryKey: ["piket-cfg"],
+    queryFn: async () => {
+      const { data } = await supabase.from("piket_settings" as any).select("*").eq("id", 1).maybeSingle();
+      return ({ ...DEFAULT_CFG, ...((data as any) ?? {}) }) as PiketCfg;
     },
   });
 
@@ -235,7 +243,7 @@ function PiketPage({ shift }: { shift: PiketShift }) {
 
   const openSettings = async () => {
     const { data } = await supabase.from("piket_settings" as any).select("*").eq("id", 1).maybeSingle();
-    setCfg(data ?? { night_window_start: "16:00", night_window_end: "09:00", weekend_window_start: "05:00", weekend_window_end: "20:00", min_gap_minutes: 60 });
+    setCfg({ ...DEFAULT_CFG, ...((data as any) ?? {}) });
     setSettingsOpen(true);
   };
   const saveSettings = async () => {
@@ -244,8 +252,10 @@ function PiketPage({ shift }: { shift: PiketShift }) {
       id: 1,
       night_window_start: t(cfg.night_window_start), night_window_end: t(cfg.night_window_end),
       weekend_window_start: t(cfg.weekend_window_start), weekend_window_end: t(cfg.weekend_window_end),
-      min_gap_minutes: Number(cfg.min_gap_minutes) || 60,
+      night_checkin_deadline: t(cfg.night_checkin_deadline), night_checkout_start: t(cfg.night_checkout_start),
+      weekend_checkin_deadline: t(cfg.weekend_checkin_deadline), weekend_checkout_start: t(cfg.weekend_checkout_start),
     });
+    qc.invalidateQueries({ queryKey: ["piket-cfg"] });
     if (error) return toast.error(error.message);
     toast.success("Pengaturan disimpan");
     setSettingsOpen(false);
@@ -253,7 +263,7 @@ function PiketPage({ shift }: { shift: PiketShift }) {
   };
 
   const exportPdf = async () => {
-    const doc = await buildPiketPdf({ rows, shift, ym, school, punches });
+    const doc = await buildPiketPdf({ rows, shift, ym, school, punches, cfg: piketCfg });
     doc.save(`daftar-hadir-${shift}-${ym}.pdf`);
   };
 
@@ -298,7 +308,7 @@ function PiketPage({ shift }: { shift: PiketShift }) {
                 )}
                 <Button size="sm" onClick={() => { setFromDate(from); setToDate(from); setAddOpen(true); }}><Plus className="mr-1 h-4 w-4" />Tambah</Button>
                 <Button variant="outline" size="sm" onClick={exportPdf} disabled={!rows.length}><FileDown className="mr-1 h-4 w-4" />PDF</Button>
-                <Button variant="outline" size="sm" onClick={() => exportPiketExcel(rows, shift, ym, punches)} disabled={!rows.length}><FileSpreadsheet className="mr-1 h-4 w-4" />Excel</Button>
+                <Button variant="outline" size="sm" onClick={() => exportPiketExcel(rows, shift, ym, punches, piketCfg)} disabled={!rows.length}><FileSpreadsheet className="mr-1 h-4 w-4" />Excel</Button>
               </div>
             </div>
           </CardHeader>
@@ -308,14 +318,14 @@ function PiketPage({ shift }: { shift: PiketShift }) {
                 <TableRow>
                   <TableHead>Tanggal</TableHead><TableHead>Nama</TableHead>
                   <TableHead className="text-center">Datang</TableHead><TableHead className="text-center">Pulang</TableHead>
-                  <TableHead>Ketukan (jenis absen)</TableHead><TableHead>Status</TableHead><TableHead>Sumber</TableHead><TableHead className="text-right">Aksi</TableHead>
+                  <TableHead>Ketukan (jenis absen)</TableHead><TableHead>Status</TableHead><TableHead>Keterangan</TableHead><TableHead>Sumber</TableHead><TableHead className="text-right">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
-                  <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">Memuat…</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={9} className="py-8 text-center text-muted-foreground">Memuat…</TableCell></TableRow>
                 ) : rows.length === 0 ? (
-                  <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">Belum ada jadwal pada bulan ini.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={9} className="py-8 text-center text-muted-foreground">Belum ada jadwal pada bulan ini.</TableCell></TableRow>
                 ) : rows.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="whitespace-nowrap">{hariLabel(r.duty_date)}, {r.duty_date.split("-").reverse().join("/")}</TableCell>
@@ -326,18 +336,20 @@ function PiketPage({ shift }: { shift: PiketShift }) {
                     <TableCell className="text-center">{jamWIB(r.check_in_at)}</TableCell>
                     <TableCell className="text-center">{jamWIB(r.check_out_at)}</TableCell>
                     <TableCell className="min-w-[12rem]">
-                      {(punches.get(r.id) ?? []).length === 0 ? <span className="text-xs text-muted-foreground">-</span> : (
+                      {recordedPunches(r, punches.get(r.id)).length === 0 ? <span className="text-xs text-muted-foreground">-</span> : (
                         <div className="flex flex-wrap gap-1">
-                          {(punches.get(r.id) ?? []).map((p, i) => (
-                            <Badge key={i} variant="outline" className="gap-1 font-normal" title={`Mesin ${p.device_sn}`}>
-                              <span className="font-mono">{jamWIB(p.punched_at)}</span>
-                              <span className="text-muted-foreground">{verifyLabel(p.verify_type)}</span>
+                          {recordedPunches(r, punches.get(r.id)).map((x) => (
+                            <Badge key={x.label} variant="outline" className="gap-1 font-normal" title={`Mesin ${x.punch.device_sn}`}>
+                              <span className="text-muted-foreground">{x.label}</span>
+                              <span className="font-mono">{jamWIB(x.punch.punched_at)}</span>
+                              <span>{verifyLabel(x.punch.verify_type)}</span>
                             </Badge>
                           ))}
                         </div>
                       )}
                     </TableCell>
-                    <TableCell><Badge variant={STATUS_VARIANT[r.status]}>{STATUS_LABEL[r.status]}</Badge>{r.notes && <div className="text-xs text-muted-foreground">{r.notes}</div>}</TableCell>
+                    <TableCell><Badge variant={STATUS_VARIANT[r.status]}>{STATUS_LABEL[r.status]}</Badge></TableCell>
+                    <TableCell className="text-xs">{[autoRemark(r, piketCfg), r.notes].filter(Boolean).join(" - ") || "-"}</TableCell>
                     <TableCell>{r.source === "fingerprint" ? <span className="inline-flex items-center gap-1 text-xs"><Fingerprint className="h-3.5 w-3.5" />Fingerprint</span> : <span className="text-xs">Manual</span>}</TableCell>
                     <TableCell className="text-right whitespace-nowrap">
                       <Button size="icon" variant="ghost" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button>
@@ -438,7 +450,7 @@ function PiketPage({ shift }: { shift: PiketShift }) {
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Jam Piket</DialogTitle>
-            <DialogDescription>Ketukan jari di dalam jendela waktu ini dihitung sebagai kehadiran piket. Ketukan pertama = datang, terakhir = pulang.</DialogDescription></DialogHeader>
+            <DialogDescription>Ketukan jari di dalam jendela waktu ini dihitung sebagai kehadiran piket.</DialogDescription></DialogHeader>
           {cfg && (
             <div className="space-y-3">
               <div><Label className="text-sm font-semibold">Piket Malam (tanggal D → D+1)</Label>
@@ -451,7 +463,16 @@ function PiketPage({ shift }: { shift: PiketShift }) {
                   <div><Label className="text-xs">Mulai</Label><Input type="time" value={String(cfg.weekend_window_start).slice(0, 5)} onChange={(e) => setCfg({ ...cfg, weekend_window_start: e.target.value })} /></div>
                   <div><Label className="text-xs">Selesai</Label><Input type="time" value={String(cfg.weekend_window_end).slice(0, 5)} onChange={(e) => setCfg({ ...cfg, weekend_window_end: e.target.value })} /></div>
                 </div></div>
-              <div><Label className="text-xs">Jarak minimal datang → pulang (menit)</Label><Input type="number" min={1} value={cfg.min_gap_minutes} onChange={(e) => setCfg({ ...cfg, min_gap_minutes: e.target.value })} /></div>
+              <div className="grid grid-cols-2 gap-2">
+                {shift === "malam" ? (<>
+                  <div><Label className="text-xs">Batas absen masuk (malam)</Label><Input type="time" value={String(cfg.night_checkin_deadline).slice(0, 5)} onChange={(e) => setCfg({ ...cfg, night_checkin_deadline: e.target.value })} /></div>
+                  <div><Label className="text-xs">Absen pulang mulai jam (pagi)</Label><Input type="time" value={String(cfg.night_checkout_start).slice(0, 5)} onChange={(e) => setCfg({ ...cfg, night_checkout_start: e.target.value })} /></div>
+                </>) : (<>
+                  <div><Label className="text-xs">Batas absen masuk (Sabtu/Minggu)</Label><Input type="time" value={String(cfg.weekend_checkin_deadline).slice(0, 5)} onChange={(e) => setCfg({ ...cfg, weekend_checkin_deadline: e.target.value })} /></div>
+                  <div><Label className="text-xs">Absen pulang mulai jam</Label><Input type="time" value={String(cfg.weekend_checkout_start).slice(0, 5)} onChange={(e) => setCfg({ ...cfg, weekend_checkout_start: e.target.value })} /></div>
+                </>)}
+              </div>
+              <p className="text-xs text-muted-foreground">Tiap status hanya mencatat ketukan pertama. Hanya absen pulang atau masuk melewati batas = <b>Terlambat</b>; hanya absen masuk tanpa pulang = <b>Pulang Sebelum Waktunya</b>.</p>
             </div>
           )}
           <DialogFooter><Button variant="outline" onClick={() => setSettingsOpen(false)}>Batal</Button><Button onClick={saveSettings}>Simpan</Button></DialogFooter>

@@ -29,7 +29,7 @@ export function WeekendShiftReceiptPreview({
   const paymentDesc = batch.description || batch.job_title;
   const taxType = (batch.tax_type || 'pph21') as TaxType;
   const taxLabel = TAX_TYPE_LABELS[taxType] || 'PPh 21';
-  const city = schoolSettings?.city || "";
+  const city = schoolSettings?.city || "Ciamis";
   const headmasterTitle = schoolSettings?.headmaster_position
     ? `${schoolSettings.headmaster_position} ${schoolSettings.school_name || ""}`.trim()
     : `Kepala ${schoolSettings?.school_name || "Sekolah"}`;
