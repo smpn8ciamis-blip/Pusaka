@@ -36,6 +36,15 @@ export const STATUS_LABEL: Record<PiketStatus, string> = {
   izin: "Izin",
 };
 
+export interface PiketPunch { duty_id: string; punched_at: string; verify_type: number | null; device_sn: string }
+
+/** Kode verifikasi ZKTeco (ADMS) -> label. */
+export const VERIFY_LABEL: Record<number, string> = {
+  0: "Password", 1: "Sidik Jari", 2: "Kartu", 3: "Password", 4: "Kartu", 15: "Wajah", 25: "Telapak Tangan",
+};
+export const verifyLabel = (v: number | null | undefined) =>
+  v == null ? "-" : VERIFY_LABEL[v] ?? `Lainnya (${v})`;
+
 export const pad = (n: number) => String(n).padStart(2, "0");
 export const toISODate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 export const parseISODate = (s: string) => {
@@ -76,10 +85,13 @@ export const bulanLabel = (ym: string) => {
   return new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" }).format(new Date(y, m - 1, 1));
 };
 
+export const punchText = (ps: PiketPunch[] | undefined) =>
+  (ps ?? []).map((p) => `${jamWIB(p.punched_at)} ${verifyLabel(p.verify_type)}`).join(", ");
+
 const sorted = (rows: PiketDuty[]) =>
   [...rows].sort((a, b) => a.duty_date.localeCompare(b.duty_date) || a.person_name.localeCompare(b.person_name));
 
-export function exportPiketExcel(rows: PiketDuty[], shift: PiketShift, ym: string) {
+export function exportPiketExcel(rows: PiketDuty[], shift: PiketShift, ym: string, punches?: Map<string, PiketPunch[]>) {
   const data = sorted(rows).map((r, i) => ({
     No: i + 1,
     Hari: hariLabel(r.duty_date),
@@ -89,6 +101,7 @@ export function exportPiketExcel(rows: PiketDuty[], shift: PiketShift, ym: strin
     "Jam Datang": jamWIB(r.check_in_at),
     "Jam Pulang": jamWIB(r.check_out_at),
     Status: STATUS_LABEL[r.status],
+    "Ketukan (jam & jenis)": punchText(punches?.get(r.id)),
     Sumber: r.source === "fingerprint" ? "Fingerprint" : "Manual",
     Catatan: r.notes ?? "",
   }));
@@ -103,8 +116,9 @@ export async function buildPiketPdf(opts: {
   shift: PiketShift;
   ym: string;
   school?: any;
+  punches?: Map<string, PiketPunch[]>;
 }): Promise<jsPDF> {
-  const { rows, shift, ym, school } = opts;
+  const { rows, shift, ym, school, punches } = opts;
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const startY = await addLetterheadToPDF(doc, school);
   const w = doc.internal.pageSize.getWidth();
@@ -126,7 +140,7 @@ export async function buildPiketPdf(opts: {
       r.person_name + (r.position ? `\n${r.position}` : ""),
       jamWIB(r.check_in_at),
       jamWIB(r.check_out_at),
-      STATUS_LABEL[r.status] + (r.notes ? ` - ${r.notes}` : ""),
+      [STATUS_LABEL[r.status] + (r.notes ? ` - ${r.notes}` : ""), punchText(punches?.get(r.id))].filter(Boolean).join("\n"),
     ]),
     styles: { fontSize: 8.5, cellPadding: 1.8, valign: "middle" },
     headStyles: { fillColor: [230, 230, 230], textColor: 0, halign: "center" },
