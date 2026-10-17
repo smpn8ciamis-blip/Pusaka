@@ -272,6 +272,194 @@ async function fetchAllPeople(kind: 'students' | 'teachers') {
   return all;
 }
 
+/* -------------------- Kirim pengguna ke mesin (ADMS) -------------------- */
+// Nama di mesin: ASCII sederhana, maks 24 karakter (batas umum mesin ZKTeco).
+const machineName = (n: string) =>
+  (n || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\x20-\x7E]/g, '').replace(/[\t=&]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 24);
+const userInfoCmd = (pin: string, name: string) =>
+  `DATA UPDATE USERINFO PIN=${pin}\tName=${machineName(name)}\tPri=0\tPasswd=\tCard=\tGrp=1\tTZ=0000000000000000`;
+
+function SendUsersTab() {
+  const qc = useQueryClient();
+  const [sn, setSn] = useState('');
+  const [groups, setGroups] = useState({ teachers: true, staff: true, students: false });
+  const [trial, setTrial] = useState(true);
+  const [confirm, setConfirm] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  const { data: devices = [] } = useQuery({
+    queryKey: ['fp-devices'],
+    queryFn: async () => {
+      const { data, error } = await db.from('fingerprint_devices').select('*').order('created_at');
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+  const activeDevices = devices.filter((d) => d.is_active);
+  const device = sn || activeDevices[0]?.serial_number || '';
+
+  const { data: people, isLoading } = useQuery({
+    queryKey: ['fp-send-people'],
+    queryFn: async () => {
+      const [students, teachers, staffRes] = await Promise.all([
+        fetchAllPeople('students'), fetchAllPeople('teachers'),
+        db.from('staff').select('full_name, fingerprint_pin, status'),
+      ]);
+      const withPin = (a: any[]) => a.filter((p) => p.fingerprint_pin).map((p) => ({ name: p.full_name || '', pin: String(p.fingerprint_pin) }));
+      return {
+        students: withPin(students), teachers: withPin(teachers),
+        staff: ((staffRes.data as any[]) || []).filter((x) => x.status !== 'nonaktif' && x.fingerprint_pin)
+          .map((x) => ({ name: x.full_name as string, pin: String(x.fingerprint_pin) })),
+        studentTotal: students.length, teacherTotal: teachers.length,
+      };
+    },
+  });
+
+  const { data: queue = [], refetch: refetchQueue } = useQuery({
+    queryKey: ['fp-commands', device],
+    enabled: !!device,
+    refetchInterval: 10000,
+    queryFn: async () => {
+      const { data, error } = await db.from('fingerprint_commands').select('id, label, status, return_code').eq('device_sn', device).order('id', { ascending: false }).limit(5000);
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+  const count = (st: string) => queue.filter((c) => c.status === st).length;
+  const failed = queue.filter((c) => c.status === 'failed').slice(0, 10);
+
+  const selected = [
+    ...(groups.teachers ? people?.teachers ?? [] : []),
+    ...(groups.staff ? people?.staff ?? [] : []),
+    ...(groups.students ? people?.students ?? [] : []),
+  ];
+  const toSend = trial ? selected.slice(0, 3) : selected;
+
+  const send = async () => {
+    setSending(true);
+    try {
+      const rows = toSend.map((p) => ({ device_sn: device, command: userInfoCmd(p.pin, p.name), label: p.name }));
+      for (let i = 0; i < rows.length; i += 500) {
+        const { error } = await db.from('fingerprint_commands').insert(rows.slice(i, i + 500));
+        if (error) throw error;
+      }
+      toast.success(`${rows.length} pengguna masuk antrean. Mesin mengambilnya otomatis dalam ±30 detik.`);
+      setConfirm(false);
+      await refetchQueue();
+    } catch (e: any) {
+      toast.error(e.message || 'Gagal mengisi antrean');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const retry = useMutation({
+    mutationFn: async () => {
+      const { error } = await db.from('fingerprint_commands').update({ status: 'pending', return_code: null, sent_at: null }).eq('device_sn', device).in('status', ['failed', 'sent']);
+      if (error) throw error;
+    },
+    onSuccess: () => { toast.success('Perintah gagal/menggantung dikirim ulang'); qc.invalidateQueries({ queryKey: ['fp-commands', device] }); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const clearDone = useMutation({
+    mutationFn: async () => {
+      const { error } = await db.from('fingerprint_commands').delete().eq('device_sn', device).in('status', ['done', 'failed']);
+      if (error) throw error;
+    },
+    onSuccess: () => { toast.success('Riwayat dibersihkan'); qc.invalidateQueries({ queryKey: ['fp-commands', device] }); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const groupRow = (key: 'teachers' | 'staff' | 'students', label: string, n: number, total?: number) => (
+    <label className="flex items-center gap-2 text-sm">
+      <input type="checkbox" checked={groups[key]} onChange={(e) => setGroups({ ...groups, [key]: e.target.checked })} />
+      <span className="font-medium">{label}</span>
+      <span className="text-muted-foreground">{n} punya PIN{total != null ? ` dari ${total}` : ''}</span>
+    </label>
+  );
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Kirim pengguna ke mesin</CardTitle>
+          <CardDescription>
+            Mengirim PIN dan nama ke mesin sekaligus, jadi tidak perlu mengetik satu per satu. Sidik jari / wajah tetap direkam di mesin oleh orangnya:
+            pilih nama lalu rekam. Hanya orang yang sudah punya PIN yang dikirim (isi PIN di tab Pemetaan PIN).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {activeDevices.length === 0 ? (
+            <p className="text-sm text-amber-600">Belum ada mesin aktif. Aktifkan mesin di tab Mesin terlebih dahulu.</p>
+          ) : (
+            <div className="flex items-center gap-2 text-sm">
+              <span>Mesin</span>
+              <select className="rounded-md border bg-background px-2 py-1" value={device} onChange={(e) => setSn(e.target.value)}>
+                {activeDevices.map((d) => <option key={d.serial_number} value={d.serial_number}>{d.name || d.serial_number} ({d.serial_number})</option>)}
+              </select>
+            </div>
+          )}
+          {isLoading ? <p className="text-sm text-muted-foreground">Memuat data…</p> : (
+            <div className="space-y-1">
+              {groupRow('teachers', 'Guru', people?.teachers.length ?? 0, people?.teacherTotal)}
+              {groupRow('staff', 'Staf', people?.staff.length ?? 0)}
+              {groupRow('students', 'Siswa aktif', people?.students.length ?? 0, people?.studentTotal)}
+            </div>
+          )}
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={trial} onChange={(e) => setTrial(e.target.checked)} />
+            Uji coba: kirim hanya 3 orang pertama (matikan setelah berhasil)
+          </label>
+          <Button disabled={!device || toSend.length === 0} onClick={() => setConfirm(true)}>
+            Kirim {toSend.length} pengguna ke mesin
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Antrean perintah</CardTitle>
+          <CardDescription>Menunggu mesin mengambil (±30 detik) · diperbarui otomatis.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap gap-2 text-sm">
+            <Badge variant="outline">Menunggu {count('pending')}</Badge>
+            <Badge variant="outline">Terkirim, belum dikonfirmasi {count('sent')}</Badge>
+            <Badge>Berhasil {count('done')}</Badge>
+            <Badge variant="destructive">Gagal {count('failed')}</Badge>
+          </div>
+          {failed.length > 0 && (
+            <div className="text-xs text-muted-foreground">
+              Gagal: {failed.map((c) => `${c.label ?? '?'} (kode ${c.return_code})`).join(', ')}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => refetchQueue()}>Muat ulang</Button>
+            <Button variant="outline" size="sm" onClick={() => retry.mutate()} disabled={count('failed') + count('sent') === 0}>Kirim ulang gagal / menggantung</Button>
+            <Button variant="outline" size="sm" onClick={() => clearDone.mutate()} disabled={count('done') + count('failed') === 0}>Bersihkan riwayat</Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <AlertDialog open={confirm} onOpenChange={setConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Kirim {toSend.length} pengguna ke mesin?</AlertDialogTitle>
+            <AlertDialogDescription>
+              PIN yang sudah ada di mesin akan diperbarui namanya; sidik jari/wajah yang sudah direkam tidak dihapus.
+              {trial ? ' Mode uji coba aktif (3 orang).' : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={send} disabled={sending}>Kirim</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
 function MappingTab() {
   const [exporting, setExporting] = useState(false);
   const exportExcel = async () => {
@@ -428,11 +616,13 @@ export default function FingerprintSettings() {
           <TabsList className="flex-wrap h-auto">
             <TabsTrigger value="devices">Mesin</TabsTrigger>
             <TabsTrigger value="mapping">Pemetaan PIN</TabsTrigger>
+            <TabsTrigger value="send">Kirim ke Mesin</TabsTrigger>
             <TabsTrigger value="logs">Log</TabsTrigger>
             <TabsTrigger value="teachers">Kehadiran Guru</TabsTrigger>
           </TabsList>
           <TabsContent value="devices"><DevicesTab /></TabsContent>
           <TabsContent value="mapping"><MappingTab /></TabsContent>
+          <TabsContent value="send"><SendUsersTab /></TabsContent>
           <TabsContent value="logs"><LogsTab /></TabsContent>
           <TabsContent value="teachers"><TeacherPresenceTab /></TabsContent>
         </Tabs>
