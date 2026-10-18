@@ -5,7 +5,7 @@ import { addLetterheadToPDF } from "@/lib/pdfLetterhead";
 import { formatTanggalPanjang } from "@/lib/journalReport";
 
 export type PiketShift = "malam" | "sabtu_minggu";
-export type PiketStatus = "dijadwalkan" | "hadir" | "tidak_hadir" | "izin";
+export type PiketStatus = "dijadwalkan" | "hadir" | "tidak_hadir" | "izin" | "konfirmasi" | "ditolak";
 
 export interface PiketDuty {
   id: string;
@@ -31,9 +31,9 @@ export interface PiketCfg {
 }
 
 export const DEFAULT_CFG: PiketCfg = {
-  night_window_start: "16:00", night_window_end: "09:00",
+  night_window_start: "16:00", night_window_end: "09:00", night_detect_start: "18:00",
   weekend_window_start: "05:00", weekend_window_end: "20:00",
-  night_checkin_deadline: "20:00", night_checkout_start: "05:00",
+  night_checkin_deadline: "20:00", night_checkout_start: "05:00", night_candidate_from: "18:00",
   weekend_checkin_deadline: "08:00", weekend_checkout_start: "14:00",
   min_gap_minutes: 60,
 };
@@ -83,7 +83,15 @@ export const STATUS_LABEL: Record<PiketStatus, string> = {
   hadir: "Hadir",
   tidak_hadir: "Tidak Hadir",
   izin: "Izin",
+  konfirmasi: "Menunggu Konfirmasi",
+  ditolak: "Tidak Dihitung",
 };
+
+export interface PiketUnscheduled {
+  id: string; shift_type: PiketShift; duty_date: string; person_type: "staff" | "teacher";
+  person_name: string; position: string | null; fingerprint_pin: string | null;
+  check_in_at: string | null; check_out_at: string | null; status: "menunggu" | "dihitung" | "diabaikan";
+}
 
 export interface PiketPunch { duty_id: string; punched_at: string; verify_type: number | null; device_sn: string }
 
@@ -140,8 +148,9 @@ export const punchText = (d: PiketDuty, ps: PiketPunch[] | undefined) =>
 export const keteranganText = (d: PiketDuty, ps: PiketPunch[] | undefined, cfg?: PiketCfg) =>
   [autoRemark(d, cfg), d.notes].filter(Boolean).join(" - ");
 
-/** Daftar hadir cetak/ekspor: jadwal berstatus "Dijadwalkan" (belum ada ketukan) tidak ditampilkan dan tidak dihitung. */
-export const recordedRows = (rows: PiketDuty[]) => rows.filter((r) => r.status !== "dijadwalkan");
+/** Daftar hadir cetak/ekspor: jadwal "Dijadwalkan" (belum ada ketukan), "Menunggu Konfirmasi" dan "Tidak Dihitung" tidak ditampilkan dan tidak dihitung. */
+export const recordedRows = (rows: PiketDuty[]) =>
+  rows.filter((r) => r.status !== "dijadwalkan" && r.status !== "konfirmasi" && r.status !== "ditolak");
 
 const sorted = (rows: PiketDuty[]) =>
   recordedRows(rows).sort((a, b) => a.duty_date.localeCompare(b.duty_date) || a.person_name.localeCompare(b.person_name));

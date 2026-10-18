@@ -21,7 +21,7 @@ function MyPiketPage() {
     queryKey: ["my-piket-duties", ym],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("piket_duties" as any).select("*").gte("duty_date", from).lte("duty_date", to).order("duty_date", { ascending: false });
+        .from("piket_duties" as any).select("*").neq("status", "ditolak").gte("duty_date", from).lte("duty_date", to).order("duty_date", { ascending: false });
       if (error) throw error;
       return (data as any[]) as PiketDuty[];
     },

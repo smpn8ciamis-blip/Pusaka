@@ -31,7 +31,7 @@ function StaffDashboardPage() {
       const start = new Date(today.getFullYear(), today.getMonth(), 1);
       const iso = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-01`;
       const { data, error } = await supabase
-        .from('piket_duties' as any).select('*').eq('staff_id', me.id).gte('duty_date', iso).order('duty_date');
+        .from('piket_duties' as any).select('*').eq('staff_id', me.id).neq('status', 'ditolak').gte('duty_date', iso).order('duty_date');
       if (error) throw error;
       return (data as any[]) as PiketDuty[];
     },

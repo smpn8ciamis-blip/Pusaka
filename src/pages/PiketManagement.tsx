@@ -19,13 +19,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   PiketDuty, PiketShift, PiketStatus, SHIFT_LABEL, STATUS_LABEL, bulanLabel, buildPiketPdf, exportPiketExcel,
-  hariLabel, jamWIB, monthRange, parseISODate, toISODate, weekendDates, recordedRows, PiketPunch, verifyLabel, PiketCfg, DEFAULT_CFG, autoRemark, recordedPunches,
+  hariLabel, jamWIB, monthRange, parseISODate, toISODate, weekendDates, recordedRows, PiketPunch, verifyLabel, PiketCfg, PiketUnscheduled, DEFAULT_CFG, autoRemark, recordedPunches,
 } from "@/lib/piket";
 
 const ROLES = ["admin", "bendahara", "super_admin"] as const;
 
 const STATUS_VARIANT: Record<PiketStatus, "default" | "secondary" | "destructive" | "outline"> = {
-  hadir: "default", dijadwalkan: "outline", tidak_hadir: "destructive", izin: "secondary",
+  hadir: "default", dijadwalkan: "outline", tidak_hadir: "destructive", izin: "secondary", konfirmasi: "outline", ditolak: "secondary",
 };
 
 type PersonOpt = { key: string; type: "staff" | "teacher"; id: string; name: string; position: string; pin: string | null };
@@ -45,6 +45,7 @@ function PiketPage({ shift }: { shift: PiketShift }) {
 
   const [bulkOpen, setBulkOpen] = useState(false);
   const [periodicOpen, setPeriodicOpen] = useState(false);
+  const [showIgnored, setShowIgnored] = useState(false);
   const [bulkKeys, setBulkKeys] = useState<string[]>([]);
 
   const [editing, setEditing] = useState<PiketDuty | null>(null);
@@ -80,6 +81,32 @@ function PiketPage({ shift }: { shift: PiketShift }) {
       ((data as any[]) as PiketPunch[]).forEach((p) => m.set(p.duty_id, [...(m.get(p.duty_id) ?? []), p]));
       return m;
     },
+  });
+
+  const { data: unscheduled = [] } = useQuery({
+    queryKey: ["piket-unscheduled", shift, ym],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("piket_unscheduled" as any).select("*").eq("shift_type", shift)
+        .gte("duty_date", from).lte("duty_date", to).order("duty_date").order("person_name");
+      if (error) throw error;
+      return (data as any[]) as PiketUnscheduled[];
+    },
+  });
+  const pending = unscheduled.filter((u) => u.status === "menunggu");
+  const ignored = unscheduled.filter((u) => u.status === "diabaikan");
+
+  const decide = useMutation({
+    mutationFn: async ({ id, action }: { id: string; action: "hitung" | "abaikan" | "kembalikan" }) => {
+      const { error } = await supabase.rpc("piket_unscheduled_decide" as any, { p_id: id, p_action: action });
+      if (error) throw error;
+    },
+    onSuccess: async (_d, v) => {
+      toast.success(v.action === "hitung" ? "Dihitung: masuk daftar hadir dan kwitansi" : v.action === "abaikan" ? "Diabaikan" : "Dikembalikan ke daftar konfirmasi");
+      await qc.invalidateQueries({ queryKey: ["piket-unscheduled", shift] });
+      await refresh();
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const { data: piketCfg = DEFAULT_CFG } = useQuery({
@@ -120,6 +147,7 @@ function PiketPage({ shift }: { shift: PiketShift }) {
   const refresh = async () => {
     await qc.invalidateQueries({ queryKey: ["piket-duties", shift] });
     await qc.invalidateQueries({ queryKey: ["piket-punches", shift] });
+    await qc.invalidateQueries({ queryKey: ["piket-unscheduled", shift] });
   };
 
   const sync = async (opts?: { reset?: boolean; silent?: boolean }) => {
@@ -254,7 +282,9 @@ function PiketPage({ shift }: { shift: PiketShift }) {
       id: 1,
       night_window_start: t(cfg.night_window_start), night_window_end: t(cfg.night_window_end),
       weekend_window_start: t(cfg.weekend_window_start), weekend_window_end: t(cfg.weekend_window_end),
+      night_detect_start: t(cfg.night_detect_start),
       night_checkin_deadline: t(cfg.night_checkin_deadline), night_checkout_start: t(cfg.night_checkout_start),
+      night_candidate_from: t(cfg.night_candidate_from ?? "18:00"),
       weekend_checkin_deadline: t(cfg.weekend_checkin_deadline), weekend_checkout_start: t(cfg.weekend_checkout_start),
     });
     qc.invalidateQueries({ queryKey: ["piket-cfg"] });
@@ -269,12 +299,28 @@ function PiketPage({ shift }: { shift: PiketShift }) {
     doc.save(`daftar-hadir-${shift}-${ym}.pdf`);
   };
 
+  const mainRows = useMemo(() => rows.filter((r) => r.status !== "konfirmasi" && r.status !== "ditolak"), [rows]);
+  const pending = useMemo(() => rows.filter((r) => r.status === "konfirmasi"), [rows]);
+  const ignored = useMemo(() => rows.filter((r) => r.status === "ditolak"), [rows]);
+
+  const decide = useMutation({
+    mutationFn: async ({ ids, status }: { ids: string[]; status: PiketStatus }) => {
+      const { error } = await supabase.from("piket_duties" as any).update({ status }).in("id", ids);
+      if (error) throw error;
+    },
+    onSuccess: (_d, v) => {
+      toast.success(v.status === "hadir" ? "Dihitung sebagai kehadiran piket" : v.status === "ditolak" ? "Tidak dihitung" : "Dikembalikan ke daftar konfirmasi");
+      refresh();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const summary = useMemo(() => ({
-    total: rows.length,
-    hadir: rows.filter((r) => r.status === "hadir").length,
-    belum: rows.filter((r) => r.status === "dijadwalkan").length,
-    absen: rows.filter((r) => r.status === "tidak_hadir" || r.status === "izin").length,
-  }), [rows]);
+    total: mainRows.length,
+    hadir: mainRows.filter((r) => r.status === "hadir").length,
+    belum: mainRows.filter((r) => r.status === "dijadwalkan").length,
+    absen: mainRows.filter((r) => r.status === "tidak_hadir" || r.status === "izin").length,
+  }), [mainRows]);
 
   return (
     <DashboardLayout>
@@ -293,6 +339,89 @@ function PiketPage({ shift }: { shift: PiketShift }) {
             </Button>
           </div>
         </div>
+
+        {pending.length > 0 && (
+          <Card className="border-amber-400">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Menunggu konfirmasi ({pending.length})</CardTitle>
+              <CardDescription>
+                Guru/staf ini melakukan absen di jam piket tetapi tidak punya jadwal. Belum dihitung di daftar hadir maupun kwitansi honor sampai Anda konfirmasi.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {pending.map((r) => (
+                <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm">
+                  <div>
+                    <div className="font-medium">{r.person_name} <span className="text-xs font-normal text-muted-foreground">{r.position}</span></div>
+                    <div className="text-xs text-muted-foreground">
+                      {SHIFT_LABEL[r.shift_type]} · {hariLabel(r.duty_date)}, {r.duty_date.split("-").reverse().join("/")}
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {recordedPunches(r, punches.get(r.id)).map((x) => (
+                        <Badge key={x.label} variant="outline" className="gap-1 font-normal">
+                          <span className="text-muted-foreground">{x.label}</span>
+                          <span className="font-mono">{jamWIB(x.punch.punched_at)}</span>
+                          <span>{verifyLabel(x.punch.verify_type)}</span>
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => decide.mutate({ ids: [r.id], status: "hadir" })} disabled={decide.isPending}>Hitung</Button>
+                    <Button size="sm" variant="outline" onClick={() => decide.mutate({ ids: [r.id], status: "ditolak" })} disabled={decide.isPending}>Jangan hitung</Button>
+                  </div>
+                </div>
+              ))}
+              {pending.length > 1 && (
+                <div className="flex gap-2 pt-1">
+                  <Button size="sm" variant="secondary" onClick={() => decide.mutate({ ids: pending.map((r) => r.id), status: "hadir" })} disabled={decide.isPending}>Hitung semua</Button>
+                  <Button size="sm" variant="ghost" onClick={() => decide.mutate({ ids: pending.map((r) => r.id), status: "ditolak" })} disabled={decide.isPending}>Jangan hitung semua</Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {(pending.length > 0 || ignored.length > 0) && (
+          <Card className={pending.length ? "border-amber-400" : ""}>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Absen piket tanpa jadwal{pending.length ? ` — ${pending.length} menunggu konfirmasi` : ""}</CardTitle>
+              <CardDescription>
+                Guru/staf ini mengetuk fingerprint di jam piket tetapi tidak dijadwalkan. Belum masuk daftar hadir maupun kwitansi honor
+                sampai Anda memilih <b>Hitung</b>.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {pending.map((u) => (
+                <div key={u.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm">
+                  <div>
+                    <div className="font-medium">{u.person_name} <span className="text-xs font-normal text-muted-foreground">{u.position}</span></div>
+                    <div className="text-xs text-muted-foreground">
+                      {hariLabel(u.duty_date)}, {u.duty_date.split("-").reverse().join("/")} · Masuk {jamWIB(u.check_in_at)} · Pulang {jamWIB(u.check_out_at)}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ id: u.id, action: "hitung" })}>Hitung</Button>
+                    <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ id: u.id, action: "abaikan" })}>Abaikan</Button>
+                  </div>
+                </div>
+              ))}
+              {ignored.length > 0 && (
+                <div className="pt-1">
+                  <button type="button" className="text-xs text-muted-foreground underline" onClick={() => setShowIgnored((v) => !v)}>
+                    {showIgnored ? "Sembunyikan" : "Tampilkan"} yang diabaikan ({ignored.length})
+                  </button>
+                  {showIgnored && ignored.map((u) => (
+                    <div key={u.id} className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-dashed p-2 text-sm">
+                      <span>{u.person_name} · {u.duty_date.split("-").reverse().join("/")} · {jamWIB(u.check_in_at)}–{jamWIB(u.check_out_at)}</span>
+                      <Button size="sm" variant="ghost" disabled={decide.isPending} onClick={() => decide.mutate({ id: u.id, action: "kembalikan" })}>Kembalikan</Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader className="pb-3">
@@ -327,9 +456,9 @@ function PiketPage({ shift }: { shift: PiketShift }) {
               <TableBody>
                 {isLoading ? (
                   <TableRow><TableCell colSpan={9} className="py-8 text-center text-muted-foreground">Memuat…</TableCell></TableRow>
-                ) : rows.length === 0 ? (
+                ) : mainRows.length === 0 ? (
                   <TableRow><TableCell colSpan={9} className="py-8 text-center text-muted-foreground">Belum ada jadwal pada bulan ini.</TableCell></TableRow>
-                ) : rows.map((r) => (
+                ) : mainRows.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="whitespace-nowrap">{hariLabel(r.duty_date)}, {r.duty_date.split("-").reverse().join("/")}</TableCell>
                     <TableCell className="font-medium">
@@ -364,6 +493,19 @@ function PiketPage({ shift }: { shift: PiketShift }) {
             </Table>
           </CardContent>
         </Card>
+        {ignored.length > 0 && (
+          <details className="rounded-md border p-3 text-sm">
+            <summary className="cursor-pointer text-muted-foreground">Tidak dihitung ({ignored.length})</summary>
+            <div className="mt-2 space-y-1">
+              {ignored.map((r) => (
+                <div key={r.id} className="flex items-center justify-between gap-2">
+                  <span>{r.person_name} · {SHIFT_LABEL[r.shift_type]} · {r.duty_date}</span>
+                  <Button size="sm" variant="ghost" onClick={() => decide.mutate({ ids: [r.id], status: "konfirmasi" })}>Pulihkan</Button>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
       </div>
 
       {/* Tambah */}
@@ -477,7 +619,9 @@ function PiketPage({ shift }: { shift: PiketShift }) {
                 </div></div>
               <div className="grid grid-cols-2 gap-2">
                 {shift === "malam" ? (<>
+                  <div className="col-span-2"><Label className="text-xs">Ketukan malam dianggap piket mulai jam (untuk deteksi tanpa jadwal)</Label><Input type="time" value={String(cfg.night_detect_start).slice(0, 5)} onChange={(e) => setCfg({ ...cfg, night_detect_start: e.target.value })} /></div>
                   <div><Label className="text-xs">Batas absen masuk (malam)</Label><Input type="time" value={String(cfg.night_checkin_deadline).slice(0, 5)} onChange={(e) => setCfg({ ...cfg, night_checkin_deadline: e.target.value })} /></div>
+                  <div className="col-span-2"><Label className="text-xs">Ketukan tanpa jadwal dianggap piket malam mulai jam</Label><Input type="time" value={String(cfg.night_candidate_from ?? "18:00").slice(0, 5)} onChange={(e) => setCfg({ ...cfg, night_candidate_from: e.target.value })} /></div>
                   <div><Label className="text-xs">Absen pulang mulai jam (pagi)</Label><Input type="time" value={String(cfg.night_checkout_start).slice(0, 5)} onChange={(e) => setCfg({ ...cfg, night_checkout_start: e.target.value })} /></div>
                 </>) : (<>
                   <div><Label className="text-xs">Batas absen masuk (Sabtu/Minggu)</Label><Input type="time" value={String(cfg.weekend_checkin_deadline).slice(0, 5)} onChange={(e) => setCfg({ ...cfg, weekend_checkin_deadline: e.target.value })} /></div>
