@@ -14,11 +14,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Fingerprint, Pencil, Plus, RefreshCw, Settings2, Trash2, FileDown, FileSpreadsheet, CalendarPlus } from "lucide-react";
 import { toast } from "sonner";
+import { PiketPeriodicDialog } from "@/components/piket/PiketPeriodicDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   PiketDuty, PiketShift, PiketStatus, SHIFT_LABEL, STATUS_LABEL, bulanLabel, buildPiketPdf, exportPiketExcel,
-  hariLabel, jamWIB, monthRange, parseISODate, toISODate, weekendDates, PiketPunch, verifyLabel, PiketCfg, DEFAULT_CFG, autoRemark, recordedPunches,
+  hariLabel, jamWIB, monthRange, parseISODate, toISODate, weekendDates, recordedRows, PiketPunch, verifyLabel, PiketCfg, DEFAULT_CFG, autoRemark, recordedPunches,
 } from "@/lib/piket";
 
 const ROLES = ["admin", "bendahara", "super_admin"] as const;
@@ -43,6 +44,7 @@ function PiketPage({ shift }: { shift: PiketShift }) {
   const [toDate, setToDate] = useState(() => toISODate(new Date()));
 
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [periodicOpen, setPeriodicOpen] = useState(false);
   const [bulkKeys, setBulkKeys] = useState<string[]>([]);
 
   const [editing, setEditing] = useState<PiketDuty | null>(null);
@@ -306,9 +308,10 @@ function PiketPage({ shift }: { shift: PiketShift }) {
                 {shift === "sabtu_minggu" && (
                   <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)}><CalendarPlus className="mr-1 h-4 w-4" />Jadwalkan Sabtu–Minggu</Button>
                 )}
+                <Button variant="outline" size="sm" onClick={() => setPeriodicOpen(true)}><CalendarPlus className="mr-1 h-4 w-4" />Jadwal Periodik / 1 Tahun</Button>
                 <Button size="sm" onClick={() => { setFromDate(from); setToDate(from); setAddOpen(true); }}><Plus className="mr-1 h-4 w-4" />Tambah</Button>
-                <Button variant="outline" size="sm" onClick={exportPdf} disabled={!rows.length}><FileDown className="mr-1 h-4 w-4" />PDF</Button>
-                <Button variant="outline" size="sm" onClick={() => exportPiketExcel(rows, shift, ym, punches, piketCfg)} disabled={!rows.length}><FileSpreadsheet className="mr-1 h-4 w-4" />Excel</Button>
+                <Button variant="outline" size="sm" onClick={exportPdf} disabled={!recordedRows(rows).length}><FileDown className="mr-1 h-4 w-4" />PDF</Button>
+                <Button variant="outline" size="sm" onClick={() => exportPiketExcel(rows, shift, ym, punches, piketCfg)} disabled={!recordedRows(rows).length}><FileSpreadsheet className="mr-1 h-4 w-4" />Excel</Button>
               </div>
             </div>
           </CardHeader>
@@ -395,6 +398,15 @@ function PiketPage({ shift }: { shift: PiketShift }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PiketPeriodicDialog
+        open={periodicOpen}
+        onClose={() => setPeriodicOpen(false)}
+        shift={shift}
+        people={people}
+        userId={user?.id ?? null}
+        onDone={() => sync({ silent: true })}
+      />
 
       {/* Massal Sabtu–Minggu */}
       <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>

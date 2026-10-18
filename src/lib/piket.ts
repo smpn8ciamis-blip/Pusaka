@@ -140,8 +140,11 @@ export const punchText = (d: PiketDuty, ps: PiketPunch[] | undefined) =>
 export const keteranganText = (d: PiketDuty, ps: PiketPunch[] | undefined, cfg?: PiketCfg) =>
   [autoRemark(d, cfg), d.notes].filter(Boolean).join(" - ");
 
+/** Daftar hadir cetak/ekspor: jadwal berstatus "Dijadwalkan" (belum ada ketukan) tidak ditampilkan dan tidak dihitung. */
+export const recordedRows = (rows: PiketDuty[]) => rows.filter((r) => r.status !== "dijadwalkan");
+
 const sorted = (rows: PiketDuty[]) =>
-  [...rows].sort((a, b) => a.duty_date.localeCompare(b.duty_date) || a.person_name.localeCompare(b.person_name));
+  recordedRows(rows).sort((a, b) => a.duty_date.localeCompare(b.duty_date) || a.person_name.localeCompare(b.person_name));
 
 export function exportPiketExcel(rows: PiketDuty[], shift: PiketShift, ym: string, punches?: Map<string, PiketPunch[]>, cfg?: PiketCfg) {
   const data = sorted(rows).map((r, i) => ({
@@ -204,7 +207,7 @@ export async function buildPiketPdf(opts: {
   let y = (doc as any).lastAutoTable.finalY + 6;
   if (y > 240) { doc.addPage(); y = 25; }
   doc.setFontSize(9);
-  doc.text(`Total penugasan: ${list.length}   Hadir: ${hadir}   Tidak hadir: ${list.filter((r) => r.status === "tidak_hadir").length}   Izin: ${list.filter((r) => r.status === "izin").length}`, 14, y);
+  doc.text(`Total tercatat: ${list.length}   Hadir: ${hadir}   Tidak hadir: ${list.filter((r) => r.status === "tidak_hadir").length}   Izin: ${list.filter((r) => r.status === "izin").length}`, 14, y);
   y += 10;
   const cx = w - 50;
   const city = school?.city || "Ciamis";
