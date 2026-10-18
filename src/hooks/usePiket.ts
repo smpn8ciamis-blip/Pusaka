@@ -8,14 +8,16 @@ export function useHasPiketDuty() {
   const eligible = userRole === "teacher" || userRole === "staf";
   const { data } = useQuery({
     queryKey: ["has-piket-duty", user?.id, userRole],
-    enabled: !!user && eligible,
+    enabled: !!user && eligible && userRole !== "staf",
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
-      const { count, error } = await supabase
-        .from("piket_duties" as any).select("id", { count: "exact", head: true });
-      if (error) return false;
-      return (count ?? 0) > 0;
+      const [duties, pending] = await Promise.all([
+        supabase.from("piket_duties" as any).select("id", { count: "exact", head: true }),
+        supabase.from("piket_unscheduled" as any).select("id", { count: "exact", head: true }),
+      ]);
+      return (duties.count ?? 0) > 0 || (pending.count ?? 0) > 0;
     },
   });
-  return !!data;
+  // Akun staf selalu melihat Log Piket Saya (jadwal bisa dibuat kapan saja)
+  return userRole === "staf" || !!data;
 }
