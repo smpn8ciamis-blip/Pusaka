@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Fingerprint, Moon, CalendarDays } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  PiketCfg, PiketDuty, PiketPunch, DEFAULT_CFG, SHIFT_LABEL, STATUS_LABEL, autoRemark, bulanLabel, hariLabel,
+  PiketCfg, PiketDuty, PiketPunch, PiketUnscheduled, DEFAULT_CFG, SHIFT_LABEL, STATUS_LABEL, autoRemark, bulanLabel, hariLabel,
   jamWIB, monthRange, recordedPunches, toISODate, verifyLabel,
 } from "@/lib/piket";
 
@@ -24,6 +24,16 @@ function MyPiketPage() {
         .from("piket_duties" as any).select("*").neq("status", "ditolak").gte("duty_date", from).lte("duty_date", to).order("duty_date", { ascending: false });
       if (error) throw error;
       return (data as any[]) as PiketDuty[];
+    },
+  });
+
+  const { data: unsched = [] } = useQuery({
+    queryKey: ["my-piket-unscheduled", ym],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("piket_unscheduled" as any).select("*").gte("duty_date", from).lte("duty_date", to).order("duty_date", { ascending: false });
+      if (error) return [] as PiketUnscheduled[];
+      return (data as any[]) as PiketUnscheduled[];
     },
   });
 
@@ -105,6 +115,28 @@ function MyPiketPage() {
             })}
           </CardContent>
         </Card>
+
+        {unsched.length > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Absen Tanpa Jadwal</CardTitle>
+              <CardDescription>Ketukan piket pada hari tanpa jadwal. Baru dihitung setelah dikonfirmasi admin/bendahara.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {unsched.map((u) => (
+                <div key={u.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3 text-sm">
+                  <div>
+                    <div className="font-medium">{hariLabel(u.duty_date)}, {u.duty_date.split("-").reverse().join("/")}</div>
+                    <div className="text-xs text-muted-foreground">{SHIFT_LABEL[u.shift_type]} · Datang {jamWIB(u.check_in_at)} · Pulang {jamWIB(u.check_out_at)}</div>
+                  </div>
+                  <Badge variant={u.status === "dihitung" ? "default" : "outline"}>
+                    {u.status === "menunggu" ? "Menunggu konfirmasi" : u.status === "dihitung" ? "Dihitung" : "Tidak dihitung"}
+                  </Badge>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
       </div>
     </DashboardLayout>
   );

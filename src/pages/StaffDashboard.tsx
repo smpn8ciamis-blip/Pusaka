@@ -4,7 +4,7 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { FileCheck } from 'lucide-react';
+import { FileCheck, Fingerprint } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { SHIFT_LABEL, STATUS_LABEL, hariLabel, jamWIB, PiketDuty } from '@/lib/piket';
@@ -38,6 +38,7 @@ function StaffDashboardPage() {
   });
 
   const links = [
+    { to: '/my-piket', icon: Fingerprint, title: 'Log Piket Saya', desc: 'Riwayat absensi piket malam & Sabtu–Minggu dari fingerprint.' },
     { to: '/my-letters', icon: FileCheck, title: 'Surat Tugas Saya', desc: 'Lihat surat tugas dan unggah bukti kunjungan.' },
   ];
 

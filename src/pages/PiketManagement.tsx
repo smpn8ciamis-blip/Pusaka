@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Fingerprint, Pencil, Plus, RefreshCw, Settings2, Trash2, FileDown, FileSpreadsheet, CalendarPlus } from "lucide-react";
 import { toast } from "sonner";
+import { PdfPreviewDialog } from "@/components/piket/PdfPreviewDialog";
 import { PiketPeriodicDialog } from "@/components/piket/PiketPeriodicDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -45,6 +46,7 @@ function PiketPage({ shift }: { shift: PiketShift }) {
 
   const [bulkOpen, setBulkOpen] = useState(false);
   const [periodicOpen, setPeriodicOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [showIgnored, setShowIgnored] = useState(false);
   const [bulkKeys, setBulkKeys] = useState<string[]>([]);
 
@@ -294,10 +296,7 @@ function PiketPage({ shift }: { shift: PiketShift }) {
     await sync({ silent: true });
   };
 
-  const exportPdf = async () => {
-    const doc = await buildPiketPdf({ rows, shift, ym, school, punches, cfg: piketCfg });
-    doc.save(`daftar-hadir-${shift}-${ym}.pdf`);
-  };
+  const buildPdf = () => buildPiketPdf({ rows, shift, ym, school, punches, cfg: piketCfg });
 
   const mainRows = useMemo(() => rows.filter((r) => r.status !== "konfirmasi" && r.status !== "ditolak"), [rows]);
   const pending = useMemo(() => rows.filter((r) => r.status === "konfirmasi"), [rows]);
@@ -439,7 +438,7 @@ function PiketPage({ shift }: { shift: PiketShift }) {
                 )}
                 <Button variant="outline" size="sm" onClick={() => setPeriodicOpen(true)}><CalendarPlus className="mr-1 h-4 w-4" />Jadwal Periodik / 1 Tahun</Button>
                 <Button size="sm" onClick={() => { setFromDate(from); setToDate(from); setAddOpen(true); }}><Plus className="mr-1 h-4 w-4" />Tambah</Button>
-                <Button variant="outline" size="sm" onClick={exportPdf} disabled={!recordedRows(rows).length}><FileDown className="mr-1 h-4 w-4" />PDF</Button>
+                <Button variant="outline" size="sm" onClick={() => setPreviewOpen(true)} disabled={!recordedRows(rows).length}><FileDown className="mr-1 h-4 w-4" />Pratinjau PDF</Button>
                 <Button variant="outline" size="sm" onClick={() => exportPiketExcel(rows, shift, ym, punches, piketCfg)} disabled={!recordedRows(rows).length}><FileSpreadsheet className="mr-1 h-4 w-4" />Excel</Button>
               </div>
             </div>
@@ -540,6 +539,14 @@ function PiketPage({ shift }: { shift: PiketShift }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PdfPreviewDialog
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        title={`Pratinjau Daftar Hadir ${SHIFT_LABEL[shift]} — ${bulanLabel(ym)}`}
+        filename={`daftar-hadir-${shift}-${ym}.pdf`}
+        build={buildPdf}
+      />
 
       <PiketPeriodicDialog
         open={periodicOpen}
