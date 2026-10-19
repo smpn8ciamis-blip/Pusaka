@@ -44,64 +44,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // Auto logout after 5 minutes of inactivity
+  // Sesi login berlaku 1 jam sejak login (semua akun). Dihitung dari waktu login di server (last_sign_in_at),
+  // sehingga tetap akurat setelah halaman dimuat ulang atau tab tertidur.
   useEffect(() => {
     if (!user) return;
 
-    const IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes in milliseconds
-    const WARNING_TIME = 1 * 60 * 1000; // Show warning 1 minute before logout
-    let idleTimer: NodeJS.Timeout;
-    let warningShown = false;
+    const SESSION_MS = 60 * 60 * 1000;   // 1 jam
+    const WARN_MS = 5 * 60 * 1000;       // peringatan 5 menit sebelum berakhir
+    const STORE_KEY = 'pusaka_login_at';
+    const signedAt = user.last_sign_in_at ? new Date(user.last_sign_in_at).getTime() : NaN;
+    let loginAt = Number.isFinite(signedAt) ? signedAt : NaN;
+    if (!Number.isFinite(loginAt)) {
+      try { loginAt = Number(localStorage.getItem(STORE_KEY)) || Date.now(); } catch { loginAt = Date.now(); }
+    }
+    try { localStorage.setItem(STORE_KEY, String(loginAt)); } catch { /* abaikan */ }
 
-    const handleAutoLogout = async () => {
+    let warned = false;
+    let ended = false;
+    const endSession = async () => {
+      if (ended) return;
+      ended = true;
       toast({
         title: "Sesi Berakhir",
-        description: "Anda telah logout otomatis karena tidak aktif selama 1 jam.",
+        description: "Masa login 1 jam telah habis. Silakan login kembali.",
       });
+      try { localStorage.removeItem(STORE_KEY); } catch { /* abaikan */ }
       await supabase.auth.signOut();
       setUser(null);
       setSession(null);
       setUserRole(null);
       navigate('/auth');
     };
-
-    const resetIdleTimer = () => {
-      warningShown = false;
-      if (idleTimer) clearTimeout(idleTimer);
-      
-      idleTimer = setTimeout(() => {
-        // Show warning 5 minutes before logout
-        if (!warningShown) {
-          toast({
-            title: "Peringatan Sesi",
-            description: "Sesi Anda akan berakhir dalam 5 menit karena tidak aktif.",
-            variant: "destructive",
-          });
-          warningShown = true;
-          
-          // Set final logout timer
-          setTimeout(() => {
-            handleAutoLogout();
-          }, WARNING_TIME);
-        }
-      }, IDLE_TIMEOUT - WARNING_TIME);
+    const check = () => {
+      const left = loginAt + SESSION_MS - Date.now();
+      if (left <= 0) { endSession(); return; }
+      if (left <= WARN_MS && !warned) {
+        warned = true;
+        toast({
+          title: "Sesi hampir berakhir",
+          description: `Sesi login berakhir dalam ${Math.max(1, Math.ceil(left / 60000))} menit. Simpan pekerjaan Anda.`,
+          variant: "destructive",
+        });
+      }
     };
 
-    // Events to track user activity
-    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
-    
-    events.forEach(event => {
-      document.addEventListener(event, resetIdleTimer);
-    });
-
-    // Start the timer
-    resetIdleTimer();
-
+    check();
+    const timer = setInterval(check, 15 * 1000);
+    document.addEventListener('visibilitychange', check);
+    window.addEventListener('focus', check);
     return () => {
-      if (idleTimer) clearTimeout(idleTimer);
-      events.forEach(event => {
-        document.removeEventListener(event, resetIdleTimer);
-      });
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', check);
+      window.removeEventListener('focus', check);
     };
   }, [user, toast, navigate]);
 

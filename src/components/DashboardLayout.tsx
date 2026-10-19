@@ -21,6 +21,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { AppFooter } from '@/components/AppFooter';
 import { useQuery } from '@tanstack/react-query';
 import { NotificationBell } from '@/components/NotificationBell';
+import { EnablePushButton } from '@/components/EnablePushButton';
 import { AcademicYearSelector } from '@/components/AcademicYearSelector';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -1121,6 +1122,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
               <div className="hidden sm:block">
                 <AcademicYearSelector />
               </div>
+              <EnablePushButton />
               {userRole === 'teacher' && <NotificationBell />}
               <Button
                 variant="ghost"
