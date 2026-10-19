@@ -114,7 +114,7 @@ function DevicesTab() {
 }
 
 /* ------------------------------ Pemetaan PIN ------------------------------ */
-function PersonPinList({ kind }: { kind: 'students' | 'teachers' }) {
+function PersonPinList({ kind }: { kind: 'students' | 'teachers' | 'staff' }) {
   const qc = useQueryClient();
   const [q, setQ] = useState('');
   const [onlyEmpty, setOnlyEmpty] = useState(false);
@@ -162,7 +162,7 @@ function PersonPinList({ kind }: { kind: 'students' | 'teachers' }) {
       <div className="flex flex-wrap gap-2 items-center">
         <Input
           className="max-w-xs"
-          placeholder={kind === 'students' ? 'Cari nama siswa aktif…' : 'Cari nama guru…'}
+          placeholder={kind === 'students' ? 'Cari nama siswa aktif…' : kind === 'staff' ? 'Cari nama staf aktif…' : 'Cari nama guru…'}
           value={q}
           onChange={(e) => { setQ(e.target.value); setPage(1); }}
         />
@@ -181,7 +181,7 @@ function PersonPinList({ kind }: { kind: 'students' | 'teachers' }) {
             <TableHeader>
               <TableRow>
                 <TableHead>Nama</TableHead>
-                {kind === 'students' && <TableHead>Kelas</TableHead>}
+                {kind !== 'teachers' && <TableHead>{kind === 'staff' ? 'Jenis' : 'Kelas'}</TableHead>}
                 <TableHead className="w-44">PIN mesin</TableHead>
               </TableRow>
             </TableHeader>
@@ -192,7 +192,7 @@ function PersonPinList({ kind }: { kind: 'students' | 'teachers' }) {
               {rows.map((p) => (
                 <TableRow key={`${p.id}-${p.fingerprint_pin ?? ''}`}>
                   <TableCell>{p.full_name || '-'}</TableCell>
-                  {kind === 'students' && <TableCell>{p.class_name || '-'}</TableCell>}
+                  {kind !== 'teachers' && <TableCell>{p.class_name || '-'}</TableCell>}
                   <TableCell>
                     <div className="flex gap-1">
                       <Input
@@ -661,7 +661,9 @@ function MappingTab() {
   const exportExcel = async () => {
     setExporting(true);
     try {
-      const [students, teachers] = await Promise.all([fetchAllPeople('students'), fetchAllPeople('teachers')]);
+      const [students, teachers, staffRes] = await Promise.all([fetchAllPeople('students'), fetchAllPeople('teachers'),
+        db.from('staff').select('full_name, nip, staff_type, fingerprint_pin, status').order('full_name')]);
+      const staff = ((staffRes.data as any[]) || []).filter((x) => x.status !== 'nonaktif');
       const wb = XLSX.utils.book_new();
       const sSheet = XLSX.utils.json_to_sheet(students.map((p, i) => ({
         No: i + 1, Nama: p.full_name, Kelas: p.class_name || '', NIS: p.nis || '', NISN: p.nisn || '', PIN: p.fingerprint_pin || '',
@@ -672,10 +674,15 @@ function MappingTab() {
       })), { header: ['No', 'Nama', 'NIP', 'PIN'] });
       tSheet['!cols'] = [{ wch: 5 }, { wch: 32 }, { wch: 22 }, { wch: 12 }];
       XLSX.utils.book_append_sheet(wb, sSheet, 'Siswa');
+      const stSheet = XLSX.utils.json_to_sheet(staff.map((p, i) => ({
+        No: i + 1, Nama: p.full_name || '', Jenis: p.staff_type === 'tata_usaha' ? 'Tata Usaha' : 'Karyawan', NIP: p.nip || '', PIN: p.fingerprint_pin || '',
+      })), { header: ['No', 'Nama', 'Jenis', 'NIP', 'PIN'] });
+      stSheet['!cols'] = [{ wch: 5 }, { wch: 32 }, { wch: 14 }, { wch: 22 }, { wch: 12 }];
       XLSX.utils.book_append_sheet(wb, tSheet, 'Guru');
+      XLSX.utils.book_append_sheet(wb, stSheet, 'Staf');
       const stamp = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
       XLSX.writeFile(wb, `PIN-Fingerprint-${stamp}.xlsx`);
-      toast.success(`Export selesai: ${students.length} siswa aktif, ${teachers.length} guru`);
+      toast.success(`Export selesai: ${students.length} siswa aktif, ${teachers.length} guru, ${staff.length} staf`);
     } catch (e: any) {
       toast.error(e.message || 'Gagal export');
     } finally {
@@ -697,7 +704,7 @@ function MappingTab() {
       <div className="flex justify-end">
         <Button variant="outline" size="sm" onClick={exportExcel} disabled={exporting}>
           {exporting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
-          Export PIN ke Excel (siswa aktif + guru)
+          Export PIN ke Excel (siswa aktif + guru + staf)
         </Button>
       </div>
       {unmapped.length > 0 && (
@@ -711,9 +718,10 @@ function MappingTab() {
         </Card>
       )}
       <Tabs defaultValue="students">
-        <TabsList><TabsTrigger value="students">Siswa</TabsTrigger><TabsTrigger value="teachers">Guru</TabsTrigger></TabsList>
+        <TabsList><TabsTrigger value="students">Siswa</TabsTrigger><TabsTrigger value="teachers">Guru</TabsTrigger><TabsTrigger value="staff">Staf</TabsTrigger></TabsList>
         <TabsContent value="students"><PersonPinList kind="students" /></TabsContent>
         <TabsContent value="teachers"><PersonPinList kind="teachers" /></TabsContent>
+        <TabsContent value="staff"><PersonPinList kind="staff" /></TabsContent>
       </Tabs>
     </div>
   );
