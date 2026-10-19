@@ -511,6 +511,19 @@ function EnrollTab() {
     },
   });
 
+  const { data: methods = new Map<string, { finger: number; face: number }>() } = useQuery({
+    queryKey: ['fp-pin-methods'],
+    staleTime: 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await db.rpc('fp_pin_methods');
+      if (error) return new Map<string, { finger: number; face: number }>();
+      return new Map<string, { finger: number; face: number }>(
+        ((data as any[]) || []).map((r) => [String(r.pin), { finger: Number(r.finger_count), face: Number(r.face_count) }]),
+      );
+    },
+  });
+  const [onlyNoFace, setOnlyNoFace] = useState(false);
+
   const { data: queue = [], refetch } = useQuery({
     queryKey: ['fp-enroll-queue', device],
     enabled: !!device,
@@ -548,7 +561,8 @@ function EnrollTab() {
   });
 
   const term = q.trim().toLowerCase();
-  const shown = people.filter((p) => !term || p.name.toLowerCase().includes(term) || p.pin.includes(term) || p.extra.toLowerCase().includes(term)).slice(0, 50);
+  const shown = people.filter((p) => (!onlyNoFace || !(methods.get(p.pin)?.face)) && (!term || p.name.toLowerCase().includes(term) || p.pin.includes(term) || p.extra.toLowerCase().includes(term))).slice(0, 50);
+  const noFaceCount = people.filter((p) => !methods.get(p.pin)?.face).length;
   const statusLabel: Record<string, string> = { pending: 'Menunggu mesin', sent: 'Layar rekam dibuka di mesin', done: 'Selesai', failed: 'Gagal' };
 
   return (
@@ -576,6 +590,11 @@ function EnrollTab() {
             </div>
           )}
           <Input placeholder="Cari nama, kelas, atau PIN…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={onlyNoFace} onChange={(e) => setOnlyNoFace(e.target.checked)} />
+            Tampilkan yang belum terdeteksi absen wajah ({noFaceCount} orang)
+          </label>
+          <p className="text-xs text-muted-foreground">Status diambil dari riwayat absen: "Wajah terdeteksi" berarti orang itu pernah absen memakai wajah di mesin. Yang sudah merekam wajah tetapi belum pernah absen dengan wajah akan tampil "Belum ada absen wajah".</p>
           {isLoading ? <p className="text-sm text-muted-foreground">Memuat…</p> : (
             <Table>
               <TableHeader><TableRow><TableHead>Nama</TableHead><TableHead>PIN</TableHead><TableHead className="text-right">Rekam</TableHead></TableRow></TableHeader>
@@ -584,7 +603,11 @@ function EnrollTab() {
                   <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground">Tidak ada data (hanya yang punya PIN yang tampil).</TableCell></TableRow>
                 ) : shown.map((p) => (
                   <TableRow key={p.kind + p.pin}>
-                    <TableCell className="font-medium">{p.name}<div className="text-xs text-muted-foreground">{p.kind}{p.extra ? ` · ${p.extra}` : ''}</div></TableCell>
+                    <TableCell className="font-medium">{p.name}<div className="text-xs text-muted-foreground">{p.kind}{p.extra ? ` · ${p.extra}` : ''}</div>
+                      <div className="mt-1 flex gap-1">
+                        <Badge variant={methods.get(p.pin)?.finger ? 'default' : 'outline'} className="font-normal">{methods.get(p.pin)?.finger ? 'Jari terdeteksi' : 'Belum ada absen jari'}</Badge>
+                        <Badge variant={methods.get(p.pin)?.face ? 'default' : 'outline'} className="font-normal">{methods.get(p.pin)?.face ? 'Wajah terdeteksi' : 'Belum ada absen wajah'}</Badge>
+                      </div></TableCell>
                     <TableCell>{p.pin}</TableCell>
                     <TableCell className="space-x-2 whitespace-nowrap text-right">
                       <Button size="sm" variant="outline" disabled={!device || enqueue.isPending} onClick={() => enqueue.mutate({ pin: p.pin, name: p.name, mode: 'jari' })}>Rekam jari</Button>
