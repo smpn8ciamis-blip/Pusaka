@@ -798,22 +798,46 @@ function LogsTab() {
     },
     refetchInterval: 15000,
   });
+  const pinsKey = Array.from(new Set(logs.map((l) => String(l.pin)))).sort().join(',');
+  // Nama diambil dari pemetaan PIN saat ini (juga untuk log lama yang dulu belum dipetakan)
+  const { data: names = new Map<string, { name: string; kind: string }>() } = useQuery({
+    queryKey: ['fp-log-names', pinsKey],
+    enabled: pinsKey.length > 0,
+    queryFn: async () => {
+      const pins = pinsKey.split(',');
+      const [s, t, st] = await Promise.all([
+        db.from('students').select('fingerprint_pin, full_name, classes(name)').in('fingerprint_pin', pins),
+        db.from('teachers').select('fingerprint_pin, profiles(full_name)').in('fingerprint_pin', pins),
+        db.from('staff').select('fingerprint_pin, full_name, staff_type').in('fingerprint_pin', pins),
+      ]);
+      const m = new Map<string, { name: string; kind: string }>();
+      ((s.data as any[]) || []).forEach((r) => m.set(String(r.fingerprint_pin), { name: r.full_name, kind: `Siswa${r.classes?.name ? ` · ${r.classes.name}` : ''}` }));
+      ((t.data as any[]) || []).forEach((r) => m.set(String(r.fingerprint_pin), { name: r.profiles?.full_name || 'Guru', kind: 'Guru' }));
+      ((st.data as any[]) || []).forEach((r) => m.set(String(r.fingerprint_pin), { name: r.full_name, kind: r.staff_type === 'tata_usaha' ? 'Staf · Tata Usaha' : 'Staf · Karyawan' }));
+      return m;
+    },
+  });
+  const [q, setQ] = useState('');
+  const term = q.trim().toLowerCase();
+  const shownLogs = logs.filter((l) => !term || String(l.pin).includes(term) || (names.get(String(l.pin))?.name || '').toLowerCase().includes(term));
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between space-y-0">
         <CardTitle>100 ketukan terakhir</CardTitle>
+        <Input className="max-w-[14rem]" placeholder="Cari nama atau PIN…" value={q} onChange={(e) => setQ(e.target.value)} />
         <Button size="sm" variant="outline" onClick={() => refetch()}>Muat ulang</Button>
       </CardHeader>
       <CardContent>
         {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : (
           <Table>
-            <TableHeader><TableRow><TableHead>Waktu</TableHead><TableHead>PIN</TableHead><TableHead>Jenis</TableHead><TableHead>Hasil</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>Waktu</TableHead><TableHead>Nama</TableHead><TableHead>PIN</TableHead><TableHead>Jenis</TableHead><TableHead>Hasil</TableHead></TableRow></TableHeader>
             <TableBody>
-              {logs.map((l) => (
+              {shownLogs.map((l) => (
                 <TableRow key={l.id}>
                   <TableCell>{fmt(l.punched_at)}</TableCell>
+                  <TableCell className="font-medium">{names.get(String(l.pin))?.name || <span className="font-normal text-muted-foreground">Belum dipetakan</span>}</TableCell>
                   <TableCell>{l.pin}</TableCell>
-                  <TableCell>{l.person_type === 'student' ? 'Siswa' : l.person_type === 'teacher' ? 'Guru' : l.person_type === 'staff' ? 'Staf' : '-'}</TableCell>
+                  <TableCell>{names.get(String(l.pin))?.kind || (l.person_type === 'student' ? 'Siswa' : l.person_type === 'teacher' ? 'Guru' : l.person_type === 'staff' ? 'Staf' : '-')}</TableCell>
                   <TableCell>{RESULT_LABEL[l.result] || l.result || '-'}</TableCell>
                 </TableRow>
               ))}
