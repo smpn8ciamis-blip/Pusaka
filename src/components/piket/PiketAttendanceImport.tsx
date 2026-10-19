@@ -38,6 +38,39 @@ export function usePiketAttendance(shift: PiketShift, month: Date | string | nul
   });
 }
 
+const personKey = (d: PiketDuty) => d.staff_id ?? d.teacher_id ?? `manual:${d.person_name}`;
+
+/** Nama yang sama dipakai oleh lebih dari satu orang (staf/guru berbeda): perlu konfirmasi digabung atau dipisah. */
+export function ambiguousNames(map: Map<string, PiketDuty[]> | undefined): string[] {
+  return Array.from((map ?? new Map<string, PiketDuty[]>()).entries())
+    .filter(([, ds]) => new Set(ds.map(personKey)).size > 1)
+    .map(([name]) => name);
+}
+
+/** Uraikan per nama menjadi daftar entri hitungan. choice[name]: 'gabung' (satu petugas) | 'pisah' (per orang). */
+export function buildEntries(map: Map<string, PiketDuty[]> | undefined, choice: Record<string, "gabung" | "pisah">) {
+  const out: { label: string; ds: PiketDuty[]; position: string }[] = [];
+  Array.from((map ?? new Map<string, PiketDuty[]>()).entries()).forEach(([name, ds]) => {
+    const people = new Map<string, PiketDuty[]>();
+    ds.forEach((d) => people.set(personKey(d), [...(people.get(personKey(d)) ?? []), d]));
+    if (people.size <= 1 || choice[name] !== "pisah") {
+      // digabung: satu hari dihitung sekali walau tercatat pada dua orang
+      const seen = new Set<string>();
+      const merged = [...ds].sort((x, y) => x.duty_date.localeCompare(y.duty_date)).filter((d) => !seen.has(d.duty_date) && !!seen.add(d.duty_date));
+      out.push({ label: name, ds: merged, position: merged[0]?.position ?? "" });
+      return;
+    }
+    const kinds = Array.from(people.values()).map((x) => x[0].person_type);
+    Array.from(people.values()).forEach((x, i) => {
+      const kind = x[0].person_type;
+      const sameKind = kinds.filter((k) => k === kind).length > 1;
+      const suffix = sameKind ? String(i + 1) : kind === "teacher" ? "Guru" : kind === "staff" ? "Staf" : String(i + 1);
+      out.push({ label: `${name} (${suffix})`, ds: x, position: x[0].position ?? "" });
+    });
+  });
+  return out;
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -55,7 +88,12 @@ export function PiketAttendanceImport({ open, onClose, shift, month, rates, exis
   const [rateByName, setRateByName] = useState<Record<string, string>>({});
   const [skip, setSkip] = useState<Record<string, boolean>>({});
 
-  const list = useMemo(() => Array.from((data ?? new Map<string, PiketDuty[]>()).entries()), [data]);
+  const [choice, setChoice] = useState<Record<string, "gabung" | "pisah">>({});
+  const ambiguous = useMemo(() => ambiguousNames(data), [data]);
+  const list = useMemo(
+    () => buildEntries(data, choice).map((e) => [e.label, e.ds, e.position] as [string, PiketDuty[], string]),
+    [data, choice],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -69,9 +107,10 @@ export function PiketAttendanceImport({ open, onClose, shift, month, rates, exis
     setSkip({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, list.length, ym]);
+  useEffect(() => { if (open) setChoice({}); }, [open, ym]);
 
   const chosen = list.filter(([n]) => !skip[n]);
-  const ready = chosen.length > 0 && chosen.every(([n]) => rateByName[n]);
+  const ready = chosen.length > 0 && chosen.every(([n]) => rateByName[n]) && ambiguous.every((n) => choice[n]);
 
   const apply = () => {
     onApply(
@@ -102,6 +141,29 @@ export function PiketAttendanceImport({ open, onClose, shift, month, rates, exis
           <span>Bulan kehadiran</span>
           <Input type="month" className="w-44" value={ym} onChange={(e) => e.target.value && setYm(e.target.value)} />
         </div>
+
+        {ambiguous.length > 0 && (
+          <div className="space-y-2 rounded-md border border-amber-400 p-3 text-sm">
+            <div className="font-medium">Ada nama yang sama pada lebih dari satu orang</div>
+            <p className="text-xs text-muted-foreground">Pilih apakah kehadirannya dihitung sebagai satu petugas (digabung) atau masing-masing sendiri (dipisah).</p>
+            {ambiguous.map((n) => {
+              const ds = data?.get(n) ?? [];
+              const kinds = Array.from(new Set(ds.map((d) => (d.person_type === "teacher" ? "Guru" : d.person_type === "staff" ? "Staf" : "Manual"))));
+              return (
+                <div key={n} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2">
+                  <div>
+                    <div className="font-medium">{n}</div>
+                    <div className="text-xs text-muted-foreground">{ds.length} hari hadir · tercatat sebagai {kinds.join(" + ")}</div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant={choice[n] === "gabung" ? "default" : "outline"} onClick={() => setChoice((c) => ({ ...c, [n]: "gabung" }))}>Gabung</Button>
+                    <Button size="sm" variant={choice[n] === "pisah" ? "default" : "outline"} onClick={() => setChoice((c) => ({ ...c, [n]: "pisah" }))}>Pisah</Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {isLoading ? (
           <p className="py-6 text-center text-sm text-muted-foreground">Memuat…</p>
