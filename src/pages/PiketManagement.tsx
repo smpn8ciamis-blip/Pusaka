@@ -19,7 +19,7 @@ import { PiketPeriodicDialog } from "@/components/piket/PiketPeriodicDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  PiketDuty, PiketShift, PiketStatus, SHIFT_LABEL, STATUS_LABEL, bulanLabel, buildPiketPdf, exportPiketExcel,
+  PiketDuty, PiketShift, PiketStatus, SHIFT_LABEL, STATUS_LABEL, bulanLabel, buildPiketPdf, exportPiketExcel, validForShift,
   hariLabel, jamWIB, monthRange, parseISODate, toISODate, weekendDates, recordedRows, PiketPunch, verifyLabel, PiketCfg, PiketUnscheduled, DEFAULT_CFG, autoRemark, recordedPunches,
 } from "@/lib/piket";
 
@@ -302,7 +302,7 @@ function PiketPage({ shift }: { shift: PiketShift }) {
 
   const summary = useMemo(() => ({
     total: mainRows.length,
-    hadir: mainRows.filter((r) => r.status === "hadir").length,
+    hadir: mainRows.filter((r) => r.status === "hadir" && validForShift(r)).length,
     belum: mainRows.filter((r) => r.status === "dijadwalkan").length,
     absen: mainRows.filter((r) => r.status === "tidak_hadir" || r.status === "izin").length,
   }), [mainRows]);
