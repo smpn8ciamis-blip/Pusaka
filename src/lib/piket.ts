@@ -126,6 +126,11 @@ export const weekendDates = (ym: string): string[] => {
   return out;
 };
 
+/** Piket Sabtu & Minggu hanya sah pada hari Sabtu/Minggu; absen hari kerja tidak dihitung sebagai piket ini. */
+export const isWeekendDate = (iso: string) => { const g = parseISODate(iso).getDay(); return g === 0 || g === 6; };
+export const validForShift = (d: { shift_type: PiketShift; duty_date: string }) =>
+  d.shift_type !== "sabtu_minggu" || isWeekendDate(d.duty_date);
+
 export const hariLabel = (iso: string) =>
   ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"][parseISODate(iso).getDay()];
 
@@ -150,7 +155,7 @@ export const keteranganText = (d: PiketDuty, ps: PiketPunch[] | undefined, cfg?:
 
 /** Daftar hadir cetak/ekspor: jadwal "Dijadwalkan" (belum ada ketukan), "Menunggu Konfirmasi" dan "Tidak Dihitung" tidak ditampilkan dan tidak dihitung. */
 export const recordedRows = (rows: PiketDuty[]) =>
-  rows.filter((r) => r.status !== "dijadwalkan" && r.status !== "konfirmasi" && r.status !== "ditolak");
+  rows.filter((r) => r.status !== "dijadwalkan" && r.status !== "konfirmasi" && r.status !== "ditolak" && validForShift(r));
 
 const sorted = (rows: PiketDuty[]) =>
   recordedRows(rows).sort((a, b) => a.duty_date.localeCompare(b.duty_date) || a.person_name.localeCompare(b.person_name));

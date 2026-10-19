@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Fingerprint } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { PiketDuty, PiketShift, SHIFT_LABEL, bulanLabel, monthRange, toISODate } from "@/lib/piket";
+import { PiketDuty, PiketShift, SHIFT_LABEL, bulanLabel, monthRange, toISODate, validForShift } from "@/lib/piket";
 
 export interface ImportedWorker {
   worker_name: string;
@@ -30,7 +30,7 @@ export function usePiketAttendance(shift: PiketShift, month: Date | string | nul
         .gte("duty_date", from).lte("duty_date", to).order("duty_date");
       if (error) throw error;
       const map = new Map<string, PiketDuty[]>();
-      ((data as any[]) as PiketDuty[]).forEach((d) => {
+      ((data as any[]) as PiketDuty[]).filter(validForShift).forEach((d) => {
         map.set(d.person_name, [...(map.get(d.person_name) ?? []), d]);
       });
       return map;

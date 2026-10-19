@@ -12,7 +12,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   PiketCfg, PiketDuty, PiketPunch, PiketShift, PiketUnscheduled, DEFAULT_CFG, SHIFT_LABEL,
-  hariLabel, jamWIB, keteranganText, recordedRows, toISODate,
+  hariLabel, jamWIB, keteranganText, recordedRows, toISODate, validForShift,
 } from "@/lib/piket";
 
 interface LogRow { key: string; date: string; datang: string; pulang: string; ket: string }
@@ -63,7 +63,7 @@ function ShiftLog({ shift, from, to, cfg }: { shift: PiketShift; from: string; t
     const a: LogRow[] = recordedRows(duties).map((d) => ({
       key: d.id, date: d.duty_date, datang: jamWIB(d.check_in_at), pulang: jamWIB(d.check_out_at), ket: keteranganText(d, punches.get(d.id), cfg),
     }));
-    const b: LogRow[] = unsched.filter((u) => u.status !== "dihitung").map((u) => ({
+    const b: LogRow[] = unsched.filter((u) => u.status !== "dihitung" && validForShift({ shift_type: shift, duty_date: u.duty_date })).map((u) => ({
       key: `u-${u.id}`, date: u.duty_date, datang: jamWIB(u.check_in_at), pulang: jamWIB(u.check_out_at),
       ket: u.status === "menunggu" ? "Absen tanpa jadwal - menunggu konfirmasi" : "Absen tanpa jadwal - tidak dihitung",
     }));
