@@ -298,21 +298,7 @@ function PiketPage({ shift }: { shift: PiketShift }) {
 
   const buildPdf = () => buildPiketPdf({ rows, shift, ym, school, punches, cfg: piketCfg });
 
-  const mainRows = useMemo(() => rows.filter((r) => r.status !== "konfirmasi" && r.status !== "ditolak"), [rows]);
-  const pending = useMemo(() => rows.filter((r) => r.status === "konfirmasi"), [rows]);
-  const ignored = useMemo(() => rows.filter((r) => r.status === "ditolak"), [rows]);
-
-  const decide = useMutation({
-    mutationFn: async ({ ids, status }: { ids: string[]; status: PiketStatus }) => {
-      const { error } = await supabase.from("piket_duties" as any).update({ status }).in("id", ids);
-      if (error) throw error;
-    },
-    onSuccess: (_d, v) => {
-      toast.success(v.status === "hadir" ? "Dihitung sebagai kehadiran piket" : v.status === "ditolak" ? "Tidak dihitung" : "Dikembalikan ke daftar konfirmasi");
-      refresh();
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
+  const mainRows = rows;
 
   const summary = useMemo(() => ({
     total: mainRows.length,
@@ -338,48 +324,6 @@ function PiketPage({ shift }: { shift: PiketShift }) {
             </Button>
           </div>
         </div>
-
-        {pending.length > 0 && (
-          <Card className="border-amber-400">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Menunggu konfirmasi ({pending.length})</CardTitle>
-              <CardDescription>
-                Guru/staf ini melakukan absen di jam piket tetapi tidak punya jadwal. Belum dihitung di daftar hadir maupun kwitansi honor sampai Anda konfirmasi.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {pending.map((r) => (
-                <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm">
-                  <div>
-                    <div className="font-medium">{r.person_name} <span className="text-xs font-normal text-muted-foreground">{r.position}</span></div>
-                    <div className="text-xs text-muted-foreground">
-                      {SHIFT_LABEL[r.shift_type]} · {hariLabel(r.duty_date)}, {r.duty_date.split("-").reverse().join("/")}
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {recordedPunches(r, punches.get(r.id)).map((x) => (
-                        <Badge key={x.label} variant="outline" className="gap-1 font-normal">
-                          <span className="text-muted-foreground">{x.label}</span>
-                          <span className="font-mono">{jamWIB(x.punch.punched_at)}</span>
-                          <span>{verifyLabel(x.punch.verify_type)}</span>
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={() => decide.mutate({ ids: [r.id], status: "hadir" })} disabled={decide.isPending}>Hitung</Button>
-                    <Button size="sm" variant="outline" onClick={() => decide.mutate({ ids: [r.id], status: "ditolak" })} disabled={decide.isPending}>Jangan hitung</Button>
-                  </div>
-                </div>
-              ))}
-              {pending.length > 1 && (
-                <div className="flex gap-2 pt-1">
-                  <Button size="sm" variant="secondary" onClick={() => decide.mutate({ ids: pending.map((r) => r.id), status: "hadir" })} disabled={decide.isPending}>Hitung semua</Button>
-                  <Button size="sm" variant="ghost" onClick={() => decide.mutate({ ids: pending.map((r) => r.id), status: "ditolak" })} disabled={decide.isPending}>Jangan hitung semua</Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
 
         {(pending.length > 0 || ignored.length > 0) && (
           <Card className={pending.length ? "border-amber-400" : ""}>
@@ -492,19 +436,6 @@ function PiketPage({ shift }: { shift: PiketShift }) {
             </Table>
           </CardContent>
         </Card>
-        {ignored.length > 0 && (
-          <details className="rounded-md border p-3 text-sm">
-            <summary className="cursor-pointer text-muted-foreground">Tidak dihitung ({ignored.length})</summary>
-            <div className="mt-2 space-y-1">
-              {ignored.map((r) => (
-                <div key={r.id} className="flex items-center justify-between gap-2">
-                  <span>{r.person_name} · {SHIFT_LABEL[r.shift_type]} · {r.duty_date}</span>
-                  <Button size="sm" variant="ghost" onClick={() => decide.mutate({ ids: [r.id], status: "konfirmasi" })}>Pulihkan</Button>
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
       </div>
 
       {/* Tambah */}
