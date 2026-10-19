@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Loader2, Fingerprint, Wand2, Download } from 'lucide-react';
+import { Loader2, Fingerprint, Wand2, Download, Pencil } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -121,6 +121,9 @@ function PersonPinList({ kind }: { kind: 'students' | 'teachers' | 'staff' }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [confirmAll, setConfirmAll] = useState(false);
+  const [editing, setEditing] = useState<{ id: string; name: string; pin: string } | null>(null);
+  const [newPin, setNewPin] = useState('');
+  const [confirmText, setConfirmText] = useState('');
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ['fp-map', kind, q, onlyEmpty, page, pageSize],
@@ -144,7 +147,7 @@ function PersonPinList({ kind }: { kind: 'students' | 'teachers' | 'staff' }) {
       const { error } = await db.from(kind).update({ fingerprint_pin: pin.trim() || null }).eq('id', id);
       if (error) throw error;
     },
-    onSuccess: () => { toast.success('PIN disimpan'); refresh(); },
+    onSuccess: () => { toast.success('PIN disimpan'); setEditing(null); refresh(); qc.invalidateQueries({ queryKey: ['fp-unmapped'] }); qc.invalidateQueries({ queryKey: ['fp-pin-methods'] }); },
     onError: (e: Error) => toast.error(e.message.includes('duplicate') ? 'PIN sudah dipakai orang lain' : e.message),
   });
   const generate = useMutation({
@@ -194,14 +197,12 @@ function PersonPinList({ kind }: { kind: 'students' | 'teachers' | 'staff' }) {
                   <TableCell>{p.full_name || '-'}</TableCell>
                   {kind !== 'teachers' && <TableCell>{p.class_name || '-'}</TableCell>}
                   <TableCell>
-                    <div className="flex gap-1">
-                      <Input
-                        defaultValue={p.fingerprint_pin || ''}
-                        inputMode="numeric"
-                        className="h-8"
-                        placeholder="PIN"
-                        onBlur={(e) => e.target.value.trim() !== (p.fingerprint_pin || '') && save.mutate({ id: p.id, pin: e.target.value })}
-                      />
+                    <div className="flex items-center gap-1">
+                      <span className={`min-w-[4.5rem] font-mono text-sm ${p.fingerprint_pin ? '' : 'text-muted-foreground'}`}>{p.fingerprint_pin || 'Belum ada'}</span>
+                      <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" title={p.fingerprint_pin ? 'Ubah PIN' : 'Isi PIN manual'}
+                        onClick={() => { setEditing({ id: p.id, name: p.full_name || '-', pin: p.fingerprint_pin || '' }); setNewPin(p.fingerprint_pin || ''); setConfirmText(''); }}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
                       {!p.fingerprint_pin && (
                         <Button size="icon" variant="outline" className="h-8 w-8 shrink-0" title="Generate PIN" disabled={generate.isPending}
                           onClick={() => generate.mutate([p.id])}>
@@ -237,9 +238,37 @@ function PersonPinList({ kind }: { kind: 'students' | 'teachers' | 'staff' }) {
         </div>
       )}
       <p className="text-xs text-muted-foreground">
-        PIN = nomor ID yang didaftarkan di mesin. Ketik PIN lalu klik di luar kolom untuk menyimpan, atau klik ikon tongkat untuk membuat PIN otomatis
+        PIN = nomor ID yang didaftarkan di mesin. Klik ikon pensil untuk mengubah PIN (ada konfirmasi), atau ikon tongkat untuk membuat PIN otomatis
         (angka urut, tidak kembar antara siswa dan guru). Yang sudah punya PIN tidak diubah.
       </p>
+
+      <AlertDialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{editing?.pin ? 'Ubah PIN' : 'Isi PIN'}: {editing?.name}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {editing?.pin
+                ? 'Mengubah PIN memutus kaitan dengan data yang sudah terdaftar di mesin (jari/wajah memakai PIN lama) dan absen berikutnya. Setelah diubah, daftarkan ulang orangnya di mesin dengan PIN baru. Absen lama tidak ikut berpindah.'
+                : 'PIN harus sama dengan PIN yang didaftarkan di mesin untuk orang ini.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            {editing?.pin && <p className="text-sm">PIN sekarang: <b className="font-mono">{editing.pin}</b></p>}
+            <Input inputMode="numeric" placeholder="PIN baru (angka)" value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))} />
+            {editing?.pin && (
+              <Input placeholder='Ketik "UBAH" untuk melanjutkan' value={confirmText} onChange={(e) => setConfirmText(e.target.value)} />
+            )}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={save.isPending || !newPin || newPin === editing?.pin || (!!editing?.pin && confirmText.trim().toUpperCase() !== 'UBAH')}
+              onClick={(e) => { if (editing) { e.preventDefault(); save.mutate({ id: editing.id, pin: newPin }); } }}>
+              Simpan PIN
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={confirmAll} onOpenChange={setConfirmAll}>
         <AlertDialogContent>
@@ -695,7 +724,16 @@ function MappingTab() {
       const { data } = await db.from('fingerprint_logs').select('pin, punched_at').eq('result', 'unmapped').order('punched_at', { ascending: false }).limit(200);
       const seen = new Map<string, string>();
       (data || []).forEach((r: any) => { if (!seen.has(r.pin)) seen.set(r.pin, r.punched_at); });
-      return Array.from(seen.entries());
+      const pins = Array.from(seen.keys());
+      if (pins.length === 0) return [] as [string, string][];
+      // Log lama bertanda "unmapped" walau PIN-nya kini sudah dipetakan: sembunyikan yang sudah dipetakan sekarang
+      const [s, t, st] = await Promise.all([
+        db.from('students').select('fingerprint_pin').in('fingerprint_pin', pins).eq('status', 'aktif'),
+        db.from('teachers').select('fingerprint_pin').in('fingerprint_pin', pins),
+        db.from('staff').select('fingerprint_pin').in('fingerprint_pin', pins).neq('status', 'nonaktif'),
+      ]);
+      const mapped = new Set<string>([...(s.data || []), ...(t.data || []), ...(st.data || [])].map((r: any) => String(r.fingerprint_pin)));
+      return Array.from(seen.entries()).filter(([pin]) => !mapped.has(pin));
     },
     refetchInterval: 20000,
   });
