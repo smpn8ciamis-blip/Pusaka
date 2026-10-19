@@ -59,6 +59,63 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 
 const app = express();
 app.use(express.json());
+
+// ===================== WEB PUSH (notifikasi layar kunci saat absen tercatat) =====================
+// Butuh: npm i web-push, dan env VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT (npx web-push generate-vapid-keys).
+let webpush = null;
+try { webpush = require('web-push'); } catch (e) { console.log('[PUSH] paket web-push belum terpasang; notifikasi absen dimatikan'); }
+const PUSH_ENABLED = !!(webpush && process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
+if (PUSH_ENABLED) {
+    webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:admin@smpn8ciamis.sch.id', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
+    console.log('[PUSH] Web Push aktif');
+}
+app.get('/push/public-key', (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.json({ key: PUSH_ENABLED ? process.env.VAPID_PUBLIC_KEY : null });
+});
+
+const PUSH_TEXT = { check_in: 'Absen masuk', late: 'Absen masuk (terlambat)', check_out: 'Absen pulang', staff: 'Absen tercatat' };
+// Kirim notifikasi ke semua perangkat pemilik akun. Gagal tidak boleh mengganggu pemrosesan absensi.
+async function notifyPunch(sn, pin, at, result) {
+    if (!PUSH_ENABLED || !PUSH_TEXT[result]) return;
+    if (Date.now() - at.getTime() > 15 * 60 * 1000) return;      // log lama (mesin mengirim ulang antrean) tidak dinotifikasikan
+    const { data: log } = await supabase.from('fingerprint_logs').select('person_type, person_id')
+        .eq('device_sn', sn).eq('pin', pin).eq('punched_at', at.toISOString()).maybeSingle();
+    if (!log || !log.person_id) return;
+    let userId = null, name = '';
+    if (log.person_type === 'student') {
+        const [{ data: sa }, { data: st }] = await Promise.all([
+            supabase.from('student_accounts').select('user_id').eq('student_id', log.person_id).maybeSingle(),
+            supabase.from('students').select('full_name').eq('id', log.person_id).maybeSingle(),
+        ]);
+        userId = sa && sa.user_id; name = (st && st.full_name) || '';
+    } else if (log.person_type === 'teacher') {
+        const { data: t } = await supabase.from('teachers').select('user_id').eq('id', log.person_id).maybeSingle();
+        userId = t && t.user_id;
+        if (userId) { const { data: p } = await supabase.from('profiles').select('full_name').eq('id', userId).maybeSingle(); name = (p && p.full_name) || ''; }
+    } else if (log.person_type === 'staff') {
+        const { data: st } = await supabase.from('staff').select('user_id, full_name').eq('id', log.person_id).maybeSingle();
+        userId = st && st.user_id; name = (st && st.full_name) || '';
+    }
+    if (!userId) return;
+    const { data: subs } = await supabase.from('web_push_subscriptions').select('id, endpoint, p256dh, auth').eq('user_id', userId);
+    if (!subs || !subs.length) return;
+    const hhmm = at.toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false }).replace('.', ':');
+    const payload = JSON.stringify({
+        title: 'PUSAKA · ' + PUSH_TEXT[result],
+        body: (name ? name + ' · ' : '') + hhmm + ' WIB',
+        url: '/', tag: 'absen-' + log.person_id, timestamp: at.getTime(),
+    });
+    for (const s of subs) {
+        try {
+            await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 600, urgency: 'high' });
+        } catch (e) {
+            if (e && (e.statusCode === 404 || e.statusCode === 410)) await supabase.from('web_push_subscriptions').delete().eq('id', s.id);
+            else console.error('[PUSH] gagal kirim:', e && e.message);
+        }
+    }
+}
+
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
@@ -1034,6 +1091,7 @@ app.post('/iclock/cdata', rawText, async (req, res) => {
             });
             if (r.error) throw r.error; // kegagalan -> mesin mengirim ulang (aman, proses idempoten)
             n++;
+            if (r.data && r.data.result) notifyPunch(sn, pin, at, r.data.result).catch((e) => console.error('[PUSH]', e && e.message));
         }
         if (n) console.log('[FINGERPRINT] ' + sn + ': ' + n + ' log diproses');
         res.type('text/plain').send('OK: ' + n);

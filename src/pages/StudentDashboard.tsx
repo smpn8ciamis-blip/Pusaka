@@ -29,6 +29,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { AcademicYearSelector } from "@/components/AcademicYearSelector";
 import { useAcademicYear } from "@/contexts/AcademicYearContext";
 import { getMessagingInstance, getToken, onMessage } from "@/integrations/firebase";
+import { EnablePushButton } from "@/components/EnablePushButton";
 
 import StudentUploadTab from "@/components/dashboard/StudentUploadTab";
 import StudentElearningTab from "@/components/dashboard/StudentElearningTab";
@@ -1575,6 +1576,8 @@ const StudentDashboardPage = () => {
       {(() => {
         const isHome = activeTab === 'overview' || !['schedule', 'idcard', 'grades', 'elearning', 'profile', 'attendance', 'violations', 'achievements', 'ekskul', 'announcements', 'dispensasi', 'uploads', 'settings'].includes(activeTab);
         const bellBtn = (
+          <>
+          <EnablePushButton className="h-11 w-11 shrink-0 rounded-full bg-white/20 p-0 text-white hover:bg-white/30 hover:text-white" />
           <button
             data-notif-btn
             onClick={() => setShowNotifications((v) => !v)}
@@ -1588,6 +1591,7 @@ const StudentDashboardPage = () => {
               </span>
             )}
           </button>
+          </>
         );
         const logoutBtn = (
           <button
