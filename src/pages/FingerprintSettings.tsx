@@ -147,7 +147,11 @@ function PersonPinList({ kind }: { kind: 'students' | 'teachers' | 'staff' }) {
       const { error } = await db.from(kind).update({ fingerprint_pin: pin.trim() || null }).eq('id', id);
       if (error) throw error;
     },
-    onSuccess: () => { toast.success('PIN disimpan'); setEditing(null); refresh(); qc.invalidateQueries({ queryKey: ['fp-unmapped'] }); qc.invalidateQueries({ queryKey: ['fp-pin-methods'] }); },
+    onSuccess: async () => {
+      toast.success('PIN disimpan'); setEditing(null); refresh();
+      await db.rpc('fp_reprocess_unmapped', { p_days: 60 });
+      qc.invalidateQueries({ queryKey: ['fp-unmapped'] }); qc.invalidateQueries({ queryKey: ['fp-pin-methods'] });
+    },
     onError: (e: Error) => toast.error(e.message.includes('duplicate') ? 'PIN sudah dipakai orang lain' : e.message),
   });
   const generate = useMutation({
@@ -156,7 +160,10 @@ function PersonPinList({ kind }: { kind: 'students' | 'teachers' | 'staff' }) {
       if (error) throw error;
       return data as number;
     },
-    onSuccess: (n) => { toast.success(n > 0 ? `${n} PIN berhasil dibuat` : 'Tidak ada PIN baru yang perlu dibuat'); refresh(); },
+    onSuccess: async (n) => {
+      toast.success(n > 0 ? `${n} PIN berhasil dibuat` : 'Tidak ada PIN baru yang perlu dibuat'); refresh();
+      if (n > 0) { await db.rpc('fp_reprocess_unmapped', { p_days: 60 }); qc.invalidateQueries({ queryKey: ['fp-unmapped'] }); }
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -718,6 +725,16 @@ function MappingTab() {
       setExporting(false);
     }
   };
+  const mapQc = useQueryClient();
+  const reprocess = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await db.rpc('fp_reprocess_unmapped', { p_days: 60 });
+      if (error) throw error;
+      return data as number;
+    },
+    onSuccess: (n) => { toast.success(n > 0 ? `${n} log diproses ulang` : 'Tidak ada log yang perlu diproses ulang'); mapQc.invalidateQueries({ queryKey: ['fp-unmapped'] }); mapQc.invalidateQueries({ queryKey: ['fp-logs'] }); },
+    onError: (e: Error) => toast.error(e.message),
+  });
   const { data: unmapped = [] } = useQuery({
     queryKey: ['fp-unmapped'],
     queryFn: async () => {
@@ -747,7 +764,12 @@ function MappingTab() {
       </div>
       {unmapped.length > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-base">PIN yang sudah menempel jari tapi belum dipetakan</CardTitle></CardHeader>
+          <CardHeader className="flex-row items-center justify-between space-y-0">
+            <CardTitle className="text-base">PIN yang sudah menempel jari tapi belum dipetakan</CardTitle>
+            <Button size="sm" variant="outline" disabled={reprocess.isPending} onClick={() => reprocess.mutate()}>
+              {reprocess.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}Proses ulang log
+            </Button>
+          </CardHeader>
           <CardContent className="flex flex-wrap gap-2">
             {unmapped.map(([pin, at]) => (
               <Badge key={pin} variant="outline" title={fmt(at)}>PIN {pin} · {fmtTime(at)}</Badge>
@@ -791,7 +813,7 @@ function LogsTab() {
                 <TableRow key={l.id}>
                   <TableCell>{fmt(l.punched_at)}</TableCell>
                   <TableCell>{l.pin}</TableCell>
-                  <TableCell>{l.person_type === 'student' ? 'Siswa' : l.person_type === 'teacher' ? 'Guru' : '-'}</TableCell>
+                  <TableCell>{l.person_type === 'student' ? 'Siswa' : l.person_type === 'teacher' ? 'Guru' : l.person_type === 'staff' ? 'Staf' : '-'}</TableCell>
                   <TableCell>{RESULT_LABEL[l.result] || l.result || '-'}</TableCell>
                 </TableRow>
               ))}
