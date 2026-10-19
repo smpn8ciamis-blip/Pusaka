@@ -475,6 +475,7 @@ function EnrollTab() {
   const [sn, setSn] = useState('');
   const [q, setQ] = useState('');
   const [fid, setFid] = useState(6);
+  const [facePin, setFacePin] = useState('');
   const [faceTpl, setFaceTpl] = useState(() => {
     try { return localStorage.getItem('fp-face-template') || DEFAULT_FACE_TEMPLATE; } catch { return DEFAULT_FACE_TEMPLATE; }
   });
@@ -556,8 +557,7 @@ function EnrollTab() {
         <CardHeader>
           <CardTitle className="text-base">Rekam sidik jari / wajah dari komputer</CardTitle>
           <CardDescription>
-            Klik <b>Rekam jari</b> atau <b>Rekam wajah</b> pada nama, lalu orangnya menghadap mesin: layar rekam langsung terbuka untuk PIN itu,
-            tanpa mencari nama di menu mesin. Orang harus sudah ada di mesin (kirim dulu di tab Kirim ke Mesin). Perintah rekam dikirim satu per satu.
+            Klik <b>Rekam jari</b> pada nama: layar rekam sidik jari terbuka di mesin untuk PIN itu (bisa tertunda sesuai interval ping mesin, biasanya beberapa detik hingga ±1 menit). Orang harus sudah ada di mesin (kirim dulu di tab Kirim ke Mesin). Perintah dikirim satu per satu. Rekam wajah pada mesin tipe ini (Face VX7.0, firmware 8.0.3.6) dilakukan langsung di mesin; tombol <b>Panduan wajah</b> menampilkan langkahnya.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -588,7 +588,7 @@ function EnrollTab() {
                     <TableCell>{p.pin}</TableCell>
                     <TableCell className="space-x-2 whitespace-nowrap text-right">
                       <Button size="sm" variant="outline" disabled={!device || enqueue.isPending} onClick={() => enqueue.mutate({ pin: p.pin, name: p.name, mode: 'jari' })}>Rekam jari</Button>
-                      <Button size="sm" variant="outline" disabled={!device || enqueue.isPending} onClick={() => enqueue.mutate({ pin: p.pin, name: p.name, mode: 'wajah' })}>Rekam wajah</Button>
+                      <Button size="sm" variant="ghost" onClick={() => toast.info(`Wajah ${p.name} (PIN ${p.pin}): rekam langsung di mesin. Menu → Pengguna → Kelola Pengguna → cari PIN ${p.pin} → Edit → Wajah.`, { duration: 12000 })}>Panduan wajah</Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -616,11 +616,15 @@ function EnrollTab() {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Lanjutan: perintah rekam wajah</CardTitle>
+        <CardHeader><CardTitle className="text-base">Eksperimental: perintah rekam wajah jarak jauh</CardTitle>
           <CardDescription>
-            Sintaks perintah wajah bisa berbeda antar firmware. Bila mesin menolak (kode gagal), sesuaikan di sini; <code>{'{PIN}'}</code> diganti PIN orangnya.
+            Firmware lama (Push 2.0.x) umumnya tidak mendukung rekam wajah jarak jauh (kode -1003). Hanya untuk mesin/firmware lebih baru; <code>{'{PIN}'}</code> diganti PIN orangnya.
           </CardDescription></CardHeader>
         <CardContent className="space-y-2">
+          <div className="flex gap-2">
+            <Input className="w-32" placeholder="PIN" value={facePin} onChange={(e) => setFacePin(e.target.value)} />
+            <Button variant="outline" size="sm" disabled={!device || !facePin.trim() || enqueue.isPending} onClick={() => enqueue.mutate({ pin: facePin.trim(), name: `PIN ${facePin.trim()}`, mode: 'wajah' })}>Coba kirim</Button>
+          </div>
           <Input className="font-mono text-xs" value={faceTpl.replace(/\t/g, '<TAB>')} onChange={(e) => saveTpl(e.target.value.replace(/<TAB>/g, '\t'))} />
           <Button variant="ghost" size="sm" onClick={() => saveTpl(DEFAULT_FACE_TEMPLATE)}>Kembalikan bawaan</Button>
         </CardContent>
