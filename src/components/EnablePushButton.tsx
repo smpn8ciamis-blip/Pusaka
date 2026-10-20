@@ -1,35 +1,29 @@
 import { useEffect, useState } from 'react';
 import { BellRing, BellOff } from 'lucide-react';
-import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { currentPushState, disablePush, enablePush } from '@/lib/webPush';
+import { currentPushState, syncPush } from '@/lib/webPush';
+import { NotificationSetupDialog } from '@/components/NotificationSetupDialog';
 
-/** Tombol aktif/nonaktif notifikasi absensi di perangkat ini (muncul di layar kunci). */
+/** Tombol lonceng: membuka panduan & pengaturan notifikasi absensi (layar kunci, pasang aplikasi, uji). */
 export function EnablePushButton({ className }: { className?: string }) {
   const { user } = useAuth();
   const [state, setState] = useState<'unsupported' | 'denied' | 'on' | 'off'>('off');
-  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
 
-  useEffect(() => { currentPushState().then(setState); }, [user?.id]);
+  useEffect(() => {
+    if (!user) return;
+    syncPush(user.id).finally(() => currentPushState().then(setState));
+  }, [user?.id]);
   if (!user || state === 'unsupported') return null;
 
-  const toggle = async () => {
-    setBusy(true);
-    try {
-      if (state === 'on') { await disablePush(); toast.success('Notifikasi absensi dimatikan di perangkat ini'); }
-      else { await enablePush(user.id); toast.success('Notifikasi absensi aktif. Setiap absen akan muncul di layar kunci.'); }
-      setState(await currentPushState());
-    } catch (e: any) {
-      toast.error(e?.message || 'Gagal mengatur notifikasi');
-      setState(await currentPushState());
-    } finally { setBusy(false); }
-  };
-
   return (
-    <Button variant="ghost" size="sm" onClick={toggle} disabled={busy} className={className ?? 'px-2 text-muted-foreground hover:text-foreground'}
-      title={state === 'on' ? 'Matikan notifikasi absensi' : state === 'denied' ? 'Izin notifikasi diblokir di browser' : 'Aktifkan notifikasi absensi'}>
-      {state === 'on' ? <BellRing className="h-4 w-4 text-primary" /> : <BellOff className="h-4 w-4" />}
-    </Button>
+    <>
+      <Button variant="ghost" size="sm" onClick={() => setOpen(true)} className={className ?? 'px-2 text-muted-foreground hover:text-foreground'}
+        title="Pengaturan notifikasi absensi">
+        {state === 'on' ? <BellRing className="h-4 w-4 text-primary" /> : <BellOff className="h-4 w-4" />}
+      </Button>
+      <NotificationSetupDialog open={open} onClose={() => setOpen(false)} onChanged={setState} />
+    </>
   );
 }

@@ -5,6 +5,9 @@ import App from "./App.tsx";
 import "./index.css";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { AcademicYearProvider } from "./contexts/AcademicYearContext";
+import { initPwa } from "./lib/webPush";
+
+initPwa();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -2,6 +2,9 @@
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 
+// Handler fetch kosong (tanpa respondWith): syarat agar aplikasi dapat dipasang ke layar utama; permintaan tetap langsung ke jaringan.
+self.addEventListener('fetch', () => {});
+
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch (e) { data = { body: event.data ? event.data.text() : '' }; }
@@ -13,12 +16,16 @@ self.addEventListener('push', (event) => {
     tag: data.tag || 'pusaka-absensi',
     renotify: true,
     requireInteraction: false,
+    silent: false,
     vibrate: [200, 100, 200],
     timestamp: data.timestamp || Date.now(),
     data: { url: data.url || '/' },
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });
+
+// Langganan diganti browser: simpan ulang lewat halaman yang terbuka berikutnya (klien menyinkronkan saat aplikasi dibuka)
+self.addEventListener('pushsubscriptionchange', () => {});
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();

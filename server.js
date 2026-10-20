@@ -74,6 +74,33 @@ app.get('/push/public-key', (req, res) => {
     res.json({ key: PUSH_ENABLED ? process.env.VAPID_PUBLIC_KEY : null });
 });
 
+// Notifikasi tes untuk perangkat yang sudah berlangganan (endpoint harus terdaftar). Dikirim setelah jeda agar pengguna sempat mengunci layar.
+const pushTestLast = new Map();
+app.post('/push/test', async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    if (!PUSH_ENABLED) return res.status(503).json({ status: 'error', message: 'Notifikasi belum aktif di server.' });
+    const endpoint = req.body && req.body.endpoint;
+    const delay = Math.min(Math.max(parseInt(req.body && req.body.delay, 10) || 10, 0), 30);
+    if (!endpoint) return res.status(400).json({ status: 'error', message: 'endpoint wajib diisi.' });
+    const last = pushTestLast.get(endpoint) || 0;
+    if (Date.now() - last < 15000) return res.status(429).json({ status: 'error', message: 'Tunggu beberapa detik sebelum tes lagi.' });
+    const { data: sub } = await supabase.from('web_push_subscriptions').select('id, endpoint, p256dh, auth').eq('endpoint', endpoint).maybeSingle();
+    if (!sub) return res.status(404).json({ status: 'error', message: 'Perangkat belum terdaftar. Aktifkan notifikasi dulu.' });
+    pushTestLast.set(endpoint, Date.now());
+    setTimeout(async () => {
+        try {
+            await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+                JSON.stringify({ title: 'PUSAKA · Tes notifikasi', body: 'Jika ini muncul di layar kunci, notifikasi absensi sudah siap.', url: '/', tag: 'pusaka-test', timestamp: Date.now() }),
+                { TTL: 120, urgency: 'high' });
+            console.log('[PUSH] tes terkirim');
+        } catch (e) {
+            if (e && (e.statusCode === 404 || e.statusCode === 410)) await supabase.from('web_push_subscriptions').delete().eq('id', sub.id);
+            else console.error('[PUSH] tes gagal:', e && e.message);
+        }
+    }, delay * 1000);
+    res.json({ status: 'success', message: 'Tes dikirim dalam ' + delay + ' detik.' });
+});
+
 const PUSH_TEXT = { check_in: 'Absen masuk', late: 'Absen masuk (terlambat)', check_out: 'Absen pulang', staff: 'Absen tercatat' };
 // Kirim notifikasi ke semua perangkat pemilik akun. Gagal tidak boleh mengganggu pemrosesan absensi.
 async function notifyPunch(sn, pin, at, result) {
@@ -111,7 +138,7 @@ async function pushToUser(userId, title, body, tag, ts, label) {
     let ok = 0;
     for (const s of subs) {
         try {
-            await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 600, urgency: 'high' });
+            await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 3600, urgency: 'high' });
             ok++;
         } catch (e) {
             if (e && (e.statusCode === 404 || e.statusCode === 410)) await supabase.from('web_push_subscriptions').delete().eq('id', s.id);
