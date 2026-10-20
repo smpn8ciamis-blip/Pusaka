@@ -101,7 +101,7 @@ app.post('/push/test', async (req, res) => {
     res.json({ status: 'success', message: 'Tes dikirim dalam ' + delay + ' detik.' });
 });
 
-const PUSH_TEXT = { check_in: 'Absen masuk', late: 'Absen masuk (terlambat)', check_out: 'Absen pulang', staff: 'Absen tercatat' };
+const PUSH_TEXT = { check_in: 'Absen masuk', late: 'Absen masuk (terlambat)', check_out: 'Absen pulang', staff: 'Absen tercatat', prayer: 'Absen salat', prayer_late: 'Absen salat (terlambat)' };
 // Kirim notifikasi ke semua perangkat pemilik akun. Gagal tidak boleh mengganggu pemrosesan absensi.
 async function notifyPunch(sn, pin, at, result) {
     if (!PUSH_ENABLED || !PUSH_TEXT[result]) return;

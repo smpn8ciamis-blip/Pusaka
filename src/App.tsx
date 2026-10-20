@@ -117,6 +117,8 @@ const CbtStudentExam = lazy(() => import("./pages/CbtStudentExam"));
 const NedelcisHub = lazy(() => import("./pages/NedelcisHub"));
 const PortalTautanGuru = lazy(() => import("./pages/PortalTautanGuru"));
 const RfidTap = lazy(() => import("./pages/RfidTap"));
+const PrayerTap = lazy(() => import("./pages/PrayerTap"));
+const PrayerAttendance = lazy(() => import("./pages/PrayerAttendance"));
 const RfidAttendanceManagement = lazy(() => import("./pages/RfidAttendanceManagement"));
 // Tambahan halaman upload untuk wali kelas
 const HomeroomFileUploadManagement = lazy(() => import("./pages/HomeroomFileUploadManagement"));
@@ -363,6 +365,8 @@ const App = () => (
               <Route path="/nedelcis-hub" element={<NedelcisHub />} />
               <Route path="/portal-tautan-guru" element={<PortalTautanGuru />} />
               <Route path="/absensi-rfid" element={<RfidTap />} />
+              <Route path="/absensi-salat" element={<PrayerTap />} />
+              <Route path="/kelola-salat" element={<PrayerAttendance />} />
               <Route path="/rfid-attendance" element={<RfidAttendanceManagement />} />
               <Route path="*" element={<NotFound />} />
             </Routes>

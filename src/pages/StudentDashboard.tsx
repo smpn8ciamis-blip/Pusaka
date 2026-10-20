@@ -375,6 +375,7 @@ const StudentDashboardPage = () => {
 
   const [showData, setShowData] = useState(true);
   const [showAllMenu, setShowAllMenu] = useState(false);
+  const [prayerShown, setPrayerShown] = useState(30);
   const [scheduleDay, setScheduleDay] = useState<number | 'all'>('all');
   const navigate = useNavigate();
   const [newsIdx, setNewsIdx] = useState(0);
@@ -651,6 +652,23 @@ const StudentDashboardPage = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  // ─── Log absensi salat ─────────────────────────────────────────────────
+  const { data: prayerLogs, isError: prayerError } = useQuery({
+    queryKey: ['student-prayer-logs', studentId],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from('prayer_attendance')
+        .select('id, date, punched_at, status, source, prayer_types(name)')
+        .eq('student_id', studentId!)
+        .order('punched_at', { ascending: false })
+        .limit(500);
+      if (error) throw error;
+      return (data || []) as any[];
+    },
+    enabled: !!studentId && activeTab === 'salat',
+    staleTime: 60 * 1000,
+  });
+
   // ─── Realtime notifications ────────────────────────────────────────────
   useEffect(() => {
     if (!studentId) return;
@@ -852,6 +870,7 @@ const StudentDashboardPage = () => {
     { tab: 'ekskul', label: 'Ekstrakurikuler', icon: Users, color: 'bg-orange-500' },
     { tab: 'announcements', label: 'Pengumuman', icon: Megaphone, color: 'bg-indigo-500' },
     { tab: 'dispensasi', label: 'Dispensasi', icon: Hourglass, color: 'bg-cyan-500' },
+    { tab: 'salat', label: 'Absensi Salat', icon: Star, color: 'bg-teal-500' },
     { tab: 'uploads', label: 'Upload Berkas', icon: Upload, color: 'bg-emerald-500' },
     { tab: 'settings', label: 'Pengaturan', icon: Settings, color: 'bg-slate-500' },
     { tab: 'profile', label: 'Profil Saya', icon: UserCircle, color: 'bg-pink-500' },
@@ -1481,6 +1500,75 @@ const StudentDashboardPage = () => {
     </div>
   );
 
+  const renderPrayerTab = () => {
+    const logs = prayerLogs || [];
+    const monthKey = format(new Date(), 'yyyy-MM');
+    const thisMonth = logs.filter((l: any) => String(l.date).startsWith(monthKey));
+    const late = thisMonth.filter((l: any) => l.status === 'terlambat').length;
+    const shown = logs.slice(0, prayerShown);
+    const groups: { date: string; items: any[] }[] = [];
+    shown.forEach((l: any) => {
+      const g = groups[groups.length - 1];
+      if (g && g.date === l.date) g.items.push(l); else groups.push({ date: l.date, items: [l] });
+    });
+    const jam = (ts: string) => new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Jakarta' }).format(new Date(ts)).replace('.', ':');
+    return (
+      <div className="p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold">Absensi Salat</h2>
+          <Badge className="bg-emerald-100 text-emerald-700 text-xs">{thisMonth.length} bulan ini</Badge>
+        </div>
+        {prayerLogs ? (
+          <>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-xl bg-white dark:bg-gray-900 p-3 text-center shadow-sm border border-gray-100 dark:border-gray-800">
+                <p className="text-xl font-bold text-emerald-600">{thisMonth.length}</p><p className="text-[11px] text-gray-500">Salat bulan ini</p>
+              </div>
+              <div className="rounded-xl bg-white dark:bg-gray-900 p-3 text-center shadow-sm border border-gray-100 dark:border-gray-800">
+                <p className="text-xl font-bold text-amber-600">{late}</p><p className="text-[11px] text-gray-500">Terlambat</p>
+              </div>
+              <div className="rounded-xl bg-white dark:bg-gray-900 p-3 text-center shadow-sm border border-gray-100 dark:border-gray-800">
+                <p className="text-xl font-bold text-sky-600">{logs.filter((l: any) => l.date === format(new Date(), 'yyyy-MM-dd')).length}</p><p className="text-[11px] text-gray-500">Hari ini</p>
+              </div>
+            </div>
+            {groups.length > 0 ? (
+              <div className="space-y-3">
+                {groups.map((g) => (
+                  <div key={g.date}>
+                    <p className="mb-1 text-xs font-semibold text-gray-500">{safeFormatDate(g.date, 'EEEE, dd MMMM yyyy')}</p>
+                    <div className="space-y-2">
+                      {g.items.map((l: any) => (
+                        <div key={l.id} className="bg-white dark:bg-gray-900 rounded-xl p-3 shadow-sm border border-gray-100 dark:border-gray-800 flex items-center gap-3">
+                          <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center shrink-0">
+                            <Star className="h-5 w-5 text-emerald-600" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-sm text-gray-800 dark:text-gray-100">{l.prayer_types?.name ?? 'Salat'}</p>
+                            <p className="text-xs text-gray-500">{jam(l.punched_at)} WIB · {l.source === 'fingerprint' ? 'Mesin fingerprint' : l.source === 'rfid' ? 'Kartu RFID' : 'Dicatat manual'}</p>
+                          </div>
+                          <Badge className={`text-xs shrink-0 ${l.status === 'terlambat' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                            {l.status === 'terlambat' ? 'Terlambat' : 'Tepat waktu'}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {logs.length > prayerShown && (
+                  <Button variant="outline" className="w-full" onClick={() => setPrayerShown((n) => n + 30)}>Tampilkan lebih banyak</Button>
+                )}
+              </div>
+            ) : (
+              <EmptyState icon={Star} title="Belum ada catatan" subtitle="Tempelkan kartu atau gunakan mesin saat jam salat" />
+            )}
+          </>
+        ) : prayerError ? (
+          <EmptyState icon={AlertCircle} title="Data salat belum tersedia" subtitle="Coba lagi nanti" />
+        ) : <LoadingState />}
+      </div>
+    );
+  };
+
   const renderDispensasiTab = () => (
     <div className="p-4 space-y-4">
       <h2 className="text-lg font-bold">Riwayat Dispensasi</h2>
@@ -1557,6 +1645,7 @@ const StudentDashboardPage = () => {
       case 'ekskul': return renderEkskulTab();
       case 'announcements': return renderAnnouncementsTab();
       case 'dispensasi': return renderDispensasiTab();
+      case 'salat': return renderPrayerTab();
       case 'elearning':
         return <StudentElearningTab classId={classId} studentId={studentId} />;
       case 'uploads':
@@ -1574,7 +1663,7 @@ const StudentDashboardPage = () => {
     <div className="min-h-screen bg-[#F1F6FD] dark:bg-slate-950 pb-28" style={{ fontFamily: FONT_STACK }}>
       {/* HEADER */}
       {(() => {
-        const isHome = activeTab === 'overview' || !['schedule', 'idcard', 'grades', 'elearning', 'profile', 'attendance', 'violations', 'achievements', 'ekskul', 'announcements', 'dispensasi', 'uploads', 'settings'].includes(activeTab);
+        const isHome = activeTab === 'overview' || !['schedule', 'idcard', 'grades', 'elearning', 'profile', 'attendance', 'violations', 'achievements', 'ekskul', 'announcements', 'dispensasi', 'salat', 'uploads', 'settings'].includes(activeTab);
         const bellBtn = (
           <>
           <EnablePushButton className="h-11 w-11 shrink-0 rounded-full bg-white/20 p-0 text-white hover:bg-white/30 hover:text-white" />

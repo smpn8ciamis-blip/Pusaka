@@ -12,7 +12,7 @@ import {
   ChevronUp, AlertTriangle, BarChart3, FolderOpen, MessageSquare, Database,
   Award, FileSignature, Plane, Receipt, FileSpreadsheet, Wallet, FileBarChart,
   Inbox, Send, Hammer, Vote, Upload, Bell, Lock, Landmark, Server, UserMinus,
-  Sparkles, CreditCard, ScanLine, LayoutDashboard, Search, Star, Moon, CalendarDays, KeyRound, Fingerprint, Briefcase
+  Sparkles, CreditCard, ScanLine, LayoutDashboard, Search, Star, Moon, CalendarDays, KeyRound, Fingerprint, Briefcase, HeartHandshake
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -297,6 +297,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         { icon: ClipboardList, label: 'Absensi', href: '/attendance' },
         { icon: CreditCard, label: 'Absensi RFID', href: '/rfid-attendance' },
         { icon: Fingerprint, label: 'Mesin Fingerprint', href: '/fingerprint' },
+        { icon: HeartHandshake, label: 'Absensi Salat', href: '/kelola-salat' },
         { icon: FileText, label: 'Rekap Absensi Siswa', href: '/student-attendance-report' },
         { icon: TrendingUp, label: 'Analytics Kehadiran', href: '/analytics' },
       ],
@@ -415,6 +416,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
       label: 'Kesiswaan Siswa',
       items: [
         { icon: ScanLine, label: 'Absensi RFID', href: '/student-dashboard?tab=rfid' },
+        { icon: HeartHandshake, label: 'Absensi Salat', href: '/student-dashboard?tab=salat' },
         {
           icon: AlertTriangle,
           label: 'Pelanggaran',
@@ -465,6 +467,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
 
   const homeroomMenuItem: MenuItem = { icon: UserCheck, label: 'Rekap Absen Wali Kelas', href: '/homeroom-attendance' };
   const homeroomRfidItem: MenuItem = { icon: CreditCard, label: 'Absensi RFID', href: '/rfid-attendance' };
+  const homeroomPrayerItem: MenuItem = { icon: HeartHandshake, label: 'Absensi Salat', href: '/kelola-salat' };
   const homeroomAccountsItem: MenuItem = { icon: KeyRound, label: 'Akun Siswa', href: '/akun-siswa' };
   const homeroomFileManagementItem: MenuItem = { icon: FolderOpen, label: 'Manajemen Berkas Siswa', href: '/homeroom-upload-management' };
 
@@ -479,6 +482,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         ...baseTeacherMenuItems.slice(0, 4),
         homeroomMenuItem,
         homeroomRfidItem,
+        homeroomPrayerItem,
         homeroomAccountsItem,
         homeroomFileManagementItem,
         ...baseTeacherMenuItems.slice(4),
@@ -557,6 +561,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: LayoutDashboard, label: 'Dashboard', href: '/kesiswaan-dashboard' },
     { icon: ClipboardList, label: 'Absensi', href: '/attendance' },
     { icon: CreditCard, label: 'Absensi RFID', href: '/rfid-attendance' },
+    { icon: HeartHandshake, label: 'Absensi Salat', href: '/kelola-salat' },
     { icon: KeyRound, label: 'Akun Siswa', href: '/akun-siswa' },
     { icon: AlertTriangle, label: 'Poin Pelanggaran', href: '/violations' },
     { icon: Award, label: 'Penghargaan & Prestasi', href: '/achievements' },
@@ -578,6 +583,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: ClipboardList, label: 'Isi Absensi', href: '/attendance' },
     { icon: FileText, label: 'Dispensasi Siswa', href: '/dispensasi-siswa' },
     { icon: CreditCard, label: 'Absensi RFID', href: '/rfid-attendance' },
+    { icon: HeartHandshake, label: 'Absensi Salat', href: '/kelola-salat' },
     { icon: BookOpen, label: 'Buku Tamu', href: '/buku-tamu' },
     { icon: Settings, label: 'Pengaturan', href: '/settings' },
   ];
