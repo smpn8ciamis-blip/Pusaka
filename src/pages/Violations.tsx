@@ -526,19 +526,28 @@ export default function Violations() {
   const { data: allViolationsForSummary = [] } = useQuery({
     queryKey: ['student-violations-summary', dateFrom, dateTo],
     queryFn: async () => {
-      let query = supabase
-        .from('student_violations')
-        .select(`
-          student_id, points, violation_date,
-          students(full_name, nis, classes(name))
-        `);
+      // Hanya siswa aktif (bukan alumni/pindah/keluar); dibaca bertahap karena batas 1000 baris per permintaan.
+      const rows: any[] = [];
+      const PAGE = 1000;
+      for (let from = 0; ; from += PAGE) {
+        let query = supabase
+          .from('student_violations')
+          .select(`
+            id, student_id, points, violation_date,
+            students!inner(full_name, nis, status, classes(name))
+          `)
+          .eq('students.status', 'aktif')
+          .order('id');
 
-      if (dateFrom) query = query.gte('violation_date', dateFrom);
-      if (dateTo) query = query.lte('violation_date', dateTo);
+        if (dateFrom) query = query.gte('violation_date', dateFrom);
+        if (dateTo) query = query.lte('violation_date', dateTo);
 
-      const { data, error } = await query;
-      if (error) throw error;
-      return data || [];
+        const { data, error } = await query.range(from, from + PAGE - 1);
+        if (error) throw error;
+        rows.push(...(data ?? []));
+        if (!data || data.length < PAGE) break;
+      }
+      return rows;
     },
     staleTime: 1 * 60 * 1000,
     enabled: canAccessPage,
@@ -1479,7 +1488,7 @@ export default function Violations() {
             <TabsContent value="summary" className="space-y-4">
               <Card>
                 <CardHeader>
-                  <CardTitle>Rekap Poin Per Siswa</CardTitle>
+                  <CardTitle>Rekap Poin Per Siswa (siswa aktif)</CardTitle>
                   <CardDescription>
                     Total poin pelanggaran setiap siswa
                     {isDateFilterActive && ` — ${dateFilterLabel}`}
@@ -1535,7 +1544,7 @@ export default function Violations() {
             <TabsContent value="leaderboard" className="space-y-4">
               <Card>
                 <CardHeader>
-                  <CardTitle>🏆 Top 10 Siswa dengan Poin Pelanggaran Tertinggi</CardTitle>
+                  <CardTitle>🏆 Top 10 Siswa Aktif dengan Poin Pelanggaran Tertinggi</CardTitle>
                   <CardDescription>
                     Daftar siswa yang perlu perhatian khusus
                     {isDateFilterActive && ` — ${dateFilterLabel}`}
