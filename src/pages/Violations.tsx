@@ -526,7 +526,7 @@ export default function Violations() {
   const { data: allViolationsForSummary = [] } = useQuery({
     queryKey: ['student-violations-summary', dateFrom, dateTo],
     queryFn: async () => {
-      // Hanya siswa aktif (bukan alumni/pindah/keluar); dibaca bertahap karena batas 1000 baris per permintaan.
+      // Hanya siswa aktif: status aktif, bukan alumni, dan masih punya kelas (alumni/mutasi tidak ikut); dibaca bertahap karena batas 1000 baris per permintaan.
       const rows: any[] = [];
       const PAGE = 1000;
       for (let from = 0; ; from += PAGE) {
@@ -534,9 +534,11 @@ export default function Violations() {
           .from('student_violations')
           .select(`
             id, student_id, points, violation_date,
-            students!inner(full_name, nis, status, classes(name))
+            students!inner(full_name, nis, status, is_alumni, class_id, classes(name))
           `)
           .eq('students.status', 'aktif')
+          .eq('students.is_alumni', false)
+          .not('students.class_id', 'is', null)
           .order('id');
 
         if (dateFrom) query = query.gte('violation_date', dateFrom);
