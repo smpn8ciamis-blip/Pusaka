@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "id.pusaka.nedelcis",
+    "sha256_cert_fingerprints": ["61:AF:D4:F1:BF:F5:4B:3A:DD:A0:2A:02:36:9B:5D:45:57:49:5F:B6:22:2E:90:85:E6:0F:3E:CD:C7:BA:3F:56"]
+  }
+}]

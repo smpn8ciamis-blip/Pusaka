@@ -8,3 +8,5 @@ build/
 google-services.json
 *-service-account*.json
 gdrive-token.json
+twa/app/release.jks
+*.jks
