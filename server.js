@@ -97,23 +97,39 @@ async function notifyPunch(sn, pin, at, result) {
         const { data: st } = await supabase.from('staff').select('user_id, full_name').eq('id', log.person_id).maybeSingle();
         userId = st && st.user_id; name = (st && st.full_name) || '';
     }
-    if (!userId) return;
-    const { data: subs } = await supabase.from('web_push_subscriptions').select('id, endpoint, p256dh, auth').eq('user_id', userId);
-    if (!subs || !subs.length) return;
+    if (!userId) { console.log('[PUSH] ' + (log.person_type || '?') + ' ' + (name || log.person_id) + ': belum punya akun login, dilewati'); return; }
     const hhmm = at.toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false }).replace('.', ':');
-    const payload = JSON.stringify({
-        title: 'PUSAKA · ' + PUSH_TEXT[result],
-        body: (name ? name + ' · ' : '') + hhmm + ' WIB',
-        url: '/', tag: 'absen-' + log.person_id, timestamp: at.getTime(),
-    });
+    await pushToUser(userId, 'PUSAKA · ' + PUSH_TEXT[result], (name ? name + ' · ' : '') + hhmm + ' WIB', 'absen-' + log.person_id, at.getTime(), name);
+}
+
+// Kirim ke semua perangkat milik satu akun; langganan kedaluwarsa dibersihkan otomatis.
+async function pushToUser(userId, title, body, tag, ts, label) {
+    if (!PUSH_ENABLED || !userId) return;
+    const { data: subs } = await supabase.from('web_push_subscriptions').select('id, endpoint, p256dh, auth').eq('user_id', userId);
+    if (!subs || !subs.length) { console.log('[PUSH] ' + (label || userId) + ': belum mengaktifkan notifikasi di perangkat mana pun'); return; }
+    const payload = JSON.stringify({ title, body, url: '/', tag, timestamp: ts || Date.now() });
+    let ok = 0;
     for (const s of subs) {
         try {
             await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 600, urgency: 'high' });
+            ok++;
         } catch (e) {
             if (e && (e.statusCode === 404 || e.statusCode === 410)) await supabase.from('web_push_subscriptions').delete().eq('id', s.id);
             else console.error('[PUSH] gagal kirim:', e && e.message);
         }
     }
+    console.log('[PUSH] ' + (label || userId) + ': terkirim ke ' + ok + '/' + subs.length + ' perangkat');
+}
+
+// Absen siswa lewat RFID (halaman tap memanggil /notify-parent): notifikasi ke akun siswa itu sendiri.
+async function notifyStudentRfid(studentId, fullName, type, status, timeText) {
+    if (!PUSH_ENABLED) return;
+    if (type !== 'check_in' && type !== 'check_out') return;
+    const { data: sa } = await supabase.from('student_accounts').select('user_id').eq('student_id', studentId).maybeSingle();
+    if (!sa || !sa.user_id) { console.log('[PUSH] ' + fullName + ': siswa belum punya akun login, dilewati'); return; }
+    const title = type === 'check_out' ? 'PUSAKA · Absen pulang' : (status === 'terlambat' ? 'PUSAKA · Absen masuk (terlambat)' : 'PUSAKA · Absen masuk');
+    const hhmm = timeText ? String(timeText).slice(0, 5).replace('.', ':') : new Date().toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false }).replace('.', ':');
+    await pushToUser(sa.user_id, title, fullName + ' · ' + hhmm + ' WIB', 'absen-' + studentId, Date.now(), fullName);
 }
 
 app.use((req, res, next) => {
@@ -418,6 +434,7 @@ app.post('/notify-parent', async (req, res) => {
         const student = result.data, error = result.error;
         if (error) throw error;
         if (!student) return res.status(404).json({ status: 'error', message: 'Siswa tidak ditemukan.' });
+        notifyStudentRfid(student_id, student.full_name, type, status, time).catch((e) => console.error('[PUSH]', e && e.message));
         if (!student.parent_phone) return res.json({ status: 'skipped', message: 'Nomor WA untuk ' + student.full_name + ' belum tertaut.' });
         const typeText = type === 'check_out' ? 'Pulang' : 'Masuk';
         const statusText = status === 'terlambat' ? 'Terlambat' : 'Hadir';
