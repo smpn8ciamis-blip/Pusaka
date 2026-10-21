@@ -290,8 +290,16 @@ export interface PenjabBudgetRow {
   months: number[];
 }
 
-export function exportAllRkaXlsx(opts: { rows: PenjabBudgetRow[]; fiscalYear?: string | null }) {
-  const { rows, fiscalYear } = opts;
+/** Penerimaan sekolah untuk dibandingkan dengan total anggaran belanja penjab. */
+export interface RevenueSummary {
+  items: Array<{ source: string; description: string | null; amount: number; month: number | null }>;
+  total: number;
+  /** penerimaan per bulan, indeks 0..11, 12 = tanpa bulan */
+  months: number[];
+}
+
+export function exportAllRkaXlsx(opts: { rows: PenjabBudgetRow[]; fiscalYear?: string | null; revenue?: RevenueSummary | null }) {
+  const { rows, fiscalYear, revenue } = opts;
   const grand = rows.reduce((a, r) => a + r.total, 0);
   const wb = XLSX.utils.book_new();
   const s1: unknown[][] = [[`Rekap Anggaran Penanggung Jawab Standar${fiscalYear ? ' TA ' + fiscalYear : ''}`], [], ['No', 'Standar', 'Penjab', 'Versi RKA', 'Jumlah Rincian', 'Total Anggaran', '% dari Total']];
@@ -319,11 +327,37 @@ export function exportAllRkaXlsx(opts: { rows: PenjabBudgetRow[]; fiscalYear?: s
   const ws2 = XLSX.utils.aoa_to_sheet(s2);
   ws2['!cols'] = [{ wch: 36 }, ...new Array(head.length - 1).fill({ wch: 14 })];
   XLSX.utils.book_append_sheet(wb, ws2, 'Standar x Bulan');
+
+  if (revenue) {
+    const s3: unknown[][] = [[`Penerimaan Sekolah${fiscalYear ? ' TA ' + fiscalYear : ''}`], [], ['No', 'Sumber', 'Keterangan', 'Bulan', 'Jumlah']];
+    revenue.items.forEach((r, i) => s3.push([i + 1, r.source, r.description || '-', r.month ? MONTH_NAMES[r.month - 1] : '-', Math.round(r.amount)]));
+    const a = 4; const b = 3 + revenue.items.length;
+    s3.push(['', 'TOTAL PENERIMAAN', '', '', { t: 'n', v: Math.round(revenue.total), f: revenue.items.length ? `SUM(E${a}:E${b})` : undefined }]);
+    s3.push(['', 'TOTAL ANGGARAN BELANJA PENJAB', '', '', Math.round(grand)]);
+    const r1 = 4 + revenue.items.length;
+    s3.push(['', 'SELISIH (PENERIMAAN - BELANJA)', '', '', { t: 'n', v: Math.round(revenue.total - grand), f: `E${r1}-E${r1 + 1}` }]);
+    const ws3 = XLSX.utils.aoa_to_sheet(s3);
+    ws3['!cols'] = [{ wch: 5 }, { wch: 36 }, { wch: 30 }, { wch: 14 }, { wch: 20 }];
+    XLSX.utils.book_append_sheet(wb, ws3, 'Penerimaan & Selisih');
+
+    const s4: unknown[][] = [['Bulan', 'Penerimaan', 'Belanja', 'Selisih', 'Saldo Kumulatif']];
+    const bel = new Array(13).fill(0);
+    rows.forEach((r) => r.months.forEach((v, i) => { bel[i] += v; }));
+    let cum = 0;
+    for (let i = 0; i < 13; i++) {
+      if (i === 12 && !revenue.months[12] && !bel[12]) continue;
+      const net = revenue.months[i] - bel[i]; cum += net;
+      s4.push([i === 12 ? 'Tanpa Bulan' : MONTH_NAMES[i], Math.round(revenue.months[i]), Math.round(bel[i]), Math.round(net), Math.round(cum)]);
+    }
+    const ws4 = XLSX.utils.aoa_to_sheet(s4);
+    ws4['!cols'] = [{ wch: 16 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 20 }];
+    XLSX.utils.book_append_sheet(wb, ws4, 'Penerimaan vs Belanja');
+  }
   XLSX.writeFile(wb, `rekap-anggaran-penjab${fiscalYear ? '-' + fiscalYear : ''}-${idDate()}.xlsx`);
 }
 
 export async function buildAllRkaPdf(opts: {
-  rows: PenjabBudgetRow[]; fiscalYear?: string | null; paper?: PaperSize;
+  rows: PenjabBudgetRow[]; fiscalYear?: string | null; paper?: PaperSize; revenue?: RevenueSummary | null;
   settings?: (LetterheadSettings & Record<string, any>) | null; signerName?: string | null; signerRole?: string;
 }): Promise<jsPDF> {
   const { rows, fiscalYear, settings } = opts;
@@ -363,6 +397,28 @@ export async function buildAllRkaPdf(opts: {
     columnStyles: { 0: { cellWidth: 44 }, ...Object.fromEntries(Array.from({ length: 13 }, (_, i) => [i + 1, { halign: 'right' as const }])) },
   });
   y = (doc as any).lastAutoTable.finalY + 8;
+
+  if (opts.revenue) {
+    const rev = opts.revenue;
+    if (y > H - 80) { doc.addPage(); y = 16; }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(0, 0, 0);
+    doc.text('Penerimaan Sekolah dan Selisih terhadap Anggaran Belanja Penjab', M, y); y += 2;
+    const body: any[][] = rev.items.map((r, i) => [i + 1, r.source, r.description || '-', r.month ? MONTH_NAMES[r.month - 1] : '-', rp(r.amount)]);
+    if (body.length === 0) body.push([{ content: 'Belum ada penerimaan tercatat', colSpan: 5, styles: { halign: 'center' } }]);
+    autoTable(doc, {
+      startY: y, theme: 'grid', margin: { left: M, right: M, bottom: 18 }, styles: st, headStyles: hs,
+      head: [['No', 'Sumber Penerimaan', 'Keterangan', 'Bulan', 'Jumlah']],
+      body,
+      foot: [
+        [{ content: 'TOTAL PENERIMAAN', colSpan: 4, styles: { halign: 'right' } }, rp(rev.total)],
+        [{ content: 'TOTAL ANGGARAN BELANJA PENJAB', colSpan: 4, styles: { halign: 'right' } }, rp(grand)],
+        [{ content: rev.total - grand >= 0 ? 'SELISIH (SURPLUS)' : 'SELISIH (DEFISIT)', colSpan: 4, styles: { halign: 'right' } }, rp(rev.total - grand)],
+      ],
+      footStyles: { fillColor: [229, 231, 235], textColor: [17, 24, 39], fontStyle: 'bold' },
+      columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 3: { cellWidth: 26 }, 4: { halign: 'right', cellWidth: 40 } },
+    });
+    y = (doc as any).lastAutoTable.finalY + 8;
+  }
   const sigH = 46;
   if (y + sigH > H - 16) { doc.addPage(); y = 20; }
   const rx = W - M - 32;
