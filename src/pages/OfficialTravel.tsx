@@ -484,6 +484,10 @@ export default function OfficialTravel() {
 
         // Pelaksana manual dari surat tugas (satu ruang indeks dengan guru)
         if (manualExecutors.length > 0) {
+          // Hapus salinan otomatis dari trigger database (jika masih ada) agar pelaksana tidak tercatat ganda
+          const { error: dupErr } = await supabase.from("official_travel_followers").delete()
+            .eq("official_travel_id", letter.id).eq("follower_type", "manual_executor");
+          if (dupErr) throw dupErr;
           const { error } = await supabase.from("official_travel_followers").insert(
             manualExecutors.map((m: any) => ({
               official_travel_id: letter.id,
