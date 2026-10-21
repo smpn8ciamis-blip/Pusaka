@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
-  Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { ArrowRight, Eye, FileSpreadsheet, FileText, Loader2, Printer, Wallet } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
@@ -16,7 +16,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { snpDb, useSnpStandards, type SnpAssignment, type SnpRkaBatch } from '@/hooks/usePenjabSnp';
 import { amountPerMonth, formatRupiah, MONTH_SHORT } from '@/lib/rkaParser';
-import { buildAllRkaPdf, exportAllRkaXlsx, type PenjabBudgetRow } from '@/lib/rkaReport';
+import { buildAllRkaPdf, exportAllRkaXlsx, type PenjabBudgetRow, type RevenueSummary } from '@/lib/rkaReport';
+import { revenuePerMonth, useSchoolRevenues } from '@/hooks/useSchoolRevenues';
+import { SchoolRevenueCard } from '@/components/penjab/SchoolRevenueCard';
 import type { PaperSize } from '@/lib/journalReport';
 
 const COLORS = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed', '#0891b2', '#db2777', '#65a30d'];
@@ -64,13 +66,15 @@ export default function AnggaranPenjab() {
     },
   });
 
+  const { data: allRevenues = [] } = useSchoolRevenues();
+
   const { data: schoolSettings } = useQuery({
     queryKey: ['school-settings'],
     queryFn: async () => (await supabase.from('school_settings').select('*').limit(1).maybeSingle()).data,
     staleTime: 5 * 60 * 1000,
   });
 
-  const years = useMemo(() => Array.from(new Set((raw?.batches ?? []).map((b) => b.fiscal_year).filter(Boolean) as string[])).sort().reverse(), [raw]);
+  const years = useMemo(() => Array.from(new Set([...(raw?.batches ?? []).map((b) => b.fiscal_year), ...allRevenues.map((r) => r.fiscal_year)].filter(Boolean) as string[])).sort().reverse(), [raw, allRevenues]);
   useEffect(() => { if (year === ALL_YEARS && years.length > 0) setYear(years[0]); }, [years]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows: (PenjabBudgetRow & { id: string; lastDate: string | null; hasData: boolean })[] = useMemo(() => {
@@ -91,6 +95,12 @@ export default function AnggaranPenjab() {
   }, [raw, standards, year]);
 
   const grand = rows.reduce((a, r) => a + r.total, 0);
+  const revenues = useMemo(() => allRevenues.filter((r) => year === ALL_YEARS || r.fiscal_year === year), [allRevenues, year]);
+  const revenueTotal = revenues.reduce((a, r) => a + r.amount, 0);
+  const revenueMonths = useMemo(() => revenuePerMonth(revenues), [revenues]);
+  const balance = revenueTotal - grand;
+  const yearSelected = year !== ALL_YEARS;
+  const revenueSummary: RevenueSummary | null = revenues.length > 0 || yearSelected ? { items: revenues, total: revenueTotal, months: revenueMonths } : null;
   const withData = rows.filter((r) => r.hasData).length;
   const monthTotals = useMemo(() => {
     const t = new Array(13).fill(0);
@@ -106,6 +116,13 @@ export default function AnggaranPenjab() {
     rows.forEach((r) => { o[r.code] = Math.round(r.months[i]); });
     return o;
   });
+  const cashChart = (() => {
+    let cum = 0;
+    return MONTH_SHORT.map((m, i) => {
+      const net = revenueMonths[i] - monthTotals[i]; cum += net;
+      return { bulan: m, penerimaan: Math.round(revenueMonths[i]), belanja: Math.round(monthTotals[i]), saldo: Math.round(cum) };
+    });
+  })();
   const pie = rows.filter((r) => r.total > 0).map((r) => ({ name: r.name, value: r.total }));
   const short = (n: string) => n.replace(/^Standar\s+/i, '');
 
@@ -114,7 +131,7 @@ export default function AnggaranPenjab() {
     setBusy(true);
     try { await fn(); } catch (e) { console.error(e); toast.error('Gagal memproses dokumen'); } finally { setBusy(false); }
   };
-  const mkPdf = () => buildAllRkaPdf({ rows, fiscalYear: fy, paper, settings: schoolSettings as any });
+  const mkPdf = () => buildAllRkaPdf({ rows, fiscalYear: fy, paper, settings: schoolSettings as any, revenue: yearSelected ? revenueSummary : null });
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
   const doPreview = () => run(async () => setPreviewUrl(URL.createObjectURL((await mkPdf()).output('blob'))));
   const doPdf = () => run(async () => { (await mkPdf()).save(`rekap-anggaran-penjab${fy ? '-' + fy : ''}.pdf`); });
@@ -124,7 +141,7 @@ export default function AnggaranPenjab() {
     if (!window.open(url, '_blank')) toast.error('Pop-up diblokir. Gunakan Pratinjau atau Unduh PDF.');
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   });
-  const doXlsx = () => run(() => exportAllRkaXlsx({ rows, fiscalYear: fy }));
+  const doXlsx = () => run(() => exportAllRkaXlsx({ rows, fiscalYear: fy, revenue: yearSelected ? revenueSummary : null }));
 
   return (
     <DashboardLayout>
@@ -163,6 +180,18 @@ export default function AnggaranPenjab() {
               <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Bulan Terpadat</p><p className="text-lg font-bold">{grand > 0 ? MONTH_SHORT[peakIdx] : '-'}</p><p className="text-xs text-muted-foreground">{formatRupiah(Math.round(monthTotals[peakIdx] ?? 0))}</p></CardContent></Card>
               <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Standar Terbesar</p><p className="text-sm font-bold line-clamp-2">{topStd && topStd.total > 0 ? short(topStd.name) : '-'}</p><p className="text-xs text-muted-foreground">{formatRupiah(Math.round(topStd?.total ?? 0))}</p></CardContent></Card>
             </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total Penerimaan Sekolah</p><p className="text-lg font-bold text-emerald-600">{formatRupiah(Math.round(revenueTotal))}</p><p className="text-xs text-muted-foreground">{revenues.length} sumber{yearSelected ? ` · TA ${year}` : ''}</p></CardContent></Card>
+              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total Anggaran Belanja Semua Penjab</p><p className="text-lg font-bold">{formatRupiah(Math.round(grand))}</p><p className="text-xs text-muted-foreground">{revenueTotal > 0 ? `${((grand / revenueTotal) * 100).toFixed(1)}% dari penerimaan` : 'Belum ada penerimaan'}</p></CardContent></Card>
+              <Card className={balance < 0 ? 'border-destructive/50' : 'border-emerald-500/40'}><CardContent className="p-4">
+                <p className="text-xs text-muted-foreground">Selisih (Penerimaan − Belanja)</p>
+                <p className={`text-lg font-bold ${balance < 0 ? 'text-destructive' : 'text-emerald-600'}`}>{formatRupiah(Math.round(balance))}</p>
+                <p className={`text-xs ${balance < 0 ? 'text-destructive' : 'text-emerald-600'}`}>{revenueTotal === 0 && grand === 0 ? '-' : balance < 0 ? 'Defisit: belanja melebihi penerimaan' : 'Surplus'}</p>
+              </CardContent></Card>
+            </div>
+            {!yearSelected && <p className="text-xs text-amber-600">Pilih satu tahun anggaran agar selisih dihitung dengan tepat (anggaran belanja memakai RKA terbaru tiap standar).</p>}
+            <SchoolRevenueCard fiscalYear={yearSelected ? year : null} rows={revenues} />
+
             {noPenjab > 0 && <p className="text-xs text-amber-600">{noPenjab} standar belum memiliki penjab (atur di menu Penjab Standar → Kelola).</p>}
 
             <Card>
@@ -206,6 +235,25 @@ export default function AnggaranPenjab() {
 
             {grand > 0 && (
               <>
+                {(revenueTotal > 0 || grand > 0) && (
+                  <Card>
+                    <CardHeader className="pb-2"><CardTitle className="text-base">Penerimaan vs Belanja per Bulan</CardTitle></CardHeader>
+                    <CardContent className="h-80">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart data={cashChart} margin={{ left: 0, right: 8, top: 8 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                          <XAxis dataKey="bulan" tick={{ fontSize: 11 }} />
+                          <YAxis tickFormatter={compact} tick={{ fontSize: 11 }} width={48} />
+                          <Tooltip formatter={(v: number) => formatRupiah(v)} />
+                          <Legend wrapperStyle={{ fontSize: 11 }} />
+                          <Bar dataKey="penerimaan" name="Penerimaan" fill="#16a34a" />
+                          <Bar dataKey="belanja" name="Belanja" fill="#dc2626" />
+                          <Line type="monotone" dataKey="saldo" name="Saldo kumulatif" stroke="#2563eb" strokeWidth={2} dot={false} />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+                )}
                 <Card>
                   <CardHeader className="pb-2"><CardTitle className="text-base">Anggaran per Bulan (per Standar)</CardTitle></CardHeader>
                   <CardContent className="h-80">
