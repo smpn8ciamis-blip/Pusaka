@@ -41,6 +41,10 @@ const MONTH_ALIASES: Record<string, number> = {
   desember: 12, des: 12, dec: 12, december: 12,
 };
 
+/** Nama kegiatan pengganti bila file tidak memuat teks (nilai kosong merusak daftar pilihan di halaman penjab). */
+export const NO_ACTIVITY_NAME = '(Tanpa nama kegiatan)';
+export const safeActivityName = (v: unknown): string => String(v ?? '').replace(/\s+/g, ' ').trim() || NO_ACTIVITY_NAME;
+
 const norm = (v: unknown) => String(v ?? '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 
 /** "1.500.000", "Rp 1.500.000,50", "1,500,000.25", 1500000 → number */
@@ -87,7 +91,7 @@ export function parseMonths(v: unknown): number[] {
   const monthOf = (t: string): number | null => {
     t = t.trim();
     if (!t) return null;
-    if (MONTH_ALIASES[t]) return MONTH_ALIASES[t];
+    if (Object.prototype.hasOwnProperty.call(MONTH_ALIASES, t)) return MONTH_ALIASES[t];
     if (/^\d{1,2}$/.test(t)) { const n = parseInt(t, 10); return n >= 1 && n <= 12 ? n : null; }
     return null;
   };
@@ -209,7 +213,7 @@ function parseRkasGrid(rows: unknown[][], grid: { row: number; col: number }): R
     let amount = amtI > 0 ? amtI : monthSum > 0 ? monthSum : Math.round(volume * price * (freq || 1));
     out.push({
       line_no: out.length + 1,
-      activity_name: activity || group || label,
+      activity_name: safeActivityName(activity || group || label),
       description: desc,
       volume,
       unit: text(row[4]),
@@ -256,7 +260,7 @@ export function parseRkaRows(rows: unknown[][]): RkaParseResult {
     const noN = parseNumber(noRaw);
     out.push({
       line_no: noRaw !== undefined && String(noRaw).trim() !== '' && Number.isFinite(noN) ? Math.floor(noN) : null,
-      activity_name: name || desc,
+      activity_name: safeActivityName(name || desc),
       description: name ? desc : '',
       volume,
       unit: String(cell(row, 'unit') ?? '').trim(),
@@ -274,9 +278,11 @@ export function parseRkaRows(rows: unknown[][]): RkaParseResult {
 export function amountPerMonth(items: Array<{ amount: number; months: number[] }>): number[] {
   const res = new Array(13).fill(0);
   for (const it of items) {
-    if (!it.months || it.months.length === 0) { res[12] += it.amount; continue; }
-    const share = it.amount / it.months.length;
-    it.months.forEach((m) => { res[m - 1] += share; });
+    const amount = Number(it.amount) || 0;
+    const months = (it.months ?? []).filter((m) => Number.isInteger(m) && m >= 1 && m <= 12);   // bulan tidak valid diabaikan
+    if (months.length === 0) { res[12] += amount; continue; }
+    const share = amount / months.length;
+    months.forEach((m) => { res[m - 1] += share; });
   }
   return res;
 }

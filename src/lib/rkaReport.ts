@@ -33,7 +33,7 @@ export function buildMonthEntries(items: RkaItemLite[]): MonthEntry[][] {
   const res: MonthEntry[][] = Array.from({ length: 13 }, () => []);
   for (const item of items) {
     const amount = Number(item.amount) || 0;
-    const months = item.months ?? [];
+    const months = (item.months ?? []).filter((m) => Number.isInteger(m) && m >= 1 && m <= 12);
     if (months.length === 0) { res[NO_MONTH].push({ item, share: amount, spread: 0 }); continue; }
     for (const m of months) res[m - 1].push({ item, share: amount / months.length, spread: months.length });
   }

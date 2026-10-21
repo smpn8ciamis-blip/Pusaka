@@ -20,7 +20,7 @@ import { RkaCrudPanel } from '@/components/penjab/RkaCrudPanel';
 import { RkaDetailPanel } from '@/components/penjab/RkaDetailPanel';
 import { snpDb, type SnpRkaBatch, type SnpRkaItem } from '@/hooks/usePenjabSnp';
 import {
-  amountPerMonth, formatMonths, formatRupiah, MONTH_SHORT, parseRkaRows, type RkaRow,
+  amountPerMonth, formatMonths, formatRupiah, MONTH_SHORT, parseRkaRows, safeActivityName, type RkaRow,
 } from '@/lib/rkaParser';
 
 const COLORS = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed', '#0891b2', '#db2777', '#65a30d', '#ea580c', '#64748b'];
@@ -61,7 +61,8 @@ export function RkaTab({ standardId, standardName }: { standardId: string; stand
         all.push(...((data ?? []) as SnpRkaItem[]));
         if (!data || data.length < PAGE) break;
       }
-      return all;
+      // Data lama bisa berisi nama kegiatan kosong (mis. hasil import file non-template); beri nama pengganti agar halaman tidak error
+      return all.map((i) => ({ ...i, activity_name: safeActivityName(i.activity_name) }));
     },
   });
 
