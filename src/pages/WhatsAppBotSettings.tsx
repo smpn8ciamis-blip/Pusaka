@@ -360,6 +360,9 @@ function ReminderTab() {
   const [recapTime, setRecapTime] = useState('06:00');
   const [satGreet, setSatGreet] = useState(true);
   const [satTime, setSatTime] = useState('07:00');
+  const [hrOn, setHrOn] = useState(false);
+  const [hrTimes, setHrTimes] = useState('08:30');
+  const [piketWa, setPiketWa] = useState(true);
 
   const { data, isLoading } = useQuery({
     queryKey: ['wa-bot-settings'],
@@ -383,6 +386,9 @@ function ReminderTab() {
       setRecapTime(String(data.daily_recap_time || '06:00').slice(0, 5));
       setSatGreet(data.saturday_greeting_enabled !== false);
       setSatTime(String(data.saturday_greeting_time || '07:00').slice(0, 5));
+      setHrOn(!!data.homeroom_att_reminder_enabled);
+      setHrTimes(String(data.homeroom_att_reminder_times || '08:30'));
+      setPiketWa(data.piket_wa_enabled !== false);
     }
   }, [data]);
 
@@ -400,6 +406,9 @@ function ReminderTab() {
         daily_recap_time: /^\d{2}:\d{2}$/.test(recapTime) ? recapTime : '06:00',
         saturday_greeting_enabled: satGreet,
         saturday_greeting_time: /^\d{2}:\d{2}$/.test(satTime) ? satTime : '07:00',
+        homeroom_att_reminder_enabled: hrOn,
+        homeroom_att_reminder_times: hrTimes.split(/[,\s;]+/).filter((t) => /^\d{1,2}:\d{2}$/.test(t)).map((t) => t.padStart(5, '0')).join(', ') || '08:30',
+        piket_wa_enabled: piketWa,
         updated_at: new Date().toISOString(), updated_by: user?.id ?? null,
       });
       if (error) throw error;
@@ -493,6 +502,31 @@ function ReminderTab() {
               <Input type="time" value={satTime} onChange={(e) => setSatTime(e.target.value)} className="w-32" />
             </div>
           )}
+        </div>
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="hr-en">Ingatkan wali kelas bila absensi belum diisi</Label>
+            <Switch id="hr-en" checked={hrOn} onCheckedChange={setHrOn} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Pada jam pengecekan, bila absensi jam pertama suatu kelas belum terisi, wali kelasnya menerima WA yang menyebut nama guru pengajar jam pertama. Sekali per kelas per hari. Isi pesan bisa diubah di tab Template Pesan.
+          </p>
+          {hrOn && (
+            <div className="space-y-1">
+              <Label>Jam pengecekan (WIB)</Label>
+              <Input value={hrTimes} onChange={(e) => setHrTimes(e.target.value)} placeholder="08:30, 10:00" className="w-48" />
+              <p className="text-xs text-muted-foreground">Boleh lebih dari satu, pisahkan dengan koma (format 24 jam).</p>
+            </div>
+          )}
+        </div>
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="pk-en">Notifikasi absensi petugas piket</Label>
+            <Switch id="pk-en" checked={piketWa} onCheckedChange={setPiketWa} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Petugas piket (malam / Sabtu-Minggu) menerima WA saat absen masuk atau pulangnya tercatat di mesin fingerprint. Nomor diambil dari profil guru atau data staf.
+          </p>
         </div>
         <Button onClick={() => save.mutate()} disabled={save.isPending}>
           {save.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />} Simpan

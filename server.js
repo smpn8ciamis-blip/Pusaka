@@ -129,6 +129,46 @@ async function notifyPunch(sn, pin, at, result) {
     await pushToUser(userId, 'PUSAKA · ' + PUSH_TEXT[result], (name ? name + ' · ' : '') + hhmm + ' WIB', 'absen-' + log.person_id, at.getTime(), name);
 }
 
+// WA ke petugas piket (malam / Sabtu-Minggu) saat absennya lewat mesin fingerprint tercatat.
+const piketWaSent = new Set();
+const PIKET_SHIFT = { malam: 'Piket Malam', sabtu_minggu: 'Piket Sabtu/Minggu' };
+async function notifyPiketWa(sn, pin, at) {
+    if (!isReady) return;
+    const cfg = await getBotSettings();
+    if (!cfg.piket_wa_enabled) return;
+    if (Date.now() - at.getTime() > 15 * 60 * 1000) return;      // log lama (antrean mesin) tidak dinotifikasikan
+    const { data: log } = await supabase.from('fingerprint_logs').select('person_type, person_id')
+        .eq('device_sn', sn).eq('pin', pin).eq('punched_at', at.toISOString()).maybeSingle();
+    if (!log || !log.person_id || (log.person_type !== 'teacher' && log.person_type !== 'staff')) return;
+    const iso = function(d) { return new Date(d.getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10); };
+    const today = iso(at), yesterday = iso(new Date(at.getTime() - 86400000));
+    const col = log.person_type === 'teacher' ? 'teacher_id' : 'staff_id';
+    const dRes = await supabase.from('piket_duties').select('id, shift_type, duty_date, person_name, check_in_at, check_out_at')
+        .eq(col, log.person_id).gte('duty_date', yesterday).lte('duty_date', today);
+    if (dRes.error || !dRes.data || dRes.data.length === 0) return;
+    const duty = dRes.data.find(function(d) { return d.check_in_at && new Date(d.check_in_at).getTime() === at.getTime(); })
+        || dRes.data.find(function(d) { return d.check_out_at && new Date(d.check_out_at).getTime() === at.getTime(); });
+    if (!duty) return; // ketukan bukan masuk/pulang piket (mis. ketukan berulang)
+    const key = duty.id + ':' + at.getTime(); if (piketWaSent.has(key)) return; piketWaSent.add(key);
+    let phone = null, nama = duty.person_name;
+    if (log.person_type === 'teacher') {
+        const { data: t } = await supabase.from('teachers').select('user_id').eq('id', log.person_id).maybeSingle();
+        if (t && t.user_id) { const { data: p } = await supabase.from('profiles').select('full_name, phone').eq('id', t.user_id).maybeSingle(); if (p) { phone = p.phone; nama = p.full_name || nama; } }
+    } else {
+        const { data: st } = await supabase.from('staff').select('full_name, phone').eq('id', log.person_id).maybeSingle();
+        if (st) { phone = st.phone; nama = st.full_name || nama; }
+    }
+    if (!phone) { console.log('[PIKET WA] ' + nama + ': nomor HP belum diisi, dilewati'); return; }
+    const isIn = duty.check_in_at && new Date(duty.check_in_at).getTime() === at.getTime();
+    const vars = {
+        nama: nama, shift: PIKET_SHIFT[duty.shift_type] || 'Piket', jenis: isIn ? 'masuk' : 'pulang',
+        tanggal: today.split('-').reverse().join('/'),
+        jam: at.toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false }).replace('.', ':')
+    };
+    const jid = formatToInternational(phone) + '@s.whatsapp.net';
+    enqueueTask(async () => { const text = await renderMessage('piket_punch', vars); if (text) await sendSafeMessage(jid, { text: text }); });
+}
+
 // Kirim ke semua perangkat milik satu akun; langganan kedaluwarsa dibersihkan otomatis.
 async function pushToUser(userId, title, body, tag, ts, label) {
     if (!PUSH_ENABLED || !userId) return;
@@ -223,6 +263,8 @@ const DEFAULT_TEMPLATES = {
     class_attendance_recap: `📊 *REKAP ABSENSI SISWA PER KELAS*\n{{hari}}, {{tanggal}}\n\n{{tabel_rekap}}\nKls=Kelas, Sis=Siswa, H=Hadir, S=Sakit, I=Izin, A=Alfa, Jml=Jumlah tidak sekolah\n\n*REKAP SEMUA KELAS* ({{jumlah_kelas}} kelas, {{total_siswa}} siswa)\n• Hadir: *{{total_hadir}}* ({{persen_hadir}}%)\n• Sakit: *{{total_sakit}}*\n• Izin: *{{total_izin}}*\n• Alfa: *{{total_alfa}}*\n• Jml tidak hadir: *{{total_tidak_hadir}}*\n\n_Pusaka - SMP Negeri 8 Ciamis_`
 };
 DEFAULT_TEMPLATES.class_group_recap = `📊 *ABSENSI KELAS {{kelas}}*\n{{hari}}, {{tanggal}}\n\nJumlah siswa: *{{total_siswa}}*\n✅ Hadir: *{{hadir}}*\n🤒 Sakit: *{{sakit}}*\n📝 Izin: *{{izin}}*\n❌ Alfa: *{{alpa}}*\n\n{{daftar_tidak_hadir}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.homeroom_attendance_reminder = `📋 *PENGINGAT ABSENSI KELAS*\n\nYth. Bapak/Ibu *{{nama_wali}}* (Wali Kelas {{kelas}}),\nPada pukul {{waktu}} WIB absensi kelas *{{kelas}}* hari {{hari}}, {{tanggal}} belum terisi.\n\nJadwal jam pertama:\n• Jam: *{{jam_pertama}}*\n• Mapel: *{{mapel}}*\n• Guru pengajar: *{{guru_pengajar}}* (belum mengisi absensi)\n\nMohon bantu mengisi absensi kelas Anda di aplikasi Pusaka.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.piket_punch = `🕒 *ABSENSI PIKET TERCATAT*\n\nYth. Bapak/Ibu *{{nama}}*,\nAbsen *{{jenis}}* {{shift}} Anda tercatat pada {{tanggal}} pukul *{{jam}} WIB* melalui mesin absensi.\n\nTerima kasih atas pengabdiannya.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.teacher_saturday_greeting = `🌿 *SELAMAT AKHIR PEKAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\n\nTerima kasih atas dedikasi dan kerja keras Bapak/Ibu dalam mendidik anak-anak kita sepanjang pekan ini.\n\nHari {{hari}} adalah waktu untuk berhenti sejenak. Nikmatilah akhir pekan bersama keluarga, karena keluarga adalah sumber kekuatan terbesar seorang pendidik. Istirahatlah yang cukup dan siapkan energi terbaik untuk mengajar kembali di hari Senin.\n\nSemoga sehat dan bahagia selalu. 🙏\n_Pusaka - SMP Negeri 8 Ciamis_`;
 const DEFAULT_BOT_SETTINGS = {
     teacher_reminder_enabled: true, reminder_lead_min: 10, reminder_followup_min: 15,
@@ -236,7 +278,10 @@ const DEFAULT_BOT_SETTINGS = {
     class_recap_group_jid: '',        // JID grup tujuan (xxx@g.us)
     class_group_recap_enabled: false, // kirim rekap ke grup MASING-MASING kelas (tabel wa_class_groups)
     saturday_greeting_enabled: true,  // ucapan akhir pekan ke guru yang tidak mengajar hari Sabtu
-    saturday_greeting_time: '07:00'   // jam kirim (WIB)
+    saturday_greeting_time: '07:00',  // jam kirim (WIB)
+    homeroom_att_reminder_enabled: false, // ingatkan wali kelas bila absensi kelasnya belum diisi guru jam pertama
+    homeroom_att_reminder_times: '08:30', // jam pengecekan (WIB), boleh lebih dari satu dipisah koma
+    piket_wa_enabled: true            // WA ke petugas piket saat absen lewat mesin fingerprint tercatat
 };
 const CONFIG_TTL_MS = 30 * 1000;
 let templateCache = { at: 0, rows: new Map() };
@@ -605,6 +650,62 @@ async function runTeacherReminders() {
         }
     } catch (e) { console.error('[REMINDER ERROR]:', e.message); }
     finally { reminderRunning = false; }
+}
+// Pengingat ke WALI KELAS: pada jam yang diatur, bila absensi jam pertama suatu kelas belum terisi.
+// Menyebut nama guru pengajar jam pertama yang belum mengisi. Sekali per kelas per hari.
+let homeroomRunning = false;
+async function runHomeroomAttendanceReminder() {
+    if (!isReady || homeroomRunning) return;
+    homeroomRunning = true;
+    try {
+        const cfg = await getBotSettings();
+        if (!cfg.homeroom_att_reminder_enabled) return;
+        const now = wibNow();
+        if (now.dow > 6) return;
+        const times = String(cfg.homeroom_att_reminder_times || '08:30').split(/[,\s;]+/).filter(function(t) { return /^\d{1,2}:\d{2}$/.test(t); }).map(hhmmToMin);
+        // jam pengecekan yang sudah tiba (dalam 90 menit terakhir)
+        const due = times.filter(function(t) { return now.minutes >= t && now.minutes < t + 90; });
+        if (due.length === 0) return;
+        if (reminderSentDate !== now.date) loadReminderState(now.date);
+        const comp = await supabase.rpc('get_class_attendance_completion', { p_date: now.date });
+        if (comp.error) throw comp.error;
+        const unfilled = (comp.data || []).filter(function(c) { return !c.filled && c.first_schedule_id; });
+        if (unfilled.length === 0) return;
+        const schedRes = await supabase.from('schedules').select('id, teacher_id, subject, start_time, end_time').in('id', unfilled.map(function(c) { return c.first_schedule_id; }));
+        if (schedRes.error) throw schedRes.error;
+        const schedById = new Map((schedRes.data || []).map(function(x) { return [x.id, x]; }));
+        const clsRes = await supabase.from('classes').select('id, homeroom_teacher_id').in('id', unfilled.map(function(c) { return c.class_id; }));
+        if (clsRes.error) throw clsRes.error;
+        const homeroomOf = new Map((clsRes.data || []).map(function(x) { return [x.id, x.homeroom_teacher_id]; }));
+        const teacherIds = Array.from(new Set([].concat(
+            (schedRes.data || []).map(function(x) { return x.teacher_id; }),
+            (clsRes.data || []).map(function(x) { return x.homeroom_teacher_id; })
+        ).filter(Boolean)));
+        const tRes = await supabase.from('teachers').select('id, user_id').in('id', teacherIds);
+        if (tRes.error) throw tRes.error;
+        const pRes = await supabase.from('profiles').select('id, full_name, phone').in('id', (tRes.data || []).map(function(t) { return t.user_id; }).filter(Boolean));
+        if (pRes.error) throw pRes.error;
+        const profById = new Map((pRes.data || []).map(function(x) { return [x.id, x]; }));
+        const profOfTeacher = new Map((tRes.data || []).map(function(t) { return [t.id, profById.get(t.user_id)]; }));
+        const tgl = now.date.split('-').reverse().join('/');
+        const waktu = String(Math.floor(now.minutes / 60)).padStart(2, '0') + ':' + String(now.minutes % 60).padStart(2, '0');
+        for (const c of unfilled) {
+            const sc = schedById.get(c.first_schedule_id);
+            if (!sc || hhmmToMin(sc.start_time) > now.minutes) continue; // jam pertama belum mulai
+            const wali = profOfTeacher.get(homeroomOf.get(c.class_id));
+            if (!wali || !wali.phone) continue;
+            const key = 'hr:' + c.class_id; if (reminderSent.has(key)) continue; markReminderSent(key);
+            const guru = profOfTeacher.get(sc.teacher_id);
+            const vars = {
+                nama_wali: wali.full_name, kelas: c.class_name, hari: DAY_NAMES[now.dow], tanggal: tgl, waktu: waktu,
+                jam_pertama: String(sc.start_time).slice(0, 5) + '-' + String(sc.end_time).slice(0, 5), mapel: sc.subject,
+                guru_pengajar: (guru && guru.full_name) || '-'
+            };
+            const jid = formatToInternational(wali.phone) + '@s.whatsapp.net';
+            enqueueTask(async () => { const text = await renderMessage('homeroom_attendance_reminder', vars); if (text) await sendSafeMessage(jid, { text: text }); });
+        }
+    } catch (e) { console.error('[HOMEROOM REMINDER ERROR]:', e.message); }
+    finally { homeroomRunning = false; }
 }
 // Ucapan akhir pekan: hari Sabtu dikirim ke guru yang TIDAK punya jadwal mengajar hari itu (sekali per guru per hari)
 let saturdayRunning = false;
@@ -1138,6 +1239,7 @@ app.post('/iclock/cdata', rawText, async (req, res) => {
             if (r.error) throw r.error; // kegagalan -> mesin mengirim ulang (aman, proses idempoten)
             n++;
             if (r.data && r.data.result) notifyPunch(sn, pin, at, r.data.result).catch((e) => console.error('[PUSH]', e && e.message));
+            notifyPiketWa(sn, pin, at).catch((e) => console.error('[PIKET WA]', e && e.message));
         }
         if (n) console.log('[FINGERPRINT] ' + sn + ': ' + n + ' log diproses');
         res.type('text/plain').send('OK: ' + n);
@@ -1492,6 +1594,7 @@ app.listen(PORT, () => {
     startBot();
     setInterval(runTeacherReminders, 60 * 1000);
     setInterval(runSaturdayGreeting, 60 * 1000);
+    setInterval(runHomeroomAttendanceReminder, 60 * 1000);
     setInterval(checkBackupSchedule, 60 * 1000);
     setInterval(checkStudentSnapshot, 60 * 1000);
 });
