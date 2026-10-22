@@ -8,9 +8,9 @@ export const ekskulDb = supabase as any;
 
 /**
  * Role yang bisa mendapat akses pembina lewat PENUGASAN (baris extracurricular_coaches):
- * guru, serta staf/tata usaha (akun dari menu Registrasi Staf).
+ * guru, serta akun dari Registrasi Staf/Akun (staf, tata usaha, bendahara, guru piket).
  */
-export const EKSKUL_ASSIGNABLE_ROLES = ['teacher', 'staf', 'tata_usaha'];
+export const EKSKUL_ASSIGNABLE_ROLES = ['teacher', 'staf', 'tata_usaha', 'bendahara', 'guru_piket'];
 export const isEkskulAssignableRole = (role: string | null | undefined) =>
   !!role && EKSKUL_ASSIGNABLE_ROLES.includes(role);
 

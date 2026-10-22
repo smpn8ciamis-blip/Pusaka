@@ -41,10 +41,19 @@ interface StaffAccountOption {
   staff_position: string | null;
   nip: string | null;
   email: string | null;
-  source: 'staff' | 'akun_pembina';
+  source: 'staff' | 'akun';
+  user_role: string | null;
 }
 
 const NO_ACCOUNT = '__none';
+
+const ROLE_LABEL: Record<string, string> = {
+  tata_usaha: 'Tata Usaha',
+  bendahara: 'Bendahara',
+  staf: 'Staf',
+  guru_piket: 'Guru Piket',
+  pembina_ekskul: 'Pembina Ekskul',
+};
 
 type Mode = 'teacher' | 'manual';
 
@@ -272,7 +281,7 @@ export default function EkskulCoaches() {
                         <SelectItem value={NO_ACCOUNT}>Tanpa akun login</SelectItem>
                         {staffAccounts.map((st) => (
                           <SelectItem key={st.user_id} value={st.user_id}>
-                            {st.full_name}{st.email ? ` — ${st.email}` : ''}{st.source === 'akun_pembina' ? ' (akun pembina ekskul)' : ''}
+                            {st.full_name}{st.email ? ` — ${st.email}` : ''}{st.user_role && ROLE_LABEL[st.user_role] ? ` (${ROLE_LABEL[st.user_role]})` : ''}
                           </SelectItem>
                         ))}
                       </SelectContent>
