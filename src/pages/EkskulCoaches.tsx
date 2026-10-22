@@ -35,13 +35,13 @@ interface TeacherOption {
 }
 
 interface StaffAccountOption {
-  staff_id: string;
   user_id: string;
   full_name: string;
   staff_type: string | null;
   staff_position: string | null;
   nip: string | null;
   email: string | null;
+  source: 'staff' | 'akun_pembina';
 }
 
 const NO_ACCOUNT = '__none';
@@ -97,12 +97,12 @@ export default function EkskulCoaches() {
 
   const selectedTeacher = teachers.find((t) => t.teacher_id === teacherId);
   const hasStaffAccount = staffId !== NO_ACCOUNT;
-  const selectedStaff = staffAccounts.find((x) => x.staff_id === staffId);
+  const selectedStaff = staffAccounts.find((x) => x.user_id === staffId);
   const manualReady = manual.name.trim().length > 0 || hasStaffAccount;
 
   const pickStaffAccount = (id: string) => {
     setStaffId(id);
-    const st = staffAccounts.find((x) => x.staff_id === id);
+    const st = staffAccounts.find((x) => x.user_id === id);
     if (!st) return;
     // Isi otomatis kolom yang masih kosong dari data staf
     setManual((m) => ({
@@ -125,7 +125,7 @@ export default function EkskulCoaches() {
       if (mode === 'manual' && hasStaffAccount) {
         const { data, error } = await ekskulDb.rpc('assign_ekskul_pembina_akun', {
           _type_id: typeId,
-          _staff_id: staffId,
+          _user_id: staffId,
           _name: manual.name.trim() || null,
           _nip: manual.nip.trim() || null,
           _nuptk: manual.nuptk.trim() || null,
@@ -268,15 +268,15 @@ export default function EkskulCoaches() {
                       <SelectContent>
                         <SelectItem value={NO_ACCOUNT}>Tanpa akun login</SelectItem>
                         {staffAccounts.map((st) => (
-                          <SelectItem key={st.staff_id} value={st.staff_id}>
-                            {st.full_name}{st.email ? ` — ${st.email}` : ''}
+                          <SelectItem key={st.user_id} value={st.user_id}>
+                            {st.full_name}{st.email ? ` — ${st.email}` : ''}{st.source === 'akun_pembina' ? ' (akun pembina ekskul)' : ''}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">
                       {staffAccounts.length === 0
-                        ? 'Belum ada staf aktif yang memiliki akun login (buat di menu Registrasi Staf).'
+                        ? 'Belum ada staf aktif yang memiliki akun login (buat di menu Registrasi Staf / Registrasi Akun).'
                         : selectedStaff
                           ? `Akun ${selectedStaff.email ?? selectedStaff.full_name} bisa login dan mengelola Jurnal & Anggota Ekskul untuk ekskul ini.`
                           : 'Akun yang dipilih mendapat akses penuh (tambah/ubah/hapus) Jurnal & Anggota Ekskul binaannya.'}
