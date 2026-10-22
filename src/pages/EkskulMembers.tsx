@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { Link } from 'react-router-dom';
-import { canManageEkskulMembers, ekskulDb, useAccessibleEkskulTypes, useIsEkskulCoach } from '@/hooks/useEkskul';
+import { canManageEkskulMembers, ekskulDb, isEkskulAssignableRole, useAccessibleEkskulTypes, useIsEkskulCoach } from '@/hooks/useEkskul';
 import { EkskulPrintDialog } from '@/components/EkskulPrintDialog';
 
 interface Member {
@@ -482,7 +482,7 @@ export default function EkskulMembers() {
   const queryClient = useQueryClient();
   const { isCoach } = useIsEkskulCoach();
   const canEdit = canManageEkskulMembers(userRole, isCoach);
-  const isPembina = userRole === 'pembina_ekskul' || (userRole === 'teacher' && isCoach);
+  const isPembina = userRole === 'pembina_ekskul' || (isEkskulAssignableRole(userRole) && isCoach);
 
   const { data: types = [], isLoading: typesLoading } = useAccessibleEkskulTypes();
   const typeName = useMemo(() => new Map(types.map((t) => [t.id, t.name])), [types]);

@@ -549,11 +549,13 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: GraduationCap, label: 'Honorarium GTT/PTT', href: '/gtt-ptt-honorarium' },
     { icon: Receipt, label: 'Kwitansi Narasumber', href: '/narasumber-honorarium' },
     { icon: Award, label: 'Honorarium Ekskul', href: '/extracurricular-honorarium' },
+    ...(isEkskulCoach ? ekskulCoachMenuItems : []),
   ];
 
   const stafMenuItems: MenuItem[] = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/staff-dashboard' },
     { icon: FileCheck, label: 'Surat Tugas Saya', href: '/my-letters' },
+    ...(isEkskulCoach ? ekskulCoachMenuItems : []),
     ...(hasPiketDuty ? [{ icon: Fingerprint, label: 'Log Piket Saya', href: '/my-piket' }] : []),
   ];
 

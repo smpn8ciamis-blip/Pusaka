@@ -6,6 +6,14 @@ import { useAuth } from '@/contexts/AuthContext';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const ekskulDb = supabase as any;
 
+/**
+ * Role yang bisa mendapat akses pembina lewat PENUGASAN (baris extracurricular_coaches):
+ * guru, serta staf/tata usaha (akun dari menu Registrasi Staf).
+ */
+export const EKSKUL_ASSIGNABLE_ROLES = ['teacher', 'staf', 'tata_usaha'];
+export const isEkskulAssignableRole = (role: string | null | undefined) =>
+  !!role && EKSKUL_ASSIGNABLE_ROLES.includes(role);
+
 export const EKSKUL_PHOTO_BUCKET = 'ekskul-journal-photos';
 
 export interface EkskulType {
@@ -16,7 +24,7 @@ export interface EkskulType {
 
 /**
  * Daftar ekskul yang boleh diakses user saat ini:
- * - pembina_ekskul : hanya ekskul yang ditugaskan kepadanya
+ * - pembina_ekskul / guru / staf yang ditugaskan: hanya ekskul yang ditugaskan kepadanya
  * - admin/kesiswaan: semua ekskul aktif di sekolah
  */
 export function useAccessibleEkskulTypes() {
@@ -27,7 +35,7 @@ export function useAccessibleEkskulTypes() {
     enabled: !!user && !!userRole,
     queryFn: async (): Promise<EkskulType[]> => {
       // pembina_ekskul & guru yang ditugaskan: hanya ekskul binaannya
-      if (userRole === 'pembina_ekskul' || userRole === 'teacher') {
+      if (userRole === 'pembina_ekskul' || isEkskulAssignableRole(userRole)) {
         const { data, error } = await ekskulDb
           .from('extracurricular_coaches')
           .select('extracurricular_types(id, name, description)')
@@ -56,7 +64,7 @@ export function useAccessibleEkskulTypes() {
  */
 export function useIsEkskulCoach() {
   const { user, userRole } = useAuth();
-  const eligible = userRole === 'pembina_ekskul' || userRole === 'teacher';
+  const eligible = userRole === 'pembina_ekskul' || isEkskulAssignableRole(userRole);
 
   const { data = [], isLoading } = useQuery({
     queryKey: ['ekskul-my-coach-types', user?.id],
@@ -81,11 +89,11 @@ export function useIsEkskulCoach() {
 
 /** Jurnal ekskul: diisi pembina (role pembina_ekskul atau guru yang ditugaskan); admin & kesiswaan memantau. */
 export const canEditEkskul = (role: string | null | undefined, isCoach = false) =>
-  role === 'pembina_ekskul' || (role === 'teacher' && isCoach);
+  role === 'pembina_ekskul' || (isEkskulAssignableRole(role) && isCoach);
 
 /** Anggota ekskul: dikelola pembina (ekskul binaannya) dan kesiswaan (semua ekskul). */
 export const canManageEkskulMembers = (role: string | null | undefined, isCoach = false) =>
-  role === 'pembina_ekskul' || role === 'kesiswaan' || (role === 'teacher' && isCoach);
+  role === 'pembina_ekskul' || role === 'kesiswaan' || (isEkskulAssignableRole(role) && isCoach);
 
 /** Jenis ekskul: dikelola kesiswaan dan admin. */
 export const canManageEkskulTypes = (role: string | null | undefined) =>
