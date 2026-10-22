@@ -526,6 +526,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: FileBarChart, label: 'SPJ / BKU', href: '/spj' },
     { icon: BarChart3, label: 'Kode Anggaran', href: '/kode-label-settings' },
     { icon: Settings, label: 'Pengaturan Bendahara', href: '/bendahara-settings' },
+    ...(isEkskulCoach ? ekskulCoachMenuItems : []),
   ];
 
   // ============================================================
@@ -587,6 +588,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: CreditCard, label: 'Absensi RFID', href: '/rfid-attendance' },
     { icon: HeartHandshake, label: 'Absensi Salat', href: '/kelola-salat' },
     { icon: BookOpen, label: 'Buku Tamu', href: '/buku-tamu' },
+    ...(isEkskulCoach ? ekskulCoachMenuItems : []),
     { icon: Settings, label: 'Pengaturan', href: '/settings' },
   ];
 
