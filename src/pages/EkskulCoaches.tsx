@@ -80,6 +80,9 @@ export default function EkskulCoaches() {
 
   const { data: staffAccounts = [] } = useQuery({
     queryKey: ['ekskul-staff-account-options'],
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
     queryFn: async (): Promise<StaffAccountOption[]> => {
       const { data, error } = await ekskulDb.rpc('list_staff_accounts_for_ekskul');
       if (error) throw error;
