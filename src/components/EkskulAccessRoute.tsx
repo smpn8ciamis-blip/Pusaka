@@ -1,7 +1,7 @@
 import { Navigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useIsEkskulCoach } from '@/hooks/useEkskul';
+import { isEkskulAssignableRole, useIsEkskulCoach } from '@/hooks/useEkskul';
 
 /**
  * Akses halaman Jurnal/Anggota Ekskul:
@@ -25,7 +25,7 @@ export const EkskulAccessRoute = ({ children }: { children: React.ReactNode }) =
     userRole === 'kesiswaan' ||
     userRole === 'super_admin' ||
     userRole === 'pembina_ekskul' ||
-    (userRole === 'teacher' && isCoach);
+    (isEkskulAssignableRole(userRole) && isCoach);
 
   return allowed ? <>{children}</> : <Navigate to="/dashboard" replace />;
 };
