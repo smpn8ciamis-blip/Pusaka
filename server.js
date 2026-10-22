@@ -512,7 +512,9 @@ async function runTeacherReminders() {
     reminderRunning = true;
     try {
         const cfg = await getBotSettings();
-        if (!cfg.teacher_reminder_enabled) return;
+        // Saklar pengingat (sebelum mengajar + tindak lanjut) dan saklar rekap jadwal harian berdiri sendiri.
+        const remindOn = !!cfg.teacher_reminder_enabled;
+        if (!remindOn && !cfg.daily_recap_enabled) return;
         const now = wibNow();
         if (reminderSentDate !== now.date) loadReminderState(now.date);
         if (now.dow > 6) return;
@@ -527,7 +529,7 @@ async function runTeacherReminders() {
         const recapMin = hhmmToMin(cfg.daily_recap_time || '06:00');
         const lastEnd = Math.max.apply(null, schedules.map(function(s) { return hhmmToMin(s.end_time); }));
         const needRecap = cfg.daily_recap_enabled && now.minutes >= recapMin && now.minutes < lastEnd && !reminderSent.has('recap:done');
-        let relevant = schedules.filter(function(s) {
+        let relevant = !remindOn ? [] : schedules.filter(function(s) {
             const start = hhmmToMin(s.start_time);
             return (now.minutes >= start - cfg.reminder_lead_min && now.minutes < start + 5) || (now.minutes >= start + cfg.reminder_followup_min && now.minutes < hhmmToMin(s.end_time));
         });

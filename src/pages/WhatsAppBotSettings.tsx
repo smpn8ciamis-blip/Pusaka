@@ -418,7 +418,10 @@ function ReminderTab() {
       </CardHeader>
       <CardContent className="space-y-4 max-w-md">
         <div className="flex items-center justify-between">
-          <Label htmlFor="rem-en">Aktifkan pengingat guru</Label>
+          <div>
+            <Label htmlFor="rem-en">Aktifkan pengingat sebelum mengajar</Label>
+            <p className="text-xs text-muted-foreground">Pengingat menjelang jam mengajar beserta pesan tindak lanjut jurnal/absensi. Tidak memengaruhi rekap jadwal harian di bawah.</p>
+          </div>
           <Switch id="rem-en" checked={enabled} onCheckedChange={setEnabled} />
         </div>
         <div className="space-y-1">
@@ -431,7 +434,7 @@ function ReminderTab() {
           <p className="text-xs text-muted-foreground">Jika belum terisi, guru menerima pesan tindak lanjut.</p>
         </div>
         <div className="space-y-1">
-          <Label>Pengingat untuk jam mengajar</Label>
+          <Label>Pengingat sebelum mengajar untuk</Label>
           <Select value={scope} onValueChange={(v) => setScope(v as 'first' | 'all')}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -470,7 +473,7 @@ function ReminderTab() {
             <Label htmlFor="recap-en">Kirim rekap jadwal harian</Label>
             <Switch id="recap-en" checked={recap} onCheckedChange={setRecap} />
           </div>
-          <p className="text-xs text-muted-foreground">Berisi daftar jadwal mengajar guru pada hari itu. Guru yang tidak mengajar hari itu tidak dikirimi.</p>
+          <p className="text-xs text-muted-foreground">Berisi daftar jadwal mengajar guru pada hari itu. Guru yang tidak mengajar hari itu tidak dikirimi. Saklar ini berdiri sendiri, tetap berjalan walau pengingat sebelum mengajar dimatikan.</p>
           {recap && (
             <div className="space-y-1">
               <Label>Jam kirim (WIB)</Label>
