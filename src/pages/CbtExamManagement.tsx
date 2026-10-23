@@ -56,6 +56,7 @@ export default function CbtExamManagement() {
     require_token: false, exam_token: '', max_attempts: 1, allow_resume: true,
     instructions: '', exam_type: 'mixed',
     anti_cheat_enabled: false, exit_token: '', max_violations: 3,
+    grade_component: '' as string, grade_policy: 'highest' as string,
   };
   const [examForm, setExamForm] = useState(initialExamForm);
 
@@ -120,23 +121,15 @@ export default function CbtExamManagement() {
       return data || [];
     },
     enabled: !!selectedExam?.id && (isResultsOpen || isControlOpen || isGradingOpen),
-    refetchInterval: isControlOpen ? 5000 : false,
+    refetchInterval: isControlOpen ? 20000 : false,
   });
 
-  // Live answer counts per session for monitoring panel
-  const { data: answerCounts } = useQuery({
-    queryKey: ['cbt-answer-counts', selectedExam?.id, examResults?.length],
-    queryFn: async () => {
-      const ids = (examResults || []).map((r: any) => r.id);
-      if (!ids.length) return {} as Record<string, number>;
-      const { data } = await supabase.from('cbt_student_answers').select('session_id').in('session_id', ids);
-      const map: Record<string, number> = {};
-      (data || []).forEach((a: any) => { map[a.session_id] = (map[a.session_id] || 0) + 1; });
-      return map;
-    },
-    enabled: !!selectedExam?.id && isControlOpen && (examResults?.length || 0) > 0,
-    refetchInterval: isControlOpen ? 5000 : false,
-  });
+  // Jumlah soal terjawab per sesi memakai kolom answered_count (tanpa mengunduh semua jawaban)
+  const answerCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    (examResults || []).forEach((r: any) => { m[r.id] = r.answered_count || 0; });
+    return m;
+  }, [examResults]);
 
   // Templates
   const { data: templates } = useQuery({
@@ -202,6 +195,7 @@ export default function CbtExamManagement() {
         class_id: cIds[0] || data.class_id || null,
         class_ids: cIds.length > 0 ? cIds : null,
         exam_token: data.require_token ? (data.exam_token || generateToken()) : null,
+        grade_component: data.grade_component || null,
       };
       const { error } = await supabase.from('cbt_exams').insert(payload);
       if (error) throw error;
@@ -225,6 +219,7 @@ export default function CbtExamManagement() {
         start_datetime: data.start_datetime || null,
         end_datetime: data.end_datetime || null,
         exam_token: data.require_token ? (data.exam_token || generateToken()) : null,
+        grade_component: data.grade_component || null,
       };
       const { error } = await supabase.from('cbt_exams').update(payload).eq('id', id);
       if (error) throw error;
@@ -388,6 +383,20 @@ export default function CbtExamManagement() {
     },
   });
 
+  // Sinkron nilai CBT ke menu Nilai
+  const syncGradesMutation = useMutation({
+    mutationFn: async (examId: string) => {
+      const { data, error } = await (supabase as any).rpc('cbt_sync_grades', { p_exam_id: examId });
+      if (error) throw error;
+      return data as { synced: number; no_schedule: number; skipped: number };
+    },
+    onSuccess: (r) => {
+      queryClient.invalidateQueries({ queryKey: ['schedule-students-grades'] });
+      toast.success(`Nilai dikirim ke menu Nilai: ${r.synced} siswa` + (r.no_schedule ? `, ${r.no_schedule} siswa tanpa jadwal mapel yang cocok` : '') + (r.skipped ? `, ${r.skipped} belum selesai/menunggu koreksi` : ''));
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   // Control panel actions
   const sessionActionMutation = useMutation({
     mutationFn: async ({ id, action }: { id: string; action: 'pause' | 'resume' | 'finalize' | 'reset' }) => {
@@ -396,7 +405,8 @@ export default function CbtExamManagement() {
       } else if (action === 'resume') {
         await supabase.from('cbt_exam_sessions').update({ status: 'in_progress', last_activity_at: new Date().toISOString() }).eq('id', id);
       } else if (action === 'finalize') {
-        await supabase.from('cbt_exam_sessions').update({ status: 'completed', end_time: new Date().toISOString() }).eq('id', id);
+        const { error } = await (supabase as any).rpc('cbt_force_finish', { p_session_id: id });
+        if (error) throw error;
       } else if (action === 'reset') {
         await supabase.from('cbt_student_answers').delete().eq('session_id', id);
         await supabase.from('cbt_exam_sessions').delete().eq('id', id);
@@ -464,6 +474,8 @@ export default function CbtExamManagement() {
       anti_cheat_enabled: exam.anti_cheat_enabled || false,
       exit_token: exam.exit_token || '',
       max_violations: exam.max_violations || 3,
+      grade_component: exam.grade_component || '',
+      grade_policy: exam.grade_policy || 'highest',
     });
     setIsEditOpen(true);
   };
@@ -613,6 +625,34 @@ export default function CbtExamManagement() {
               </Select>
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-3 rounded-lg border p-3">
+            <div>
+              <Label>Masukkan nilai ke menu Nilai sebagai</Label>
+              <Select value={examForm.grade_component || 'none'} onValueChange={v => setExamForm(p => ({ ...p, grade_component: v === 'none' ? '' : v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Tidak dimasukkan</SelectItem>
+                  <SelectItem value="tugas">Tugas</SelectItem>
+                  <SelectItem value="kuis">Kuis</SelectItem>
+                  <SelectItem value="uts">UTS</SelectItem>
+                  <SelectItem value="uas">UAS</SelectItem>
+                  <SelectItem value="praktik">Praktik</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Bila percobaan lebih dari satu</Label>
+              <Select value={examForm.grade_policy} onValueChange={v => setExamForm(p => ({ ...p, grade_policy: v }))} disabled={!examForm.grade_component}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="highest">Ambil nilai tertinggi</SelectItem>
+                  <SelectItem value="latest">Ambil nilai terakhir</SelectItem>
+                  <SelectItem value="average">Ambil rata-rata</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="col-span-2 text-[11px] text-muted-foreground">Nilai masuk otomatis begitu siswa selesai (ujian essay setelah dikoreksi) ke mapel yang sama pada jadwal kelas siswa. Nilai yang sudah ada di komponen itu akan diganti.</p>
+          </div>
           <div><Label>Petunjuk Ujian</Label><Textarea rows={3} placeholder="Contoh: Bacalah soal dengan teliti..." value={examForm.instructions} onChange={e => setExamForm(p => ({ ...p, instructions: e.target.value }))} /></div>
         </TabsContent>
         <TabsContent value="schedule" className="space-y-3 mt-0">
@@ -760,6 +800,9 @@ export default function CbtExamManagement() {
                             <Button variant="ghost" size="icon" title="Kelola Soal" onClick={() => { setSelectedExam(exam); setIsQuestionsOpen(true); }}><FileSpreadsheet className="h-4 w-4" /></Button>
                             <Button variant="ghost" size="icon" title="Control Panel" onClick={() => { setSelectedExam(exam); setIsControlOpen(true); }}><Activity className="h-4 w-4 text-blue-600" /></Button>
                             <Button variant="ghost" size="icon" title="Hasil" onClick={() => { setSelectedExam(exam); setIsResultsOpen(true); }}><Users className="h-4 w-4" /></Button>
+                            {exam.grade_component && (
+                              <Button variant="ghost" size="icon" title={`Kirim ulang nilai ke menu Nilai (${exam.grade_component.toUpperCase()})`} disabled={syncGradesMutation.isPending} onClick={() => syncGradesMutation.mutate(exam.id)}><RefreshCcw className="h-4 w-4 text-emerald-600" /></Button>
+                            )}
                             <Button variant="ghost" size="icon" title="Analisis Jawaban" onClick={() => { setSelectedExam(exam); setIsAnalysisOpen(true); }}><BarChart3 className="h-4 w-4 text-purple-600" /></Button>
                             <Button variant="ghost" size="icon" title="Edit" onClick={() => handleEditExam(exam)}><Edit className="h-4 w-4" /></Button>
                             <Button variant="ghost" size="icon" title="Hapus" onClick={() => { if (confirm('Hapus ujian ini?')) deleteExamMutation.mutate(exam.id); }}><Trash2 className="h-4 w-4 text-destructive" /></Button>
@@ -1122,6 +1165,11 @@ export default function CbtExamManagement() {
               <div className="flex gap-2 mb-4">
                 <Button size="sm" variant="outline" onClick={() => handleExportResults('excel')}><Download className="h-4 w-4 mr-1" /> Excel</Button>
                 <Button size="sm" variant="outline" onClick={() => handleExportResults('pdf')}><Printer className="h-4 w-4 mr-1" /> PDF</Button>
+                {selectedExam?.grade_component && (
+                  <Button size="sm" variant="outline" disabled={syncGradesMutation.isPending} onClick={() => syncGradesMutation.mutate(selectedExam.id)}>
+                    <RefreshCcw className="h-4 w-4 mr-1" /> Kirim ke menu Nilai ({String(selectedExam.grade_component).toUpperCase()})
+                  </Button>
+                )}
               </div>
               <Table>
                 <TableHeader>

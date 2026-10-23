@@ -162,6 +162,26 @@ function GradesPage() {
     enabled: !!selectedSchedule,
   });
 
+  // Ujian CBT yang nilainya otomatis masuk ke mapel/kelas ini
+  const { data: linkedCbt = [] } = useQuery({
+    queryKey: ['grades-linked-cbt', selectedSchedule, selectedYear],
+    enabled: !!selectedSchedule && !!selectedYear,
+    queryFn: async () => {
+      const sc = schedules?.find((x: any) => x.id === selectedSchedule);
+      if (!sc) return [];
+      const { data, error } = await (supabase as any).from('cbt_exams')
+        .select('id, title, subject, grade_component, grade_policy, class_id, class_ids')
+        .eq('academic_year', selectedYear).not('grade_component', 'is', null);
+      if (error) return [];
+      return ((data || []) as any[]).filter((e) => {
+        if (String(e.subject || '').trim().toLowerCase() !== String(sc.subject || '').trim().toLowerCase()) return false;
+        const ids: string[] = Array.isArray(e.class_ids) ? e.class_ids : [];
+        if (ids.length === 0 && !e.class_id) return true;
+        return ids.includes(sc.class_id) || e.class_id === sc.class_id;
+      });
+    },
+  });
+
   const saveGradesMutation = useMutation({
     mutationFn: async (grades: GradeInput[]) => {
       if (!user?.id) throw new Error('User not authenticated');
@@ -451,6 +471,16 @@ function GradesPage() {
                       </SelectContent>
                     </Select>
                   </div>
+
+                  {selectedSchedule && linkedCbt.length > 0 && (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/30 p-3 text-xs space-y-1">
+                      <p className="font-medium">Nilai dari ujian CBT terisi otomatis:</p>
+                      {linkedCbt.map((e: any) => (
+                        <p key={e.id}>• <b>{String(e.grade_component).toUpperCase()}</b> ← {e.title} ({e.grade_policy === 'latest' ? 'nilai terakhir' : e.grade_policy === 'average' ? 'rata-rata' : 'nilai tertinggi'})</p>
+                      ))}
+                      <p className="text-muted-foreground">Mengubah komponen tersebut di sini akan tertimpa lagi bila siswa menyelesaikan atau guru mengirim ulang nilai CBT.</p>
+                    </div>
+                  )}
 
                   {selectedSchedule && scheduleStudents && scheduleStudents.length > 0 && (
                     <div className="space-y-4">
