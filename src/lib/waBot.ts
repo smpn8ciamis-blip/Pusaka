@@ -143,6 +143,30 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     defaultBody: `📋 *PENGINGAT ABSENSI KELAS*\n\nYth. Bapak/Ibu *{{nama_wali}}* (Wali Kelas {{kelas}}),\nPada pukul {{waktu}} WIB absensi kelas *{{kelas}}* hari {{hari}}, {{tanggal}} belum terisi.\n\nJadwal jam pertama:\n• Jam: *{{jam_pertama}}*\n• Mapel: *{{mapel}}*\n• Guru pengajar: *{{guru_pengajar}}* (belum mengisi absensi)\n\nMohon bantu mengisi absensi kelas Anda di aplikasi Pusaka.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`,
   },
   {
+    key: 'weekly_absence_wali',
+    title: 'Rekap Mingguan Siswa Tidak Hadir (Wali Kelas)',
+    description: 'Dikirim ke wali kelas pada hari & jam yang diatur di tab Pengingat Guru, berisi siswa sakit/izin/alfa pekan itu.',
+    variables: [
+      { name: 'nama_wali', sample: 'Siti Aminah, S.Pd', hint: 'Nama wali kelas' },
+      { name: 'kelas', sample: 'VIII A', hint: 'Nama kelas' },
+      { name: 'periode', sample: '19/10/2026 - 24/10/2026', hint: 'Rentang tanggal rekap' },
+      { name: 'jumlah_siswa', sample: '5', hint: 'Jumlah siswa yang tidak hadir' },
+      { name: 'rekap', sample: '1. Andi (S:1 I:0 A:2) ⚠️\n2. Cici (S:0 I:1 A:0)', hint: 'Daftar siswa beserta jumlah hari S/I/A' },
+      { name: 'sering', sample: '⚠️ *Perlu perhatian* ...', hint: 'Bagian siswa yang sering tidak hadir (otomatis)' },
+    ],
+    defaultBody: `📊 *REKAP KETIDAKHADIRAN MINGGUAN*\n\nYth. Bapak/Ibu *{{nama_wali}}* (Wali Kelas {{kelas}}),\nSiswa yang tidak hadir pada *{{periode}}* ({{jumlah_siswa}} siswa):\n\n{{rekap}}\n_S=Sakit, I=Izin, A=Alfa (jumlah hari)_\n\n{{sering}}\n_Pusaka - SMP Negeri 8 Ciamis_`,
+  },
+  {
+    key: 'weekly_absence_group',
+    title: 'Rekap Mingguan Siswa Sering Tidak Hadir (Grup)',
+    description: 'Dikirim ke grup rekap (tab Rekap Grup) bila opsi "kirim ringkasan ke grup" aktif; hanya siswa yang sering tidak hadir.',
+    variables: [
+      { name: 'periode', sample: '19/10/2026 - 24/10/2026', hint: 'Rentang tanggal rekap' },
+      { name: 'rekap', sample: '*VIII A*\n- Andi (S:1 I:0 A:2)', hint: 'Daftar per kelas' },
+    ],
+    defaultBody: `📊 *SISWA SERING TIDAK HADIR*\nPeriode *{{periode}}*\n\n{{rekap}}\n_S=Sakit, I=Izin, A=Alfa (jumlah hari)_\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
+  },
+  {
     key: 'piket_punch',
     title: 'Absensi Piket Tercatat (Mesin Fingerprint)',
     description: 'Dikirim ke petugas piket (malam / Sabtu-Minggu) saat absen masuk atau pulangnya tercatat di mesin fingerprint.',
