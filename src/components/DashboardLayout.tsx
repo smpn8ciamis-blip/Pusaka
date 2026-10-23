@@ -12,7 +12,8 @@ import {
   ChevronUp, AlertTriangle, BarChart3, FolderOpen, MessageSquare, Database,
   Award, FileSignature, Plane, Receipt, FileSpreadsheet, Wallet, FileBarChart,
   Inbox, Send, Hammer, Vote, Upload, Bell, Lock, Landmark, Server, UserMinus,
-  Sparkles, CreditCard, ScanLine, LayoutDashboard, Search, Star, Moon, CalendarDays, KeyRound, Fingerprint, Briefcase, HeartHandshake
+  Sparkles, CreditCard, ScanLine, LayoutDashboard, Search, Star, Moon, CalendarDays, KeyRound, Fingerprint, Briefcase, HeartHandshake,
+  Gauge,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -395,6 +396,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         { icon: Upload, label: 'Manajemen Upload Berkas', href: '/file-upload-management' },
         { icon: Bell, label: 'Billing Dashboard', href: '/billing-dashboard' },
         { icon: Server, label: 'Sistem Informasi', href: '/system-info' },
+        { icon: Gauge, label: 'Uji Server', href: '/uji-server' },
       ],
     },
   ];
@@ -611,6 +613,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const superAdminMenuItems: MenuItem[] = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/super-admin' },
     { icon: Database, label: 'Backup Database', href: '/database-backup' },
+    { icon: Gauge, label: 'Uji Server', href: '/uji-server' },
     { icon: Settings, label: 'Pengaturan', href: '/settings' },
   ];
 
