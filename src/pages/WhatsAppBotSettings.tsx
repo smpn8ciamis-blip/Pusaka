@@ -363,6 +363,11 @@ function ReminderTab() {
   const [hrOn, setHrOn] = useState(false);
   const [hrTimes, setHrTimes] = useState('08:30');
   const [piketWa, setPiketWa] = useState(true);
+  const [wkOn, setWkOn] = useState(false);
+  const [wkDay, setWkDay] = useState('6');
+  const [wkTime, setWkTime] = useState('13:00');
+  const [wkThreshold, setWkThreshold] = useState(3);
+  const [wkGroup, setWkGroup] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['wa-bot-settings'],
@@ -389,6 +394,11 @@ function ReminderTab() {
       setHrOn(!!data.homeroom_att_reminder_enabled);
       setHrTimes(String(data.homeroom_att_reminder_times || '08:30'));
       setPiketWa(data.piket_wa_enabled !== false);
+      setWkOn(!!data.weekly_absence_enabled);
+      setWkDay(String(data.weekly_absence_day || 6));
+      setWkTime(String(data.weekly_absence_time || '13:00').slice(0, 5));
+      setWkThreshold(data.weekly_absence_threshold || 3);
+      setWkGroup(!!data.weekly_absence_to_group);
     }
   }, [data]);
 
@@ -409,12 +419,23 @@ function ReminderTab() {
         homeroom_att_reminder_enabled: hrOn,
         homeroom_att_reminder_times: hrTimes.split(/[,\s;]+/).filter((t) => /^\d{1,2}:\d{2}$/.test(t)).map((t) => t.padStart(5, '0')).join(', ') || '08:30',
         piket_wa_enabled: piketWa,
+        weekly_absence_enabled: wkOn,
+        weekly_absence_day: Math.min(7, Math.max(1, parseInt(wkDay, 10) || 6)),
+        weekly_absence_time: /^\d{2}:\d{2}$/.test(wkTime) ? wkTime : '13:00',
+        weekly_absence_threshold: Math.min(10, Math.max(1, wkThreshold || 3)),
+        weekly_absence_to_group: wkGroup,
         updated_at: new Date().toISOString(), updated_by: user?.id ?? null,
       });
       if (error) throw error;
       waAdminFetch('/admin/reload-config', { method: 'POST' }).catch(() => {});
     },
     onSuccess: () => { toast.success('Pengaturan disimpan'); qc.invalidateQueries({ queryKey: ['wa-bot-settings'] }); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const sendWeekly = useMutation({
+    mutationFn: () => waAdminFetch<{ message: string }>('/admin/send-weekly-absence', { method: 'POST' }),
+    onSuccess: (r) => toast.success(r?.message || 'Rekap mingguan dikirim'),
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -516,6 +537,49 @@ function ReminderTab() {
               <Label>Jam pengecekan (WIB)</Label>
               <Input value={hrTimes} onChange={(e) => setHrTimes(e.target.value)} placeholder="08:30, 10:00" className="w-48" />
               <p className="text-xs text-muted-foreground">Boleh lebih dari satu, pisahkan dengan koma (format 24 jam).</p>
+            </div>
+          )}
+        </div>
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="wk-en">Rekap mingguan siswa tidak hadir</Label>
+            <Switch id="wk-en" checked={wkOn} onCheckedChange={setWkOn} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Wali kelas menerima daftar siswa kelasnya yang sakit/izin/alfa selama sepekan (berdasarkan absensi jam pertama), dengan penanda siswa yang sering tidak hadir. Kelas tanpa siswa tidak hadir tidak dikirimi.
+          </p>
+          {wkOn && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="space-y-1">
+                  <Label>Hari kirim</Label>
+                  <Select value={wkDay} onValueChange={setWkDay}>
+                    <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'].map((n, i) => (
+                        <SelectItem key={n} value={String(i + 1)}>{n}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Jam kirim (WIB)</Label>
+                  <Input type="time" value={wkTime} onChange={(e) => setWkTime(e.target.value)} className="w-32" />
+                </div>
+                <div className="space-y-1">
+                  <Label>Sering = tidak hadir ≥ (hari)</Label>
+                  <Input type="number" min={1} max={10} value={wkThreshold} onChange={(e) => setWkThreshold(parseInt(e.target.value, 10))} className="w-24" />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">Siswa juga ditandai "sering" bila alfa 2 hari atau lebih. Dikirim Senin, rekap pekan sebelumnya.</p>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="wk-grp" className="font-normal">Kirim juga ringkasan siswa yang sering tidak hadir ke grup rekap</Label>
+                <Switch id="wk-grp" checked={wkGroup} onCheckedChange={setWkGroup} />
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => sendWeekly.mutate()} disabled={sendWeekly.isPending}>
+                {sendWeekly.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null} Kirim rekap pekan ini sekarang
+              </Button>
+              <p className="text-xs text-muted-foreground">Simpan pengaturan lebih dulu agar tombol ini memakai pengaturan terbaru.</p>
             </div>
           )}
         </div>

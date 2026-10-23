@@ -264,6 +264,8 @@ const DEFAULT_TEMPLATES = {
 };
 DEFAULT_TEMPLATES.class_group_recap = `📊 *ABSENSI KELAS {{kelas}}*\n{{hari}}, {{tanggal}}\n\nJumlah siswa: *{{total_siswa}}*\n✅ Hadir: *{{hadir}}*\n🤒 Sakit: *{{sakit}}*\n📝 Izin: *{{izin}}*\n❌ Alfa: *{{alpa}}*\n\n{{daftar_tidak_hadir}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.homeroom_attendance_reminder = `📋 *PENGINGAT ABSENSI KELAS*\n\nYth. Bapak/Ibu *{{nama_wali}}* (Wali Kelas {{kelas}}),\nPada pukul {{waktu}} WIB absensi kelas *{{kelas}}* hari {{hari}}, {{tanggal}} belum terisi.\n\nJadwal jam pertama:\n• Jam: *{{jam_pertama}}*\n• Mapel: *{{mapel}}*\n• Guru pengajar: *{{guru_pengajar}}* (belum mengisi absensi)\n\nMohon bantu mengisi absensi kelas Anda di aplikasi Pusaka.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.weekly_absence_wali = `📊 *REKAP KETIDAKHADIRAN MINGGUAN*\n\nYth. Bapak/Ibu *{{nama_wali}}* (Wali Kelas {{kelas}}),\nSiswa yang tidak hadir pada *{{periode}}* ({{jumlah_siswa}} siswa):\n\n{{rekap}}\n_S=Sakit, I=Izin, A=Alfa (jumlah hari)_\n\n{{sering}}\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.weekly_absence_group = `📊 *SISWA SERING TIDAK HADIR*\nPeriode *{{periode}}*\n\n{{rekap}}\n_S=Sakit, I=Izin, A=Alfa (jumlah hari)_\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.piket_punch = `🕒 *ABSENSI PIKET TERCATAT*\n\nYth. Bapak/Ibu *{{nama}}*,\nAbsen *{{jenis}}* {{shift}} Anda tercatat pada {{tanggal}} pukul *{{jam}} WIB* melalui mesin absensi.\n\nTerima kasih atas pengabdiannya.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.teacher_saturday_greeting = `🌿 *SELAMAT AKHIR PEKAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\n\nTerima kasih atas dedikasi dan kerja keras Bapak/Ibu dalam mendidik anak-anak kita sepanjang pekan ini.\n\nHari {{hari}} adalah waktu untuk berhenti sejenak. Nikmatilah akhir pekan bersama keluarga, karena keluarga adalah sumber kekuatan terbesar seorang pendidik. Istirahatlah yang cukup dan siapkan energi terbaik untuk mengajar kembali di hari Senin.\n\nSemoga sehat dan bahagia selalu. 🙏\n_Pusaka - SMP Negeri 8 Ciamis_`;
 const DEFAULT_BOT_SETTINGS = {
@@ -281,7 +283,12 @@ const DEFAULT_BOT_SETTINGS = {
     saturday_greeting_time: '07:00',  // jam kirim (WIB)
     homeroom_att_reminder_enabled: false, // ingatkan wali kelas bila absensi kelasnya belum diisi guru jam pertama
     homeroom_att_reminder_times: '08:30', // jam pengecekan (WIB), boleh lebih dari satu dipisah koma
-    piket_wa_enabled: true            // WA ke petugas piket saat absen lewat mesin fingerprint tercatat
+    piket_wa_enabled: true,           // WA ke petugas piket saat absen lewat mesin fingerprint tercatat
+    weekly_absence_enabled: false,    // rekap mingguan siswa tidak hadir (sakit/izin/alfa) ke wali kelas
+    weekly_absence_day: 6,            // hari kirim: 1=Senin ... 7=Minggu
+    weekly_absence_time: '13:00',     // jam kirim (WIB)
+    weekly_absence_threshold: 3,      // "sering": total hari tidak hadir >= nilai ini, atau alfa >= 2
+    weekly_absence_to_group: false    // kirim juga ringkasan siswa yang sering tidak hadir ke grup rekap
 };
 const CONFIG_TTL_MS = 30 * 1000;
 let templateCache = { at: 0, rows: new Map() };
@@ -707,6 +714,97 @@ async function runHomeroomAttendanceReminder() {
     } catch (e) { console.error('[HOMEROOM REMINDER ERROR]:', e.message); }
     finally { homeroomRunning = false; }
 }
+// Rekap mingguan siswa tidak hadir -> wali kelas (per kelas) + opsional ringkasan "sering" ke grup.
+function isoAddDays(iso, n) { return new Date(new Date(iso + 'T00:00:00Z').getTime() + n * 86400000).toISOString().slice(0, 10); }
+function weeklyRange(now) {
+    // Senin..hari ini pada pekan berjalan; bila dikirim hari Senin, yang direkap adalah pekan sebelumnya (Senin..Minggu)
+    const ref = now.dow === 1 ? isoAddDays(now.date, -1) : now.date;
+    const refDow = now.dow === 1 ? 7 : now.dow;
+    return { from: isoAddDays(ref, -(refDow - 1)), to: ref };
+}
+function absFmt(x) { return 'S:' + x.sakit + ' I:' + x.izin + ' A:' + x.alpa; }
+function absFrequent(x, threshold) { return x.alpa >= 2 || x.total >= threshold; }
+async function sendWeeklyAbsenceRecap(range, cfg) {
+    const rec = await supabase.rpc('get_weekly_absence_recap', { p_from: range.from, p_to: range.to });
+    if (rec.error) throw rec.error;
+    const rows = rec.data || [];
+    const periode = dateIdn(range.from) + ' - ' + dateIdn(range.to);
+    const threshold = Math.max(1, parseInt(cfg.weekly_absence_threshold, 10) || 3);
+    const byClass = new Map();
+    for (const x of rows) { if (!byClass.has(x.class_id)) byClass.set(x.class_id, { name: x.class_name, list: [] }); byClass.get(x.class_id).list.push(x); }
+    let queued = 0, noPhone = 0;
+    if (byClass.size > 0) {
+        const clsRes = await supabase.from('classes').select('id, homeroom_teacher_id').in('id', Array.from(byClass.keys()));
+        if (clsRes.error) throw clsRes.error;
+        const tIds = (clsRes.data || []).map(function(c) { return c.homeroom_teacher_id; }).filter(Boolean);
+        const tRes = tIds.length ? await supabase.from('teachers').select('id, user_id').in('id', tIds) : { data: [] };
+        const pRes = (tRes.data || []).length ? await supabase.from('profiles').select('id, full_name, phone').in('id', tRes.data.map(function(t) { return t.user_id; }).filter(Boolean)) : { data: [] };
+        const profById = new Map((pRes.data || []).map(function(x) { return [x.id, x]; }));
+        const profOfTeacher = new Map((tRes.data || []).map(function(t) { return [t.id, profById.get(t.user_id)]; }));
+        const homeroomOf = new Map((clsRes.data || []).map(function(c) { return [c.id, c.homeroom_teacher_id]; }));
+        for (const [cid, c] of byClass) {
+            const wali = profOfTeacher.get(homeroomOf.get(cid));
+            if (!wali || !wali.phone) { noPhone++; continue; }
+            const MAX = 40;
+            const rekap = c.list.slice(0, MAX).map(function(x, i) { return (i + 1) + '. ' + x.student_name + ' (' + absFmt(x) + ')' + (absFrequent(x, threshold) ? ' ⚠️' : ''); }).join('\n')
+                + (c.list.length > MAX ? '\n...dan ' + (c.list.length - MAX) + ' siswa lainnya' : '');
+            const freq = c.list.filter(function(x) { return absFrequent(x, threshold); });
+            const sering = freq.length
+                ? '⚠️ *Perlu perhatian* (alfa 2 hari atau lebih, atau tidak hadir ' + threshold + ' hari atau lebih):\n' + freq.map(function(x) { return '- ' + x.student_name + ' (' + absFmt(x) + ')'; }).join('\n') + '\n\nMohon dilakukan pendekatan/komunikasi dengan orang tua siswa.'
+                : 'Tidak ada siswa yang sering tidak hadir pekan ini.';
+            const vars = { nama_wali: wali.full_name, kelas: c.name, periode: periode, jumlah_siswa: c.list.length, rekap: rekap, sering: sering };
+            const jid = formatToInternational(wali.phone) + '@s.whatsapp.net';
+            enqueueTask(async () => { const text = await renderMessage('weekly_absence_wali', vars); if (text) await sendSafeMessage(jid, { text: text }); });
+            queued++;
+        }
+    }
+    let group = false;
+    if (cfg.weekly_absence_to_group && cfg.class_recap_group_jid) {
+        const parts = [];
+        let shown = 0, extra = 0;
+        for (const [, c] of byClass) {
+            const freq = c.list.filter(function(x) { return absFrequent(x, threshold); });
+            if (!freq.length) continue;
+            const lines = [];
+            for (const x of freq) { if (shown < 60) { lines.push('- ' + x.student_name + ' (' + absFmt(x) + ')'); shown++; } else extra++; }
+            if (lines.length) parts.push('*' + c.name + '*\n' + lines.join('\n'));
+        }
+        if (parts.length) {
+            const vars = { periode: periode, rekap: parts.join('\n\n') + (extra ? '\n\n...dan ' + extra + ' siswa lainnya' : '') };
+            const gjid = cfg.class_recap_group_jid;
+            enqueueTask(async () => { const text = await renderMessage('weekly_absence_group', vars); if (text) await sendSafeMessage(gjid, { text: text }); });
+            group = true;
+        }
+    }
+    return { periode: periode, kelas_ada_absen: byClass.size, queued: queued, tanpa_nomor_wali: noPhone, group: group };
+}
+let weeklyRunning = false;
+async function runWeeklyAbsenceRecap() {
+    if (!isReady || weeklyRunning) return;
+    weeklyRunning = true;
+    try {
+        const cfg = await getBotSettings();
+        if (!cfg.weekly_absence_enabled) return;
+        const now = wibNow();
+        if (now.dow !== (parseInt(cfg.weekly_absence_day, 10) || 6)) return;
+        const t = hhmmToMin(cfg.weekly_absence_time || '13:00');
+        if (now.minutes < t || now.minutes >= t + 180) return;
+        if (reminderSentDate !== now.date) loadReminderState(now.date);
+        if (reminderSent.has('weekly:done')) return;
+        markReminderSent('weekly:done');
+        const res = await sendWeeklyAbsenceRecap(weeklyRange(now), cfg);
+        console.log('[REKAP MINGGUAN] ' + JSON.stringify(res));
+    } catch (e) { console.error('[WEEKLY ABSENCE ERROR]:', e.message); }
+    finally { weeklyRunning = false; }
+}
+app.post('/admin/send-weekly-absence', requireAdmin, async (req, res) => {
+    try {
+        if (!isReady) return res.status(400).json({ status: 'error', message: 'Bot WhatsApp belum terhubung.' });
+        const cfg = await getBotSettings();
+        const r = await sendWeeklyAbsenceRecap(weeklyRange(wibNow()), cfg);
+        res.json({ status: 'success', message: r.queued + ' rekap ke wali kelas masuk antrian' + (r.group ? ', 1 ke grup' : '') + (r.tanpa_nomor_wali ? ' (' + r.tanpa_nomor_wali + ' kelas tanpa nomor wali)' : '') + ' — periode ' + r.periode + '.', detail: r });
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
+});
 // Ucapan akhir pekan: hari Sabtu dikirim ke guru yang TIDAK punya jadwal mengajar hari itu (sekali per guru per hari)
 let saturdayRunning = false;
 async function runSaturdayGreeting() {
@@ -1595,6 +1693,7 @@ app.listen(PORT, () => {
     setInterval(runTeacherReminders, 60 * 1000);
     setInterval(runSaturdayGreeting, 60 * 1000);
     setInterval(runHomeroomAttendanceReminder, 60 * 1000);
+    setInterval(runWeeklyAbsenceRecap, 60 * 1000);
     setInterval(checkBackupSchedule, 60 * 1000);
     setInterval(checkStudentSnapshot, 60 * 1000);
 });
