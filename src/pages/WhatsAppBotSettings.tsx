@@ -363,6 +363,7 @@ function ReminderTab() {
   const [hrOn, setHrOn] = useState(false);
   const [hrTimes, setHrTimes] = useState('08:30');
   const [piketWa, setPiketWa] = useState(true);
+  const [assignWa, setAssignWa] = useState(true);
   const [wkOn, setWkOn] = useState(false);
   const [wkDay, setWkDay] = useState('6');
   const [wkTime, setWkTime] = useState('13:00');
@@ -394,6 +395,7 @@ function ReminderTab() {
       setHrOn(!!data.homeroom_att_reminder_enabled);
       setHrTimes(String(data.homeroom_att_reminder_times || '08:30'));
       setPiketWa(data.piket_wa_enabled !== false);
+      setAssignWa(data.assignment_wa_enabled !== false);
       setWkOn(!!data.weekly_absence_enabled);
       setWkDay(String(data.weekly_absence_day || 6));
       setWkTime(String(data.weekly_absence_time || '13:00').slice(0, 5));
@@ -419,6 +421,7 @@ function ReminderTab() {
         homeroom_att_reminder_enabled: hrOn,
         homeroom_att_reminder_times: hrTimes.split(/[,\s;]+/).filter((t) => /^\d{1,2}:\d{2}$/.test(t)).map((t) => t.padStart(5, '0')).join(', ') || '08:30',
         piket_wa_enabled: piketWa,
+        assignment_wa_enabled: assignWa,
         weekly_absence_enabled: wkOn,
         weekly_absence_day: Math.min(7, Math.max(1, parseInt(wkDay, 10) || 6)),
         weekly_absence_time: /^\d{2}:\d{2}$/.test(wkTime) ? wkTime : '13:00',
@@ -590,6 +593,15 @@ function ReminderTab() {
           </div>
           <p className="text-xs text-muted-foreground">
             Petugas piket (malam / Sabtu-Minggu) menerima WA saat absen masuk atau pulangnya tercatat di mesin fingerprint. Nomor diambil dari profil guru atau data staf.
+          </p>
+        </div>
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="as-en">Notifikasi surat tugas</Label>
+            <Switch id="as-en" checked={assignWa} onCheckedChange={setAssignWa} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Guru/staf yang ditunjuk dalam surat tugas baru menerima WA berisi jenis, waktu, dan lokasi tugas, beserta pengingat mengisi LPT dan mengunggah bukti kunjungan di akun Pusaka. Hanya untuk surat yang dibuat dalam 3 hari terakhir; yang nomor HP-nya kosong dilewati. Isi pesan bisa diubah di tab Template.
           </p>
         </div>
         <Button onClick={() => save.mutate()} disabled={save.isPending}>

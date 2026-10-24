@@ -167,6 +167,20 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     defaultBody: `📊 *SISWA SERING TIDAK HADIR*\nPeriode *{{periode}}*\n\n{{rekap}}\n_S=Sakit, I=Izin, A=Alfa (jumlah hari)_\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
   },
   {
+    key: 'assignment_notice',
+    title: 'Surat Tugas Baru (Guru/Staf)',
+    description: 'Dikirim otomatis ke guru/staf yang ditunjuk dalam surat tugas baru: jenis, waktu, lokasi, plus pengingat mengisi LPT dan mengunggah bukti kunjungan.',
+    variables: [
+      { name: 'nama', sample: 'Budi Santoso, S.Pd', hint: 'Nama penerima tugas' },
+      { name: 'nomor_surat', sample: '800/123/SMPN8/2026', hint: 'Nomor surat tugas' },
+      { name: 'jenis', sample: 'Bimbingan Teknis', hint: 'Jenis tugas' },
+      { name: 'uraian', sample: 'Mengikuti bimtek kurikulum', hint: 'Uraian tugas' },
+      { name: 'waktu', sample: 'Senin, 26/10/2026 s.d. Selasa, 27/10/2026 (2 hari)', hint: 'Tanggal pelaksanaan' },
+      { name: 'lokasi', sample: 'Dinas Pendidikan Kab. Ciamis', hint: 'Lokasi tugas' },
+    ],
+    defaultBody: `📄 *SURAT TUGAS BARU*\n\nYth. Bapak/Ibu *{{nama}}*,\nAnda mendapat surat tugas berikut:\n• Nomor: {{nomor_surat}}\n• Jenis tugas: *{{jenis}}*\n• Uraian: {{uraian}}\n• Waktu: *{{waktu}}*\n• Lokasi: *{{lokasi}}*\n\nSetelah tugas selesai, mohon:\n1. Mengisi *LPT* (Laporan Pelaksanaan Tugas)\n2. Mengunggah *bukti kunjungan* (foto dan berkas PDF)\npada akun Pusaka, menu *Surat Tugas & SPPD*.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`,
+  },
+  {
     key: 'piket_punch',
     title: 'Absensi Piket Tercatat (Mesin Fingerprint)',
     description: 'Dikirim ke petugas piket (malam / Sabtu-Minggu) saat absen masuk atau pulangnya tercatat di mesin fingerprint.',
