@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ReceiptPdfSettingsPanel, ReceiptPdfSettings, DEFAULT_RECEIPT_SETTINGS } from "./ReceiptPdfSettings";
-import { FileDown, Settings2, Loader2 } from "lucide-react";
+import { FileDown, Settings2, Loader2, Printer } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
@@ -254,6 +254,38 @@ export function ReceiptPreviewDialog({
     setSettings(next);
   };
 
+  // Cetak file PDF-nya langsung (bukan halaman web). Ctrl+P pada halaman akan mencetak dialog + iframe
+  // pratinjau yang ikut terpotong; tombol ini mencetak PDF utuh dengan ukuran kertas dan margin pilihan.
+  const handlePrint = useCallback(() => {
+    if (!previewUrl) return;
+    const frame = document.createElement("iframe");
+    frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+    frame.src = previewUrl;
+    frame.onload = () => {
+      try {
+        frame.contentWindow?.focus();
+        frame.contentWindow?.print();
+      } catch {
+        window.open(previewUrl, "_blank"); // cadangan: buka PDF di tab baru lalu cetak dari sana
+      }
+      setTimeout(() => frame.remove(), 120000);
+    };
+    document.body.appendChild(frame);
+  }, [previewUrl]);
+
+  // Selama dialog terbuka, Ctrl/Cmd+P diarahkan ke cetak PDF.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        handlePrint();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, handlePrint]);
+
   const handleReset = () => {
     setSettings({ ...DEFAULT_RECEIPT_SETTINGS, paperSize: settings.paperSize });
   };
@@ -276,6 +308,15 @@ export function ReceiptPreviewDialog({
             >
               <Settings2 className="h-4 w-4 mr-2" />
               {showSettings ? "Sembunyikan" : "Tampilkan"} Pengaturan
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePrint}
+              disabled={!previewUrl || isGenerating}
+            >
+              <Printer className="h-4 w-4 mr-2" />
+              Cetak
             </Button>
             <Button
               variant="default"

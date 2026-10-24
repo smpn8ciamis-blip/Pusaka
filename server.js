@@ -293,6 +293,7 @@ DEFAULT_TEMPLATES.class_group_recap = `📊 *ABSENSI KELAS {{kelas}}*\n{{hari}},
 DEFAULT_TEMPLATES.homeroom_attendance_reminder = `📋 *PENGINGAT ABSENSI KELAS*\n\nYth. Bapak/Ibu *{{nama_wali}}* (Wali Kelas {{kelas}}),\nPada pukul {{waktu}} WIB absensi kelas *{{kelas}}* hari {{hari}}, {{tanggal}} belum terisi.\n\nJadwal jam pertama:\n• Jam: *{{jam_pertama}}*\n• Mapel: *{{mapel}}*\n• Guru pengajar: *{{guru_pengajar}}* (belum mengisi absensi)\n\nMohon bantu mengisi absensi kelas Anda di aplikasi Pusaka.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.weekly_absence_wali = `📊 *REKAP KETIDAKHADIRAN MINGGUAN*\n\nYth. Bapak/Ibu *{{nama_wali}}* (Wali Kelas {{kelas}}),\nSiswa yang tidak hadir pada *{{periode}}* ({{jumlah_siswa}} siswa):\n\n{{rekap}}\n_S=Sakit, I=Izin, A=Alfa (jumlah hari)_\n\n{{sering}}\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.weekly_absence_group = `📊 *SISWA SERING TIDAK HADIR*\nPeriode *{{periode}}*\n\n{{rekap}}\n_S=Sakit, I=Izin, A=Alfa (jumlah hari)_\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.assignment_notice = `📄 *SURAT TUGAS BARU*\n\nYth. Bapak/Ibu *{{nama}}*,\nAnda mendapat surat tugas berikut:\n• Nomor: {{nomor_surat}}\n• Jenis tugas: *{{jenis}}*\n• Uraian: {{uraian}}\n• Waktu: *{{waktu}}*\n• Lokasi: *{{lokasi}}*\n\nSetelah tugas selesai, mohon:\n1. Mengisi *LPT* (Laporan Pelaksanaan Tugas)\n2. Mengunggah *bukti kunjungan* (foto dan berkas PDF)\npada akun Pusaka, menu *Surat Tugas & SPPD*.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.piket_punch = `🕒 *ABSENSI PIKET TERCATAT*\n\nYth. Bapak/Ibu *{{nama}}*,\nAbsen *{{jenis}}* {{shift}} Anda tercatat pada {{tanggal}} pukul *{{jam}} WIB* melalui mesin absensi.\n\nTerima kasih atas pengabdiannya.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.teacher_saturday_greeting = `🌿 *SELAMAT AKHIR PEKAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\n\nTerima kasih atas dedikasi dan kerja keras Bapak/Ibu dalam mendidik anak-anak kita sepanjang pekan ini.\n\nHari {{hari}} adalah waktu untuk berhenti sejenak. Nikmatilah akhir pekan bersama keluarga, karena keluarga adalah sumber kekuatan terbesar seorang pendidik. Istirahatlah yang cukup dan siapkan energi terbaik untuk mengajar kembali di hari Senin.\n\nSemoga sehat dan bahagia selalu. 🙏\n_Pusaka - SMP Negeri 8 Ciamis_`;
 const DEFAULT_BOT_SETTINGS = {
@@ -310,6 +311,7 @@ const DEFAULT_BOT_SETTINGS = {
     saturday_greeting_time: '07:00',  // jam kirim (WIB)
     homeroom_att_reminder_enabled: false, // ingatkan wali kelas bila absensi kelasnya belum diisi guru jam pertama
     homeroom_att_reminder_times: '08:30', // jam pengecekan (WIB), boleh lebih dari satu dipisah koma
+    assignment_wa_enabled: true,      // WA ke guru/staf yang menerima surat tugas (jenis, waktu, lokasi + pengingat LPT & bukti kunjungan)
     piket_wa_enabled: true,           // WA ke petugas piket saat absen lewat mesin fingerprint tercatat
     weekly_absence_enabled: false,    // rekap mingguan siswa tidak hadir (sakit/izin/alfa) ke wali kelas
     weekly_absence_day: 6,            // hari kirim: 1=Senin ... 7=Minggu
@@ -930,6 +932,79 @@ async function requireUser(req, res, next) {
 function botPhone() {
     const id = sock && sock.user && sock.user.id;
     return id ? String(id).split(':')[0].split('@')[0] : null;
+}
+
+
+// ===================== NOTIFIKASI SURAT TUGAS =====================
+const HARI_ID = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+function fmtTanggalHari(iso) {
+    const d = new Date(String(iso).slice(0, 10) + 'T00:00:00Z');
+    return HARI_ID[d.getUTCDay()] + ', ' + String(iso).slice(0, 10).split('-').reverse().join('/');
+}
+function fmtWaktuTugas(start, end) {
+    const s = String(start).slice(0, 10), e = String(end || start).slice(0, 10);
+    if (s === e) return fmtTanggalHari(s);
+    const hari = Math.round((new Date(e + 'T00:00:00Z') - new Date(s + 'T00:00:00Z')) / 86400000) + 1;
+    return fmtTanggalHari(s) + ' s.d. ' + fmtTanggalHari(e) + ' (' + hari + ' hari)';
+}
+const assignmentNoPhoneLogged = new Set();
+let assignmentNoticeRunning = false;
+async function runAssignmentNotices() {
+    if (!isReady || assignmentNoticeRunning) return;
+    assignmentNoticeRunning = true;
+    try {
+        const cfg = await getBotSettings();
+        if (!cfg.assignment_wa_enabled) return;
+        const today = wibNow().date;
+        // Hanya surat yang baru dibuat (3 hari terakhir) dan tugasnya belum lewat; surat lama tidak dikirimi.
+        const since = new Date(Date.now() - 3 * 86400000).toISOString();
+        const lRes = await supabase.from('assignment_letters')
+            .select('id, letter_number, assignment_type, description, location, start_date, end_date')
+            .gte('created_at', since).gte('end_date', today);
+        if (lRes.error || !lRes.data || lRes.data.length === 0) return;
+        const letters = lRes.data, ids = letters.map(function(l) { return l.id; });
+        const prom = await Promise.all([
+            supabase.from('assignment_letter_teachers').select('assignment_letter_id, teacher_id').in('assignment_letter_id', ids),
+            supabase.from('assignment_letter_manual_executors').select('assignment_letter_id, staff_id').in('assignment_letter_id', ids).not('staff_id', 'is', null),
+            supabase.from('assignment_wa_notified').select('assignment_letter_id, person_key').in('assignment_letter_id', ids)
+        ]);
+        const done = new Set((prom[2].data || []).map(function(n) { return n.assignment_letter_id + '|' + n.person_key; }));
+        const todo = []; // { letter, key, kind, refId }
+        for (const l of letters) {
+            for (const t of (prom[0].data || [])) if (t.assignment_letter_id === l.id && !done.has(l.id + '|teacher:' + t.teacher_id)) todo.push({ letter: l, key: 'teacher:' + t.teacher_id, kind: 'teacher', refId: t.teacher_id });
+            for (const m of (prom[1].data || [])) if (m.assignment_letter_id === l.id && !done.has(l.id + '|staff:' + m.staff_id)) todo.push({ letter: l, key: 'staff:' + m.staff_id, kind: 'staff', refId: m.staff_id });
+        }
+        if (todo.length === 0) return;
+        // Nomor HP: guru lewat profil akun, staf lewat tabel staff.
+        const tIds = Array.from(new Set(todo.filter(function(x) { return x.kind === 'teacher'; }).map(function(x) { return x.refId; })));
+        const sIds = Array.from(new Set(todo.filter(function(x) { return x.kind === 'staff'; }).map(function(x) { return x.refId; })));
+        const tRes = tIds.length ? await supabase.from('teachers').select('id, user_id').in('id', tIds) : { data: [] };
+        const uIds = (tRes.data || []).map(function(t) { return t.user_id; }).filter(Boolean);
+        const pRes = uIds.length ? await supabase.from('profiles').select('id, full_name, phone').in('id', uIds) : { data: [] };
+        const sRes = sIds.length ? await supabase.from('staff').select('id, full_name, phone').in('id', sIds) : { data: [] };
+        const profById = new Map((pRes.data || []).map(function(p) { return [p.id, p]; }));
+        const person = new Map();
+        for (const t of (tRes.data || [])) { const p = profById.get(t.user_id); if (p) person.set('teacher:' + t.id, p); }
+        for (const st of (sRes.data || [])) person.set('staff:' + st.id, st);
+        for (const x of todo) {
+            const p = person.get(x.key);
+            if (!p || !p.phone) {
+                const lk = x.letter.id + '|' + x.key;
+                if (!assignmentNoPhoneLogged.has(lk)) { assignmentNoPhoneLogged.add(lk); console.log('[SURAT TUGAS WA] ' + ((p && p.full_name) || x.key) + ': nomor HP belum diisi, dilewati (dicoba lagi sampai tugas selesai)'); }
+                continue;
+            }
+            const ins = await supabase.from('assignment_wa_notified').insert({ assignment_letter_id: x.letter.id, person_key: x.key });
+            if (ins.error) continue; // sudah tercatat / gagal catat: jangan kirim agar tidak dobel
+            const l = x.letter;
+            const vars = {
+                nama: p.full_name || 'Bapak/Ibu', nomor_surat: l.letter_number, jenis: l.assignment_type,
+                uraian: l.description, waktu: fmtWaktuTugas(l.start_date, l.end_date), lokasi: l.location
+            };
+            const jid = formatToInternational(p.phone) + '@s.whatsapp.net';
+            enqueueTask(async function() { const text = await renderMessage('assignment_notice', vars); if (text) await sendSafeMessage(jid, { text: text }); });
+        }
+    } catch (e) { console.error('[SURAT TUGAS WA]', e.message); }
+    finally { assignmentNoticeRunning = false; }
 }
 
 app.get('/admin/status', requireAdmin, (req, res) => {
@@ -1718,6 +1793,7 @@ app.listen(PORT, () => {
     setInterval(runSaturdayGreeting, 60 * 1000);
     setInterval(runHomeroomAttendanceReminder, 60 * 1000);
     setInterval(runWeeklyAbsenceRecap, 60 * 1000);
+    setInterval(runAssignmentNotices, 60 * 1000);
     setInterval(checkBackupSchedule, 60 * 1000);
     setInterval(checkStudentSnapshot, 60 * 1000);
 });
