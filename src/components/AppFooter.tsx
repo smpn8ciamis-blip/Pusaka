@@ -45,7 +45,7 @@ export const AppFooter = () => {
   const displayRevision = currentVersion?.revision || REVISION;
 
   return (
-    <footer className="fixed bottom-0 left-0 right-0 z-40 border-t border-border/50 bg-card/95 backdrop-blur-sm py-2.5 print:block">
+    <footer className="relative z-10 mt-auto w-full shrink-0 border-t border-border/50 bg-card/95 backdrop-blur-sm py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] print:hidden">
       <div className="container mx-auto px-3">
         <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center">
           <p className="text-[11px] text-muted-foreground">

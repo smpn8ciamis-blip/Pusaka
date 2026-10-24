@@ -23,7 +23,6 @@ import { LetterheadPreview } from '@/components/LetterheadPreview';
 import { ZapierWebhookManager } from '@/components/ZapierWebhookManager';
 import { PasswordChangeForm } from '@/components/PasswordChangeForm';
 import { TwoFactorSetup } from '@/components/TwoFactorSetup';
-import { AppFooter } from '@/components/AppFooter';
 import { format } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
 import { Calendar } from '@/components/ui/calendar';
@@ -1884,8 +1883,6 @@ const Settings = () => {
           </AlertDescription>
         </Alert>
         <TwoFactorSetup />
-
-        <AppFooter />
       </div>
     </DashboardLayout>
   );

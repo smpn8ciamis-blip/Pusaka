@@ -58,7 +58,21 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 });
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
+
+// Pembatas laju sederhana (dalam memori) untuk endpoint yang terbuka tanpa login.
+function rateLimit(name, max, windowMs) {
+    const hits = new Map();
+    setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (now - v.t > windowMs) hits.delete(k); }, windowMs).unref();
+    return (req, res, next) => {
+        const key = name + ':' + (req.ip || 'x');
+        const now = Date.now();
+        const v = hits.get(key);
+        if (!v || now - v.t > windowMs) { hits.set(key, { t: now, n: 1 }); return next(); }
+        if (++v.n > max) return res.status(429).json({ status: 'error', message: 'Terlalu banyak permintaan. Coba lagi sebentar.' });
+        next();
+    };
+}
 
 // ===================== WEB PUSH (notifikasi layar kunci saat absen tercatat) =====================
 // Butuh: npm i web-push, dan env VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT (npx web-push generate-vapid-keys).
@@ -76,7 +90,7 @@ app.get('/push/public-key', (req, res) => {
 
 // Notifikasi tes untuk perangkat yang sudah berlangganan (endpoint harus terdaftar). Dikirim setelah jeda agar pengguna sempat mengunci layar.
 const pushTestLast = new Map();
-app.post('/push/test', async (req, res) => {
+app.post('/push/test', rateLimit('pushtest', 10, 60000), async (req, res) => {
     res.set('Access-Control-Allow-Origin', '*');
     if (!PUSH_ENABLED) return res.status(503).json({ status: 'error', message: 'Notifikasi belum aktif di server.' });
     const endpoint = req.body && req.body.endpoint;
@@ -199,8 +213,21 @@ async function notifyStudentRfid(studentId, fullName, type, status, timeText) {
     await pushToUser(sa.user_id, title, fullName + ' · ' + hhmm + ' WIB', 'absen-' + studentId, Date.now(), fullName);
 }
 
+// Header keamanan dasar untuk semua respons API.
 app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('X-Frame-Options', 'DENY');
+    res.set('Referrer-Policy', 'no-referrer');
+    next();
+});
+
+// CORS: isi CORS_ORIGINS (pisahkan koma, mis. https://pusaka.sekolah.sch.id) agar hanya situs itu yang boleh memanggil API.
+// Bila kosong, perilaku lama dipertahankan (semua origin) supaya tidak ada yang putus.
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map((x) => x.trim()).filter(Boolean);
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (!CORS_ORIGINS.length) res.header('Access-Control-Allow-Origin', '*');
+    else if (origin && CORS_ORIGINS.includes(origin)) { res.header('Access-Control-Allow-Origin', origin); res.header('Vary', 'Origin'); }
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     if (req.method === 'OPTIONS') return res.sendStatus(204);
@@ -484,7 +511,7 @@ async function startBot() {
     });
 }
 
-app.post('/send-attendance', async (req, res) => {
+app.post('/send-attendance', requireAdmin, async (req, res) => {
     const notifications = (req.body && req.body.notifications) || [];
     if (!Array.isArray(notifications) || notifications.length === 0) return res.status(400).json({ status: 'error', message: 'Payload invalid.' });
     let enqueuedCount = 0;
@@ -501,13 +528,21 @@ app.post('/send-attendance', async (req, res) => {
     return res.json({ status: 'success', message: enqueuedCount + ' antrian masuk.' });
 });
 
-app.post('/notify-parent', async (req, res) => {
+const notifyParentLast = new Map();
+app.post('/notify-parent', rateLimit('notifyparent', 120, 60000), async (req, res) => {
+    // Halaman kios RFID bersifat publik (tanpa login), jadi endpoint ini dibatasi: validasi isi, jeda per siswa, dan batas per IP.
     const student_id = req.body && req.body.student_id;
     const type = req.body && req.body.type;
     const status = req.body && req.body.status;
-    const time = req.body && req.body.time;
-    const date = req.body && req.body.date;
-    if (!student_id) return res.status(400).json({ status: 'error', message: 'student_id wajib diisi.' });
+    const clean = (v, n) => (v == null ? undefined : String(v).replace(/[\r\n*_~`]/g, ' ').slice(0, n));
+    const time = clean(req.body && req.body.time, 12);
+    const date = clean(req.body && req.body.date, 40);
+    if (!student_id || typeof student_id !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(student_id)) return res.status(400).json({ status: 'error', message: 'student_id tidak valid.' });
+    if (type !== 'check_in' && type !== 'check_out') return res.status(400).json({ status: 'error', message: 'type tidak valid.' });
+    const lastNotify = notifyParentLast.get(student_id + type) || 0;
+    if (Date.now() - lastNotify < 60000) return res.json({ status: 'skipped', message: 'Notifikasi sudah dikirim barusan.' });
+    notifyParentLast.set(student_id + type, Date.now());
+    if (notifyParentLast.size > 5000) notifyParentLast.clear();
     try {
         const result = await supabase.from('students').select('full_name, parent_phone').eq('id', student_id).maybeSingle();
         const student = result.data, error = result.error;
@@ -526,19 +561,8 @@ app.post('/notify-parent', async (req, res) => {
     } catch (e) { return res.status(500).json({ status: 'error', message: e.message }); }
 });
 
-app.get('/pair', async (req, res) => {
-    if (isReady) return res.send('<h2 style="color:green;text-align:center;">Bot Sudah Terhubung!</h2>');
-    const rawNomor = req.query.nomor;
-    if (!rawNomor) return res.send('<h3>Masukkan nomor: /pair?nomor=628xxx</h3>');
-    try {
-        const cleanNum = formatToInternational(rawNomor);
-        if (!sock) startBot();
-        await new Promise(r => setTimeout(r, 2500));
-        if (!sock) return res.status(500).send('Bot belum siap. Coba lagi.');
-        const code = await sock.requestPairingCode(cleanNum);
-        res.send('<h1 style="text-align:center;color:#25D366;">Kode Pairing: ' + code + '</h1>');
-    } catch (err) { res.status(500).send('Error: ' + err.message); }
-});
+// Dinonaktifkan: sebelumnya siapa pun bisa memasangkan bot ke nomor sendiri. Gunakan menu WhatsApp Bot (admin) > Pairing.
+app.get('/pair', (req, res) => res.status(410).send('Endpoint ini dinonaktifkan. Gunakan halaman WhatsApp Bot di aplikasi (login admin).'));
 
 const REMINDER_SENT_FILE = process.env.REMINDER_SENT_FILE || '/srv/wa-bot/reminders_sent.json';
 let reminderSent = new Set();
@@ -845,8 +869,8 @@ async function runSaturdayGreeting() {
     } catch (e) { console.error('[SATURDAY GREETING ERROR]:', e.message); }
     finally { saturdayRunning = false; }
 }
-app.post('/run-saturday-greeting', async (req, res) => { runSaturdayGreeting(); res.json({ status: 'started' }); });
-app.post('/run-teacher-reminders', async (req, res) => { runTeacherReminders(); res.json({ status: 'started' }); });
+app.post('/run-saturday-greeting', requireAdmin, async (req, res) => { runSaturdayGreeting(); res.json({ status: 'started' }); });
+app.post('/run-teacher-reminders', requireAdmin, async (req, res) => { runTeacherReminders(); res.json({ status: 'started' }); });
 
 function verifyJwtLocal(token, secret) {
     const parts = token.split('.');
