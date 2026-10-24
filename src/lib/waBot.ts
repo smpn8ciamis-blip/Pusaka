@@ -168,8 +168,8 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
   },
   {
     key: 'assignment_notice',
-    title: 'Surat Tugas Baru (Guru/Staf)',
-    description: 'Dikirim otomatis ke guru/staf yang ditunjuk dalam surat tugas baru: jenis, waktu, lokasi, plus pengingat mengisi LPT dan mengunggah bukti kunjungan.',
+    title: 'Surat Tugas / SPPD Baru (Guru/Staf)',
+    description: 'Dikirim otomatis ke guru/staf pelaksana saat SPPD dibuat: jenis, waktu, lokasi, plus pengingat mengisi LPT dan mengunggah bukti kunjungan.',
     variables: [
       { name: 'nama', sample: 'Budi Santoso, S.Pd', hint: 'Nama penerima tugas' },
       { name: 'nomor_surat', sample: '800/123/SMPN8/2026', hint: 'Nomor surat tugas' },
@@ -284,6 +284,19 @@ export async function notifyBotIfAttendanceComplete(savedDate?: string): Promise
   } catch (e) {
     // Bot tidak aktif / belum diatur: tidak mengganggu simpan absen, tetapi dicatat di konsol untuk diagnosis.
     console.warn('[Rekap grup] tidak dapat memberi tahu bot:', (e as Error)?.message);
+  }
+}
+
+/**
+ * Dipanggil sekali setelah SPPD berhasil dibuat: bot mengirim WA ke guru/staf pelaksana (jenis, waktu, lokasi,
+ * pengingat LPT & bukti kunjungan). Bot tidak melakukan pengecekan berkala. Gagal diam-diam agar tidak mengganggu pembuatan SPPD.
+ */
+export async function notifyBotTravelCreated(travelId: string): Promise<void> {
+  try {
+    const res = await waAdminFetch<{ status: string; queued?: number; no_phone?: number }>('/travel-created', { method: 'POST', body: { travel_id: travelId } });
+    console.info('[WA SPPD] bot menjawab:', res.status, res.queued ?? '', res.no_phone ? `(tanpa nomor HP: ${res.no_phone})` : '');
+  } catch (e) {
+    console.warn('[WA SPPD] tidak dapat memberi tahu bot:', (e as Error)?.message);
   }
 }
 
