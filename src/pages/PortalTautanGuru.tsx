@@ -653,7 +653,7 @@ const PortalTautanGuru = () => {
       {user ? (
         <DashboardLayout>{content}</DashboardLayout>
       ) : (
-        <div className="min-h-screen gradient-hero pb-16">
+        <div className="min-h-screen flex flex-col gradient-hero">
           {content}
           <AppFooter />
         </div>
