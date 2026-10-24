@@ -28,7 +28,8 @@ import { ReceiptPreviewDialog } from "@/components/receipt/ReceiptPreviewDialog"
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DataPagination } from "@/components/ui/data-pagination";
 import { usePagination } from "@/hooks/usePagination";
-import { buildLineItems, drawCollectiveTable, resolveLineItems } from "@/lib/collectiveReceiptTable";
+import { buildLineItems, drawCollectiveTable, drawCollectiveFooter, resolveLineItems, getSavedReceiptPaper } from "@/lib/collectiveReceiptTable";
+import { paperFormat } from "@/lib/pdfPaper";
 
 const numberToWords = (num: number): string => {
   const satuan = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
@@ -816,8 +817,10 @@ export default function PaymentReceipts() {
       const travelDays = sppdData?.departure_date && sppdData?.return_date
         ? calculateTravelDays(sppdData.departure_date, sppdData.return_date) : 1;
 
-      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      // Ukuran kertas mengikuti pilihan terakhir di dialog preview (A4 / F4).
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: paperFormat(getSavedReceiptPaper()) });
       const pageWidth = doc.internal.pageSize.getWidth();
+      const pageBottom = doc.internal.pageSize.getHeight() - 15;
 
       let yPos = 15;
       if (settings) {
@@ -873,59 +876,42 @@ export default function PaymentReceipts() {
         fontSize: 7,
         minRowHeight: 7,
         lineWidth: 0.3,
+        pageBottom,
+        topOfNewPage: 15,
       });
       yPos = table.y;
       const totalAmount = table.total;
 
-      yPos += 10;
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-      doc.text("Terbilang:", leftMargin, yPos);
-      doc.setFont("helvetica", "italic");
-      const amountText = formatAmountToWords(totalAmount);
-      const terbilangLines = doc.splitTextToSize(amountText, pageWidth - leftMargin - 30);
-      doc.text(terbilangLines, leftMargin + 20, yPos);
-
-      yPos += terbilangLines.length * 5 + 10;
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "normal");
-      doc.text("Informasi Potongan Pajak:", leftMargin, yPos);
-      doc.text("PPh 21: -   |   PPh 23: -   |   PPN: -   |   Jumlah Potongan: -", leftMargin + 35, yPos);
-
-      yPos += 20;
-      const col1X = leftMargin + 35;
-      const col2X = pageWidth - leftMargin - 35;
-
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-
       const sppdDate = receipt.official_travel_letters?.departure_date
         ? format(new Date(receipt.official_travel_letters.departure_date), "dd MMMM yyyy", { locale: idLocale })
         : format(new Date(receipt.receipt_date), "dd MMMM yyyy", { locale: idLocale });
-
       const receiptDate = format(new Date(receipt.receipt_date), "dd MMMM yyyy", { locale: idLocale });
 
-      doc.text("Menyetujui,", col1X, yPos, { align: "center" });
-      doc.text(`Ciamis, ${sppdDate}`, col2X, yPos, { align: "center" });
-
-      yPos += 5;
-      doc.text(`Kepala ${settings?.school_name || "Sekolah"}`, col1X, yPos, { align: "center" });
-      doc.text("Bendahara BOS", col2X, yPos, { align: "center" });
-
-      yPos += 4;
-      doc.setFont("helvetica", "bolditalic");
-      doc.text(`Lunas Dibayar Tanggal: ${receiptDate}`, col2X, yPos, { align: "center" });
-
-      yPos += 20;
-      doc.setFont("helvetica", "bold");
-      doc.text(toTitleCase(settings?.headmaster_name) || "", col1X, yPos, { align: "center" });
-      doc.text(toTitleCase(settings?.bendahara_name) || ".........................", col2X, yPos, { align: "center" });
-
-      yPos += 4;
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "normal");
-      if (settings?.headmaster_nip) doc.text(`NIP. ${settings.headmaster_nip}`, col1X, yPos, { align: "center" });
-      doc.text(settings?.bendahara_nip ? `NIP. ${settings.bendahara_nip}` : "NIP. .........................", col2X, yPos, { align: "center" });
+      yPos += 2;
+      drawCollectiveFooter(doc, {
+        y: yPos,
+        leftMargin,
+        rightMargin: 15,
+        pageBottom,
+        topOfNewPage: 15,
+        terbilangText: formatAmountToWords(totalAmount),
+        showTax: true,
+        terbilangFontSize: 9,
+        taxFontSize: 8,
+        signatureFontSize: 9,
+        terbilangToTaxSpacing: 5,
+        taxToSignatureSpacing: 15,
+        signatureSpacing: 20,
+        signatureNameSpacing: 4,
+        signatureColumnWidth: 35,
+        schoolName: settings?.school_name,
+        headmasterName: settings?.headmaster_name,
+        headmasterNip: settings?.headmaster_nip,
+        bendaharaName: settings?.bendahara_name,
+        bendaharaNip: settings?.bendahara_nip,
+        sppdDate,
+        receiptDate,
+      });
 
       doc.save(`Kwitansi-Kolektif-${receipt.receipt_number}.pdf`);
       toast.success("PDF Kwitansi Kolektif berhasil diunduh");

@@ -9,7 +9,8 @@ import { id as idLocale } from "date-fns/locale";
 import jsPDF from "jspdf";
 import { addLetterheadToPDF } from "@/lib/pdfLetterhead";
 import { toTitleCase } from "@/lib/utils";
-import { drawCollectiveTable, resolveLineItems } from "@/lib/collectiveReceiptTable";
+import { drawCollectiveTable, drawCollectiveFooter, resolveLineItems, getSavedReceiptPaper, saveReceiptPaper } from "@/lib/collectiveReceiptTable";
+import { paperFormat } from "@/lib/pdfPaper";
 import { toast } from "sonner";
 
 // Helper function to convert number to Indonesian words
@@ -59,7 +60,7 @@ export function ReceiptPreviewDialog({
   travelRates, 
   travelDays 
 }: ReceiptPreviewDialogProps) {
-  const [settings, setSettings] = useState<ReceiptPdfSettings>(DEFAULT_RECEIPT_SETTINGS);
+  const [settings, setSettings] = useState<ReceiptPdfSettings>(() => ({ ...DEFAULT_RECEIPT_SETTINGS, paperSize: getSavedReceiptPaper() }));
   const [showSettings, setShowSettings] = useState(true);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -87,9 +88,10 @@ export function ReceiptPreviewDialog({
       const doc = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
-        format: 'a4'
+        format: paperFormat(pdfSettings.paperSize)
       });
       const pageWidth = doc.internal.pageSize.getWidth();
+      const pageBottom = doc.internal.pageSize.getHeight() - pdfSettings.marginBottom;
       const leftMargin = pdfSettings.marginLeft;
       
       let yPos = pdfSettings.marginTop;
@@ -152,68 +154,42 @@ export function ReceiptPreviewDialog({
         fontSize: pdfSettings.tableFontSize,
         minRowHeight: pdfSettings.tableRowHeight,
         lineWidth: pdfSettings.tableLineWidth,
+        pageBottom,
+        topOfNewPage: pdfSettings.marginTop,
       });
       yPos = table.y;
       const totalAmount = table.total;
 
-      // Terbilang
-      yPos += 8;
-      doc.setFontSize(pdfSettings.terbilangFontSize);
-      doc.setFont("helvetica", "normal");
-      doc.text("Terbilang:", leftMargin, yPos);
-      doc.setFont("helvetica", "italic");
-      const amountText = formatAmountToWords(totalAmount);
-      const terbilangLines = doc.splitTextToSize(amountText, pageWidth - leftMargin - 30);
-      doc.text(terbilangLines, leftMargin + 20, yPos);
-
-      // Tax Section - tanpa jarak besar
-      yPos += terbilangLines.length * 4 + pdfSettings.terbilangToTaxSpacing;
-      
-      if (pdfSettings.showTax) {
-        doc.setFontSize(pdfSettings.tableFontSize + 1);
-        doc.setFont("helvetica", "normal");
-        doc.text("Informasi Potongan Pajak:", leftMargin, yPos);
-        doc.text("PPh 21: -   |   PPh 23: -   |   PPN: -   |   Jumlah Potongan: -", leftMargin + 35, yPos);
-      }
-
-      // Signature Section
-      yPos += pdfSettings.taxToSignatureSpacing;
-      const col1X = leftMargin + pdfSettings.signatureColumnWidth;
-      const col2X = pageWidth - leftMargin - pdfSettings.signatureColumnWidth;
-      
-      doc.setFontSize(pdfSettings.signatureFontSize);
-      doc.setFont("helvetica", "normal");
-      
-      const sppdDate = receipt.official_travel_letters?.departure_date 
+      // Terbilang + pajak + tanda tangan (dijaga satu paket, pindah halaman bila tidak muat)
+      const sppdDate = receipt.official_travel_letters?.departure_date
         ? format(new Date(receipt.official_travel_letters.departure_date), "dd MMMM yyyy", { locale: idLocale })
         : format(new Date(receipt.receipt_date), "dd MMMM yyyy", { locale: idLocale });
-      
       const receiptDate = format(new Date(receipt.receipt_date), "dd MMMM yyyy", { locale: idLocale });
-      
-      doc.text("Menyetujui,", col1X, yPos, { align: "center" });
-      doc.text(`Ciamis, ${sppdDate}`, col2X, yPos, { align: "center" });
-      
-      yPos += 5;
-      doc.text(`Kepala ${schoolSettings?.school_name || "Sekolah"}`, col1X, yPos, { align: "center" });
-      doc.text("Bendahara BOS", col2X, yPos, { align: "center" });
-      
-      yPos += pdfSettings.signatureNameSpacing;
-      doc.setFont("helvetica", "bolditalic");
-      doc.text(`Lunas Dibayar Tanggal: ${receiptDate}`, col2X, yPos, { align: "center" });
 
-      yPos += pdfSettings.signatureSpacing;
-      
-      doc.setFont("helvetica", "bold");
-      doc.text(toTitleCase(schoolSettings?.headmaster_name) || "", col1X, yPos, { align: "center" });
-      doc.text(toTitleCase(schoolSettings?.bendahara_name) || ".........................", col2X, yPos, { align: "center" });
-      
-      yPos += pdfSettings.signatureNameSpacing;
-      doc.setFontSize(pdfSettings.tableFontSize + 1);
-      doc.setFont("helvetica", "normal");
-      if (schoolSettings?.headmaster_nip) {
-        doc.text(`NIP. ${schoolSettings.headmaster_nip}`, col1X, yPos, { align: "center" });
-      }
-      doc.text(schoolSettings?.bendahara_nip ? `NIP. ${schoolSettings.bendahara_nip}` : "NIP. .........................", col2X, yPos, { align: "center" });
+      drawCollectiveFooter(doc, {
+        y: yPos,
+        leftMargin,
+        rightMargin: pdfSettings.marginRight,
+        pageBottom,
+        topOfNewPage: pdfSettings.marginTop,
+        terbilangText: formatAmountToWords(totalAmount),
+        showTax: pdfSettings.showTax,
+        terbilangFontSize: pdfSettings.terbilangFontSize,
+        taxFontSize: pdfSettings.tableFontSize + 1,
+        signatureFontSize: pdfSettings.signatureFontSize,
+        terbilangToTaxSpacing: pdfSettings.terbilangToTaxSpacing,
+        taxToSignatureSpacing: pdfSettings.taxToSignatureSpacing,
+        signatureSpacing: pdfSettings.signatureSpacing,
+        signatureNameSpacing: pdfSettings.signatureNameSpacing,
+        signatureColumnWidth: pdfSettings.signatureColumnWidth,
+        schoolName: schoolSettings?.school_name,
+        headmasterName: schoolSettings?.headmaster_name,
+        headmasterNip: schoolSettings?.headmaster_nip,
+        bendaharaName: schoolSettings?.bendahara_name,
+        bendaharaNip: schoolSettings?.bendahara_nip,
+        sppdDate,
+        receiptDate,
+      });
 
       if (forDownload) {
         doc.save(`Kwitansi-Kolektif-${receipt.receipt_number}.pdf`);
@@ -273,8 +249,13 @@ export function ReceiptPreviewDialog({
     toast.success("PDF berhasil diunduh");
   };
 
+  const handleChange = (next: ReceiptPdfSettings) => {
+    if (next.paperSize !== settings.paperSize) saveReceiptPaper(next.paperSize);
+    setSettings(next);
+  };
+
   const handleReset = () => {
-    setSettings(DEFAULT_RECEIPT_SETTINGS);
+    setSettings({ ...DEFAULT_RECEIPT_SETTINGS, paperSize: settings.paperSize });
   };
 
   return (
@@ -337,7 +318,7 @@ export function ReceiptPreviewDialog({
             <div className="w-80 border-l">
               <ReceiptPdfSettingsPanel
                 settings={settings}
-                onChange={setSettings}
+                onChange={handleChange}
                 onReset={handleReset}
               />
             </div>

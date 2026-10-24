@@ -8,12 +8,16 @@ import { Separator } from "@/components/ui/separator";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ChevronDown, ChevronUp, RotateCcw, Receipt } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { PAPER_LABEL } from "@/lib/pdfPaper";
 
 export interface ReceiptPdfSettings {
   // Margins
   marginTop: number;
   marginLeft: number;
   marginRight: number;
+  marginBottom: number;
+  paperSize: 'a4' | 'f4';
   
   // Font sizes
   titleFontSize: number;
@@ -45,6 +49,8 @@ export const DEFAULT_RECEIPT_SETTINGS: ReceiptPdfSettings = {
   marginTop: 15,
   marginLeft: 15,
   marginRight: 15,
+  marginBottom: 15,
+  paperSize: 'a4',
   
   titleFontSize: 14,
   headerFontSize: 10,
@@ -162,8 +168,22 @@ export function ReceiptPdfSettingsPanel({ settings, onChange, onReset }: Receipt
       
       <ScrollArea className="flex-1">
         <div className="p-2 space-y-1">
+          {/* Ukuran kertas */}
+          <SettingGroup title="Ukuran Kertas" defaultOpen>
+            <Select value={settings.paperSize} onValueChange={(v) => updateSetting("paperSize", v as 'a4' | 'f4')}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="a4">{PAPER_LABEL.a4}</SelectItem>
+                <SelectItem value="f4">{PAPER_LABEL.f4}</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">Tanda tangan otomatis pindah ke halaman berikutnya bila tidak muat.</p>
+          </SettingGroup>
+
+          <Separator />
+
           {/* Margin Settings */}
-          <SettingGroup title="Margin" defaultOpen>
+          <SettingGroup title="Margin">
             <SliderSetting
               label="Margin Atas"
               value={settings.marginTop}
@@ -182,6 +202,13 @@ export function ReceiptPdfSettingsPanel({ settings, onChange, onReset }: Receipt
               label="Margin Kanan"
               value={settings.marginRight}
               onChange={(v) => updateSetting("marginRight", v)}
+              min={5}
+              max={40}
+            />
+            <SliderSetting
+              label="Margin Bawah"
+              value={settings.marginBottom}
+              onChange={(v) => updateSetting("marginBottom", v)}
               min={5}
               max={40}
             />

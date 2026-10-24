@@ -188,3 +188,102 @@ export function drawCollectiveTable(doc: jsPDF, items: ReceiptLineItem[], o: Tab
 
   return { y, total };
 }
+
+const RECEIPT_PAPER_KEY = 'receipt-paper';
+export const getSavedReceiptPaper = (): 'a4' | 'f4' => {
+  try { return localStorage.getItem(RECEIPT_PAPER_KEY) === 'f4' ? 'f4' : 'a4'; } catch { return 'a4'; }
+};
+export const saveReceiptPaper = (p: 'a4' | 'f4') => {
+  try { localStorage.setItem(RECEIPT_PAPER_KEY, p); } catch { /* abaikan */ }
+};
+
+interface FooterOpts {
+  y: number;                 // posisi y tepat setelah tabel
+  leftMargin: number;
+  rightMargin: number;
+  pageBottom: number;        // batas bawah area cetak (tinggi kertas - margin bawah)
+  topOfNewPage: number;
+  terbilangText: string;
+  showTax: boolean;
+  terbilangFontSize: number;
+  taxFontSize: number;
+  signatureFontSize: number;
+  terbilangToTaxSpacing: number;
+  taxToSignatureSpacing: number;
+  signatureSpacing: number;
+  signatureNameSpacing: number;
+  signatureColumnWidth: number;
+  schoolName?: string | null;
+  headmasterName?: string | null;
+  headmasterNip?: string | null;
+  bendaharaName?: string | null;
+  bendaharaNip?: string | null;
+  sppdDate: string;
+  receiptDate: string;
+}
+
+/**
+ * Menggambar terbilang, info pajak, dan blok tanda tangan. Seluruh blok dijaga satu paket:
+ * bila tidak muat di sisa halaman, dipindah utuh ke halaman berikutnya sehingga TTD tidak terpotong.
+ */
+export function drawCollectiveFooter(doc: jsPDF, o: FooterOpts) {
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const L = o.leftMargin;
+  const col1X = L + o.signatureColumnWidth;
+  const col2X = pageWidth - o.rightMargin - o.signatureColumnWidth;
+
+  doc.setFontSize(o.terbilangFontSize);
+  const terbilangLines: string[] = doc.splitTextToSize(o.terbilangText, pageWidth - L - 30);
+
+  // Tinggi seluruh blok: terbilang + pajak + 4 baris TTD (+ cadangan 6mm untuk NIP).
+  const needed =
+    8 + terbilangLines.length * 4 + o.terbilangToTaxSpacing + o.taxToSignatureSpacing +
+    5 + o.signatureNameSpacing + o.signatureSpacing + o.signatureNameSpacing + 6;
+
+  let y = o.y;
+  if (y + needed > o.pageBottom) {
+    doc.addPage();
+    y = o.topOfNewPage - 8; // dikurangi 8 karena langkah berikut menambah 8
+  }
+
+  y += 8;
+  doc.setFontSize(o.terbilangFontSize);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Terbilang:', L, y);
+  doc.setFont('helvetica', 'italic');
+  doc.text(terbilangLines, L + 20, y);
+
+  y += terbilangLines.length * 4 + o.terbilangToTaxSpacing;
+  if (o.showTax) {
+    doc.setFontSize(o.taxFontSize);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Informasi Potongan Pajak:', L, y);
+    doc.text('PPh 21: -   |   PPh 23: -   |   PPN: -   |   Jumlah Potongan: -', L + 35, y);
+  }
+
+  y += o.taxToSignatureSpacing;
+  doc.setFontSize(o.signatureFontSize);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Menyetujui,', col1X, y, { align: 'center' });
+  doc.text(`Ciamis, ${o.sppdDate}`, col2X, y, { align: 'center' });
+
+  y += 5;
+  doc.text(`Kepala ${o.schoolName || 'Sekolah'}`, col1X, y, { align: 'center' });
+  doc.text('Bendahara BOS', col2X, y, { align: 'center' });
+
+  y += o.signatureNameSpacing;
+  doc.setFont('helvetica', 'bolditalic');
+  doc.text(`Lunas Dibayar Tanggal: ${o.receiptDate}`, col2X, y, { align: 'center' });
+
+  y += o.signatureSpacing;
+  doc.setFont('helvetica', 'bold');
+  doc.text(toTitleCase(o.headmasterName) || '', col1X, y, { align: 'center' });
+  doc.text(toTitleCase(o.bendaharaName) || '.........................', col2X, y, { align: 'center' });
+
+  y += o.signatureNameSpacing;
+  doc.setFontSize(o.taxFontSize);
+  doc.setFont('helvetica', 'normal');
+  if (o.headmasterNip) doc.text(`NIP. ${o.headmasterNip}`, col1X, y, { align: 'center' });
+  doc.text(o.bendaharaNip ? `NIP. ${o.bendaharaNip}` : 'NIP. .........................', col2X, y, { align: 'center' });
+  return y;
+}
