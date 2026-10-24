@@ -597,11 +597,11 @@ function ReminderTab() {
         </div>
         <div className="space-y-2 rounded-lg border p-3">
           <div className="flex items-center justify-between">
-            <Label htmlFor="as-en">Notifikasi surat tugas</Label>
+            <Label htmlFor="as-en">Notifikasi surat tugas / SPPD</Label>
             <Switch id="as-en" checked={assignWa} onCheckedChange={setAssignWa} />
           </div>
           <p className="text-xs text-muted-foreground">
-            Guru/staf yang ditunjuk dalam surat tugas baru menerima WA berisi jenis, waktu, dan lokasi tugas, beserta pengingat mengisi LPT dan mengunggah bukti kunjungan di akun Pusaka. Hanya untuk surat yang dibuat dalam 3 hari terakhir; yang nomor HP-nya kosong dilewati. Isi pesan bisa diubah di tab Template.
+            Saat SPPD dibuat, guru/staf pelaksana otomatis menerima WA berisi jenis, waktu, dan lokasi tugas, beserta pengingat mengisi LPT dan mengunggah bukti kunjungan di akun Pusaka. Dikirim sekali per orang saat SPPD dibuat (bot tidak memeriksa berkala); yang nomor HP-nya kosong dilewati. Isi pesan bisa diubah di tab Template.
           </p>
         </div>
         <Button onClick={() => save.mutate()} disabled={save.isPending}>

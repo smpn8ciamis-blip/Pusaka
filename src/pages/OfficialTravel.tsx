@@ -27,6 +27,7 @@ import { SPDPreviewDialog } from "@/components/spd/SPDPreviewDialog";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DataPagination } from "@/components/ui/data-pagination";
 import { usePagination } from "@/hooks/usePagination";
+import { notifyBotTravelCreated } from "@/lib/waBot";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -518,9 +519,11 @@ export default function OfficialTravel() {
         await supabase.from("official_travel_letters").delete().eq("id", letter.id);
         throw e;
       }
+      return letter.id as string;
     },
-    onSuccess: () => {
+    onSuccess: (travelId) => {
       queryClient.invalidateQueries({ queryKey: ["official-travel-letters"] });
+      if (travelId) void notifyBotTravelCreated(travelId); // WA ke pelaksana, sekali saat dibuat
       toast.success("SPD berhasil dibuat");
       setIsDialogOpen(false);
       resetForm();
