@@ -25,7 +25,7 @@ export default function AdminNews() {
         { key: "title", label: "Judul", required: true, colSpan: 2 },
         { key: "slug", label: "Slug URL", required: true, placeholder: "contoh-berita" },
         { key: "category_id", label: "Kategori", type: "select", options: cats.map((c) => ({ value: c.id, label: c.name })) },
-        { key: "cover_image_url", label: "URL Gambar Cover", type: "url", colSpan: 2 },
+        { key: "cover_image_url", label: "Gambar Cover", type: "image", colSpan: 2 },
         { key: "excerpt", label: "Ringkasan", type: "textarea", colSpan: 2 },
         { key: "content", label: "Isi Berita", type: "richtext", colSpan: 2 },
         { key: "author_name", label: "Penulis" },

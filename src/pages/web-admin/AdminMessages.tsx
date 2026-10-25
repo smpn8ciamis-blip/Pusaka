@@ -20,17 +20,17 @@ export default function AdminMessages() {
   };
 
   return (
-    <div className="p-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Pesan Masuk</h1>
+    <div className="p-4 sm:p-6 lg:p-8">
+      <div className="mb-5">
+        <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Pesan Masuk</h1>
         <p className="text-sm text-slate-500">Pesan yang dikirim melalui form kontak website.</p>
       </div>
       <div className="space-y-3">
         {rows.length === 0 && <div className="bg-white rounded-2xl p-8 text-center text-slate-500 border">Belum ada pesan.</div>}
         {rows.map((m) => (
-          <div key={m.id} className={`bg-white rounded-2xl p-5 border ${m.is_read ? "border-slate-100" : "border-l-4 border-l-[#1E40AF]"}`}>
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1">
+          <div key={m.id} className={`rounded-2xl border bg-white p-4 shadow-sm sm:p-5 ${m.is_read ? "border-slate-100" : "border-l-4 border-l-[#1E40AF]"}`}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+              <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 mb-1">
                   <Mail className="h-4 w-4 text-[#1E40AF]" />
                   <span className="font-semibold">{m.name}</span>
@@ -42,11 +42,11 @@ export default function AdminMessages() {
                   <span>{new Date(m.created_at).toLocaleString("id-ID")}</span>
                 </div>
                 {m.subject && <div className="font-medium text-slate-700 text-sm mb-1">{m.subject}</div>}
-                <p className="text-sm text-slate-600 whitespace-pre-line">{m.message}</p>
+                <p className="whitespace-pre-line text-sm text-slate-600 [overflow-wrap:anywhere]">{m.message}</p>
               </div>
-              <div className="flex flex-col gap-1">
-                {!m.is_read && <Button size="sm" variant="ghost" onClick={() => markRead(m.id)}><Check className="h-4 w-4" /></Button>}
-                <Button size="sm" variant="ghost" className="text-red-600" onClick={() => del(m.id)}><Trash2 className="h-4 w-4" /></Button>
+              <div className="flex gap-2 border-t pt-3 sm:flex-col sm:gap-1 sm:border-0 sm:pt-0">
+                {!m.is_read && <Button size="sm" variant="outline" className="h-10 flex-1 rounded-xl sm:h-9 sm:flex-none" onClick={() => markRead(m.id)}><Check className="mr-1 h-4 w-4" /><span className="sm:hidden">Tandai dibaca</span></Button>}
+                <Button size="sm" variant="outline" className="h-10 flex-1 rounded-xl border-red-200 text-red-600 hover:bg-red-50 sm:h-9 sm:flex-none" onClick={() => del(m.id)}><Trash2 className="mr-1 h-4 w-4" /><span className="sm:hidden">Hapus</span></Button>
               </div>
             </div>
           </div>
