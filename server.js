@@ -294,6 +294,7 @@ DEFAULT_TEMPLATES.homeroom_attendance_reminder = `📋 *PENGINGAT ABSENSI KELAS*
 DEFAULT_TEMPLATES.weekly_absence_wali = `📊 *REKAP KETIDAKHADIRAN MINGGUAN*\n\nYth. Bapak/Ibu *{{nama_wali}}* (Wali Kelas {{kelas}}),\nSiswa yang tidak hadir pada *{{periode}}* ({{jumlah_siswa}} siswa):\n\n{{rekap}}\n_S=Sakit, I=Izin, A=Alfa (jumlah hari)_\n\n{{sering}}\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.weekly_absence_group = `📊 *SISWA SERING TIDAK HADIR*\nPeriode *{{periode}}*\n\n{{rekap}}\n_S=Sakit, I=Izin, A=Alfa (jumlah hari)_\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.assignment_notice = `📄 *SURAT TUGAS BARU*\n\nYth. Bapak/Ibu *{{nama}}*,\nAnda mendapat surat tugas berikut:\n• Nomor: {{nomor_surat}}\n• Jenis tugas: *{{jenis}}*\n• Uraian: {{uraian}}\n• Waktu: *{{waktu}}*\n• Lokasi: *{{lokasi}}*\n\nSetelah tugas selesai, mohon:\n1. Mengisi *LPT* (Laporan Pelaksanaan Tugas)\n2. Mengunggah *bukti kunjungan* (foto dan berkas PDF)\npada akun Pusaka, menu *Surat Tugas & SPPD*.\n\n📸 *Cara cepat:* balas (reply) pesan ini dengan foto bukti kunjungan, foto otomatis tersimpan di akun Pusaka Anda (maks. 3 foto).\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.assignment_followup = `⏰ *PENGINGAT BUKTI KUNJUNGAN*\n\nYth. Bapak/Ibu *{{nama}}*,\nSurat tugas berikut sudah selesai, namun *foto bukti kunjungan* Anda belum diunggah:\n• Nomor: {{nomor_surat}}\n• Jenis tugas: *{{jenis}}*\n• Waktu: {{waktu}}\n• Lokasi: {{lokasi}}\n\nMohon segera unggah di akun Pusaka, menu *Surat Tugas & SPPD*.\n\n📸 *Cara cepat:* balas (reply) pesan ini dengan foto bukti kunjungan, foto otomatis tersimpan di akun Anda (maks. 3 foto).\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.piket_punch = `🕒 *ABSENSI PIKET TERCATAT*\n\nYth. Bapak/Ibu *{{nama}}*,\nAbsen *{{jenis}}* {{shift}} Anda tercatat pada {{tanggal}} pukul *{{jam}} WIB* melalui mesin absensi.\n\nTerima kasih atas pengabdiannya.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.teacher_saturday_greeting = `🌿 *SELAMAT AKHIR PEKAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\n\nTerima kasih atas dedikasi dan kerja keras Bapak/Ibu dalam mendidik anak-anak kita sepanjang pekan ini.\n\nHari {{hari}} adalah waktu untuk berhenti sejenak. Nikmatilah akhir pekan bersama keluarga, karena keluarga adalah sumber kekuatan terbesar seorang pendidik. Istirahatlah yang cukup dan siapkan energi terbaik untuk mengajar kembali di hari Senin.\n\nSemoga sehat dan bahagia selalu. 🙏\n_Pusaka - SMP Negeri 8 Ciamis_`;
 const DEFAULT_BOT_SETTINGS = {
@@ -311,6 +312,8 @@ const DEFAULT_BOT_SETTINGS = {
     saturday_greeting_time: '07:00',  // jam kirim (WIB)
     homeroom_att_reminder_enabled: false, // ingatkan wali kelas bila absensi kelasnya belum diisi guru jam pertama
     homeroom_att_reminder_times: '08:30', // jam pengecekan (WIB), boleh lebih dari satu dipisah koma
+    assignment_followup_enabled: true, // pengingat WA H+1 bagi pelaksana SPPD yang belum mengunggah foto bukti kunjungan
+    assignment_followup_time: '09:00', // jam kirim (WIB), sekali sehari
     assignment_wa_enabled: true,      // WA ke guru/staf saat SPPD dibuat (jenis, waktu, lokasi + pengingat LPT & bukti kunjungan)
     piket_wa_enabled: true,           // WA ke petugas piket saat absen lewat mesin fingerprint tercatat
     weekly_absence_enabled: false,    // rekap mingguan siswa tidak hadir (sakit/izin/alfa) ke wali kelas
@@ -955,6 +958,122 @@ function fmtWaktuTugas(start, end) {
     const hari = Math.round((new Date(e + 'T00:00:00Z') - new Date(s + 'T00:00:00Z')) / 86400000) + 1;
     return fmtTanggalHari(s) + ' s.d. ' + fmtTanggalHari(e) + ' (' + hari + ' hari)';
 }
+// ===================== PENGINGAT SUSULAN BUKTI KUNJUNGAN (H+1) =====================
+// Satu kali sehari pada jam tetap (timer ke jam berikutnya, bukan pengecekan tiap menit).
+function addDaysIso(iso, n) { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+// Nomor HP & akun penerima: guru lewat profil akun, staf lewat tabel staff. items: [{ key, kind, refId }]
+async function resolveRecipients(items) {
+    const tIds = Array.from(new Set(items.filter(function(x) { return x.kind === 'teacher'; }).map(function(x) { return x.refId; })));
+    const sIds = Array.from(new Set(items.filter(function(x) { return x.kind === 'staff'; }).map(function(x) { return x.refId; })));
+    const tRes = tIds.length ? await supabase.from('teachers').select('id, user_id').in('id', tIds) : { data: [] };
+    const uIds = (tRes.data || []).map(function(t) { return t.user_id; }).filter(Boolean);
+    const pRes = uIds.length ? await supabase.from('profiles').select('id, full_name, phone').in('id', uIds) : { data: [] };
+    const sRes = sIds.length ? await supabase.from('staff').select('id, full_name, phone, user_id').in('id', sIds) : { data: [] };
+    const profById = new Map((pRes.data || []).map(function(p) { return [p.id, p]; }));
+    const person = new Map();
+    for (const t of (tRes.data || [])) { const p = profById.get(t.user_id); if (p) person.set('teacher:' + t.id, Object.assign({}, p, { owner_user_id: p.id })); }
+    for (const st of (sRes.data || [])) person.set('staff:' + st.id, Object.assign({}, st, { owner_user_id: st.user_id }));
+    return person;
+}
+// Pelaksana SPPD: guru di SPPD + staf pelaksana dari surat tugas terkait.
+async function travelPeople(trip) {
+    const prom = await Promise.all([
+        supabase.from('official_travel_teachers').select('teacher_id').eq('official_travel_id', trip.id),
+        trip.assignment_letter_id
+            ? supabase.from('assignment_letter_manual_executors').select('staff_id').eq('assignment_letter_id', trip.assignment_letter_id).not('staff_id', 'is', null)
+            : Promise.resolve({ data: [] })
+    ]);
+    const people = [];
+    for (const t of (prom[0].data || [])) people.push({ key: 'teacher:' + t.teacher_id, kind: 'teacher', refId: t.teacher_id });
+    for (const m of (prom[1].data || [])) people.push({ key: 'staff:' + m.staff_id, kind: 'staff', refId: m.staff_id });
+    return people;
+}
+async function runAssignmentFollowup() {
+    const cfg = await getBotSettings();
+    if (!cfg.assignment_followup_enabled) return { status: 'disabled' };
+    if (!isReady) return { status: 'bot_offline' };
+    const today = wibNow().date;
+    // H+1 sampai H+3 setelah tanggal kembali (H+2/H+3 hanya untuk menyusul bila bot sempat mati); tiap orang dikirimi sekali.
+    const tr = await supabase.from('official_travel_letters')
+        .select('id, letter_number, destination, departure_date, return_date, assignment_letter_id')
+        .gte('return_date', addDaysIso(today, -3)).lte('return_date', addDaysIso(today, -1));
+    if (tr.error) throw tr.error;
+    const trips = (tr.data || []).filter(function(t) { return t.assignment_letter_id; });
+    if (trips.length === 0) return { status: 'ok', queued: 0 };
+    const tripIds = trips.map(function(t) { return t.id; });
+    const letterIds = Array.from(new Set(trips.map(function(t) { return t.assignment_letter_id; })));
+    const prom = await Promise.all([
+        supabase.from('travel_wa_followup').select('official_travel_id, person_key').in('official_travel_id', tripIds),
+        supabase.from('letter_attachments').select('assignment_letter_id, teacher_id, staff_id').in('assignment_letter_id', letterIds).eq('kind', 'photo'),
+        supabase.from('assignment_letters').select('id, assignment_type').in('id', letterIds)
+    ]);
+    const sentSet = new Set((prom[0].data || []).map(function(x) { return x.official_travel_id + '|' + x.person_key; }));
+    const hasPhoto = new Set();
+    for (const a of (prom[1].data || [])) {
+        if (a.teacher_id) hasPhoto.add(a.assignment_letter_id + '|teacher:' + a.teacher_id);
+        if (a.staff_id) hasPhoto.add(a.assignment_letter_id + '|staff:' + a.staff_id);
+    }
+    const typeById = new Map((prom[2].data || []).map(function(l) { return [l.id, l.assignment_type]; }));
+    let queued = 0, noPhone = 0;
+    for (const trip of trips) {
+        const todo = (await travelPeople(trip)).filter(function(x) { return !sentSet.has(trip.id + '|' + x.key) && !hasPhoto.has(trip.assignment_letter_id + '|' + x.key); });
+        if (todo.length === 0) continue;
+        const person = await resolveRecipients(todo);
+        for (const x of todo) {
+            const p = person.get(x.key);
+            if (!p || !p.phone) { noPhone++; continue; }
+            const ins = await supabase.from('travel_wa_followup').insert({ official_travel_id: trip.id, person_key: x.key });
+            if (ins.error) continue; // sudah tercatat: jangan kirim dobel
+            const vars = {
+                nama: p.full_name || 'Bapak/Ibu', nomor_surat: trip.letter_number, jenis: typeById.get(trip.assignment_letter_id) || 'Perjalanan Dinas',
+                waktu: fmtWaktuTugas(trip.departure_date, trip.return_date), lokasi: trip.destination
+            };
+            const jid = formatToInternational(p.phone) + '@s.whatsapp.net';
+            const rec = {
+                jid: jid, phone: formatToInternational(p.phone), official_travel_id: trip.id, assignment_letter_id: trip.assignment_letter_id,
+                teacher_id: x.kind === 'teacher' ? x.refId : null, staff_id: x.kind === 'staff' ? x.refId : null, user_id: p.owner_user_id || null
+            };
+            enqueueTask(async function() {
+                const text = await renderMessage('assignment_followup', vars);
+                if (!text) return;
+                const sent = await sendSafeMessage(jid, { text: text });
+                // Balasan foto pada pengingat ini juga langsung jadi bukti kunjungan.
+                if (sent && sent.key && sent.key.id) {
+                    const ri = await supabase.from('wa_notice_messages').insert(Object.assign({ wa_message_id: sent.key.id }, rec));
+                    if (ri.error) console.error('[BUKTI WA] gagal mencatat pesan:', ri.error.message);
+                }
+            });
+            queued++;
+        }
+    }
+    console.log('[BUKTI WA] pengingat H+1: ' + queued + ' dikirim, ' + noPhone + ' tanpa nomor HP');
+    return { status: 'ok', queued: queued, no_phone: noPhone };
+}
+let followupTimer = null;
+function followupTime(cfg) { return /^\d{1,2}:\d{2}/.test(String(cfg.assignment_followup_time || '')) ? String(cfg.assignment_followup_time).slice(0, 5) : '09:00'; }
+function msUntilWib(hhmm) {
+    let diff = hhmmToMin(hhmm) - wibNow().minutes;
+    if (diff <= 0) diff += 1440;
+    return Math.max(1000, diff * 60000 - new Date().getSeconds() * 1000);
+}
+async function fireAssignmentFollowup(attempt) {
+    try {
+        const r = await runAssignmentFollowup();
+        if (r.status === 'bot_offline' && attempt < 6) setTimeout(function() { fireAssignmentFollowup(attempt + 1); }, 10 * 60 * 1000); // bot belum tersambung: coba lagi 10 menit
+    } catch (e) { console.error('[BUKTI WA] pengingat H+1 gagal:', e.message); }
+}
+async function scheduleAssignmentFollowup() {
+    if (followupTimer) { clearTimeout(followupTimer); followupTimer = null; }
+    const cfg = await getBotSettings();
+    followupTimer = setTimeout(async function() { await fireAssignmentFollowup(0); scheduleAssignmentFollowup().catch(function() {}); }, msUntilWib(followupTime(cfg)));
+}
+// Setelah bot dihidupkan ulang pada siang hari: menyusul sekali (aman, penerima dicatat sehingga tidak dobel).
+async function catchUpAssignmentFollowup() {
+    const cfg = await getBotSettings();
+    const t = hhmmToMin(followupTime(cfg)), m = wibNow().minutes;
+    if (m >= t && m <= t + 480) fireAssignmentFollowup(0);
+}
+
 // Dipicu aplikasi saat SPPD dibuat (tidak ada pengecekan berkala di bot). Tiap orang hanya dinotifikasi sekali per SPPD.
 async function notifyTravelCreated(travelId, userId) {
     const cfg = await getBotSettings();
@@ -1406,6 +1525,7 @@ app.post('/admin/send-class-group-recaps', requireAdmin, async (req, res) => {
 app.post('/admin/reload-config', requireAdmin, (req, res) => {
     templateCache.at = 0;
     settingsCache.at = 0;
+    scheduleAssignmentFollowup().catch(function() {}); // jam pengingat bisa berubah
     res.json({ status: 'success' });
 });
 
@@ -1883,6 +2003,8 @@ app.listen(PORT, () => {
     setInterval(runSaturdayGreeting, 60 * 1000);
     setInterval(runHomeroomAttendanceReminder, 60 * 1000);
     setInterval(runWeeklyAbsenceRecap, 60 * 1000);
+    scheduleAssignmentFollowup().catch(function(e) { console.error('[BUKTI WA]', e.message); });
+    setTimeout(function() { catchUpAssignmentFollowup().catch(function() {}); }, 90 * 1000);
     setInterval(checkBackupSchedule, 60 * 1000);
     setInterval(checkStudentSnapshot, 60 * 1000);
 });

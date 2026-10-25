@@ -364,6 +364,8 @@ function ReminderTab() {
   const [hrTimes, setHrTimes] = useState('08:30');
   const [piketWa, setPiketWa] = useState(true);
   const [assignWa, setAssignWa] = useState(true);
+  const [assignFu, setAssignFu] = useState(true);
+  const [assignFuTime, setAssignFuTime] = useState('09:00');
   const [wkOn, setWkOn] = useState(false);
   const [wkDay, setWkDay] = useState('6');
   const [wkTime, setWkTime] = useState('13:00');
@@ -396,6 +398,8 @@ function ReminderTab() {
       setHrTimes(String(data.homeroom_att_reminder_times || '08:30'));
       setPiketWa(data.piket_wa_enabled !== false);
       setAssignWa(data.assignment_wa_enabled !== false);
+      setAssignFu(data.assignment_followup_enabled !== false);
+      setAssignFuTime(String(data.assignment_followup_time || '09:00').slice(0, 5));
       setWkOn(!!data.weekly_absence_enabled);
       setWkDay(String(data.weekly_absence_day || 6));
       setWkTime(String(data.weekly_absence_time || '13:00').slice(0, 5));
@@ -422,6 +426,8 @@ function ReminderTab() {
         homeroom_att_reminder_times: hrTimes.split(/[,\s;]+/).filter((t) => /^\d{1,2}:\d{2}$/.test(t)).map((t) => t.padStart(5, '0')).join(', ') || '08:30',
         piket_wa_enabled: piketWa,
         assignment_wa_enabled: assignWa,
+        assignment_followup_enabled: assignFu,
+        assignment_followup_time: /^\d{2}:\d{2}$/.test(assignFuTime) ? assignFuTime : '09:00',
         weekly_absence_enabled: wkOn,
         weekly_absence_day: Math.min(7, Math.max(1, parseInt(wkDay, 10) || 6)),
         weekly_absence_time: /^\d{2}:\d{2}$/.test(wkTime) ? wkTime : '13:00',
@@ -602,6 +608,19 @@ function ReminderTab() {
           </div>
           <p className="text-xs text-muted-foreground">
             Saat SPPD dibuat, guru/staf pelaksana otomatis menerima WA berisi jenis, waktu, dan lokasi tugas, beserta pengingat mengisi LPT dan mengunggah bukti kunjungan di akun Pusaka. Dikirim sekali per orang saat SPPD dibuat (bot tidak memeriksa berkala); yang nomor HP-nya kosong dilewati. Penerima dapat membalas (reply) pesan itu dengan foto, dan foto otomatis tersimpan sebagai bukti kunjungan di akunnya (maks. 3). Isi pesan bisa diubah di tab Template; template lama perlu ditambah kalimat ajakan membalas dengan foto.
+          </p>
+          <div className="flex items-center justify-between pt-2">
+            <Label htmlFor="as-fu">Pengingat susulan bila belum unggah foto bukti kunjungan (H+1)</Label>
+            <Switch id="as-fu" checked={assignFu} onCheckedChange={setAssignFu} />
+          </div>
+          {assignFu && (
+            <div className="space-y-1">
+              <Label>Jam kirim (WIB)</Label>
+              <Input type="time" value={assignFuTime} onChange={(e) => setAssignFuTime(e.target.value)} className="w-32" />
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Sekali sehari pada jam di atas (bot tidak memeriksa tiap menit), bot mengirim pengingat ke pelaksana SPPD yang tanggal kembalinya kemarin dan belum punya foto bukti kunjungan. Tiap orang dikirimi sekali. Penerima juga bisa membalas pengingat itu dengan foto.
           </p>
         </div>
         <Button onClick={() => save.mutate()} disabled={save.isPending}>
