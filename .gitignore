@@ -10,3 +10,19 @@ google-services.json
 gdrive-token.json
 twa/app/release.jks
 *.jks
+
+# Cadangan, salinan, dan keluaran skrip: jangan masuk repo (membuat pencarian kode berduplikat)
+backups/
+.backup-*/
+*.bak
+*.bak.*
+*.bak-*
+*.bak[0-9]
+*.backup
+*.backup.*
+*.broken
+*.broken.*
+*.orig
+_backups/
+struktur_*.txt
+full_structure_*.txt
