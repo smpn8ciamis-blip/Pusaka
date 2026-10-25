@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadMediaMessage } = require('@whiskeysockets/baileys');
 const { createClient } = require('@supabase/supabase-js');
 const WebSocket = require('ws');
 const express = require('express');
@@ -293,7 +293,7 @@ DEFAULT_TEMPLATES.class_group_recap = `📊 *ABSENSI KELAS {{kelas}}*\n{{hari}},
 DEFAULT_TEMPLATES.homeroom_attendance_reminder = `📋 *PENGINGAT ABSENSI KELAS*\n\nYth. Bapak/Ibu *{{nama_wali}}* (Wali Kelas {{kelas}}),\nPada pukul {{waktu}} WIB absensi kelas *{{kelas}}* hari {{hari}}, {{tanggal}} belum terisi.\n\nJadwal jam pertama:\n• Jam: *{{jam_pertama}}*\n• Mapel: *{{mapel}}*\n• Guru pengajar: *{{guru_pengajar}}* (belum mengisi absensi)\n\nMohon bantu mengisi absensi kelas Anda di aplikasi Pusaka.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.weekly_absence_wali = `📊 *REKAP KETIDAKHADIRAN MINGGUAN*\n\nYth. Bapak/Ibu *{{nama_wali}}* (Wali Kelas {{kelas}}),\nSiswa yang tidak hadir pada *{{periode}}* ({{jumlah_siswa}} siswa):\n\n{{rekap}}\n_S=Sakit, I=Izin, A=Alfa (jumlah hari)_\n\n{{sering}}\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.weekly_absence_group = `📊 *SISWA SERING TIDAK HADIR*\nPeriode *{{periode}}*\n\n{{rekap}}\n_S=Sakit, I=Izin, A=Alfa (jumlah hari)_\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
-DEFAULT_TEMPLATES.assignment_notice = `📄 *SURAT TUGAS BARU*\n\nYth. Bapak/Ibu *{{nama}}*,\nAnda mendapat surat tugas berikut:\n• Nomor: {{nomor_surat}}\n• Jenis tugas: *{{jenis}}*\n• Uraian: {{uraian}}\n• Waktu: *{{waktu}}*\n• Lokasi: *{{lokasi}}*\n\nSetelah tugas selesai, mohon:\n1. Mengisi *LPT* (Laporan Pelaksanaan Tugas)\n2. Mengunggah *bukti kunjungan* (foto dan berkas PDF)\npada akun Pusaka, menu *Surat Tugas & SPPD*.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.assignment_notice = `📄 *SURAT TUGAS BARU*\n\nYth. Bapak/Ibu *{{nama}}*,\nAnda mendapat surat tugas berikut:\n• Nomor: {{nomor_surat}}\n• Jenis tugas: *{{jenis}}*\n• Uraian: {{uraian}}\n• Waktu: *{{waktu}}*\n• Lokasi: *{{lokasi}}*\n\nSetelah tugas selesai, mohon:\n1. Mengisi *LPT* (Laporan Pelaksanaan Tugas)\n2. Mengunggah *bukti kunjungan* (foto dan berkas PDF)\npada akun Pusaka, menu *Surat Tugas & SPPD*.\n\n📸 *Cara cepat:* balas (reply) pesan ini dengan foto bukti kunjungan, foto otomatis tersimpan di akun Pusaka Anda (maks. 3 foto).\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.piket_punch = `🕒 *ABSENSI PIKET TERCATAT*\n\nYth. Bapak/Ibu *{{nama}}*,\nAbsen *{{jenis}}* {{shift}} Anda tercatat pada {{tanggal}} pukul *{{jam}} WIB* melalui mesin absensi.\n\nTerima kasih atas pengabdiannya.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.teacher_saturday_greeting = `🌿 *SELAMAT AKHIR PEKAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\n\nTerima kasih atas dedikasi dan kerja keras Bapak/Ibu dalam mendidik anak-anak kita sepanjang pekan ini.\n\nHari {{hari}} adalah waktu untuk berhenti sejenak. Nikmatilah akhir pekan bersama keluarga, karena keluarga adalah sumber kekuatan terbesar seorang pendidik. Istirahatlah yang cukup dan siapkan energi terbaik untuk mengajar kembali di hari Senin.\n\nSemoga sehat dan bahagia selalu. 🙏\n_Pusaka - SMP Negeri 8 Ciamis_`;
 const DEFAULT_BOT_SETTINGS = {
@@ -371,8 +371,9 @@ async function sendSafeMessage(jid, content, options) {
     try {
         await sock.sendPresenceUpdate('composing', jid);
         await new Promise(r => setTimeout(r, 1500));
-        await sock.sendMessage(jid, content, options);
+        const sent = await sock.sendMessage(jid, content, options);
         await sock.sendPresenceUpdate('paused', jid);
+        return sent;
     } catch (e) { console.error('[SEND ERROR to ' + jid + ']:', e.message); }
 }
 
@@ -423,6 +424,13 @@ async function startBot() {
             if (messageContent.viewOnceMessageV2) messageContent = messageContent.viewOnceMessageV2.message;
             if (messageContent.documentWithCaption) messageContent = messageContent.documentWithCaption.message;
             if (messageContent.editedMessage) messageContent = messageContent.editedMessage.message;
+            // Foto yang membalas (reply) notifikasi surat tugas = unggah bukti kunjungan.
+            const imgMsg = messageContent.imageMessage;
+            if (imgMsg) {
+                const stanzaId = imgMsg.contextInfo && imgMsg.contextInfo.stanzaId;
+                if (stanzaId) await handleNoticePhotoReply(msg, imgMsg, stanzaId, from);
+                continue;
+            }
             const text = (messageContent.conversation || (messageContent.extendedTextMessage && messageContent.extendedTextMessage.text) || '').trim();
             if (!text) continue;
             const cleanText = text.toLowerCase();
@@ -985,11 +993,11 @@ async function notifyTravelCreated(travelId, userId) {
     const tRes = tIds.length ? await supabase.from('teachers').select('id, user_id').in('id', tIds) : { data: [] };
     const uIds = (tRes.data || []).map(function(t) { return t.user_id; }).filter(Boolean);
     const pRes = uIds.length ? await supabase.from('profiles').select('id, full_name, phone').in('id', uIds) : { data: [] };
-    const sRes = sIds.length ? await supabase.from('staff').select('id, full_name, phone').in('id', sIds) : { data: [] };
+    const sRes = sIds.length ? await supabase.from('staff').select('id, full_name, phone, user_id').in('id', sIds) : { data: [] };
     const profById = new Map((pRes.data || []).map(function(p) { return [p.id, p]; }));
     const person = new Map();
-    for (const t of (tRes.data || [])) { const p = profById.get(t.user_id); if (p) person.set('teacher:' + t.id, p); }
-    for (const st of (sRes.data || [])) person.set('staff:' + st.id, st);
+    for (const t of (tRes.data || [])) { const p = profById.get(t.user_id); if (p) person.set('teacher:' + t.id, Object.assign({}, p, { owner_user_id: p.id })); }
+    for (const st of (sRes.data || [])) person.set('staff:' + st.id, Object.assign({}, st, { owner_user_id: st.user_id }));
     let queued = 0, noPhone = 0;
     for (const x of todo) {
         const p = person.get(x.key);
@@ -1002,11 +1010,86 @@ async function notifyTravelCreated(travelId, userId) {
             uraian: trip.purpose, waktu: fmtWaktuTugas(trip.departure_date, trip.return_date), lokasi: trip.destination
         };
         const jid = formatToInternational(p.phone) + '@s.whatsapp.net';
-        enqueueTask(async function() { const text = await renderMessage('assignment_notice', vars); if (text) await sendSafeMessage(jid, { text: text }); });
+        const rec = {
+            jid: jid, phone: formatToInternational(p.phone), official_travel_id: trip.id, assignment_letter_id: trip.assignment_letter_id || null,
+            teacher_id: x.kind === 'teacher' ? x.refId : null, staff_id: x.kind === 'staff' ? x.refId : null, user_id: p.owner_user_id || null
+        };
+        enqueueTask(async function() {
+            const text = await renderMessage('assignment_notice', vars);
+            if (!text) return;
+            const sent = await sendSafeMessage(jid, { text: text });
+            // Simpan id pesan agar balasan berisi foto bisa dikaitkan ke surat tugas & orangnya.
+            if (sent && sent.key && sent.key.id) {
+                const ri = await supabase.from('wa_notice_messages').insert(Object.assign({ wa_message_id: sent.key.id }, rec));
+                if (ri.error) console.error('[SPPD WA] gagal mencatat pesan:', ri.error.message);
+            }
+        });
         queued++;
     }
     return { status: 'ok', queued: queued, no_phone: noPhone };
 }
+
+// ===================== BALAS NOTIFIKASI DENGAN FOTO = UNGGAH BUKTI KUNJUNGAN =====================
+const NOTICE_MAX_PHOTOS = 3;                 // sama dengan batas di aplikasi (MAX_PHOTOS)
+const NOTICE_MAX_BYTES = 10 * 1024 * 1024;
+const noticeChains = new Map();              // antrikan per pesan notifikasi agar batas 3 foto tidak terlewati saat banyak foto masuk bersamaan
+function handleNoticePhotoReply(msg, img, stanzaId, from) {
+    const prev = noticeChains.get(stanzaId) || Promise.resolve();
+    const next = prev.then(function() { return doNoticePhotoReply(msg, img, stanzaId, from); }).catch(function(e) { console.error('[BUKTI WA]', e.message); });
+    noticeChains.set(stanzaId, next);
+    next.then(function() { if (noticeChains.get(stanzaId) === next) noticeChains.delete(stanzaId); });
+    return next;
+}
+async function doNoticePhotoReply(msg, img, stanzaId, from) {
+    const rr = await supabase.from('wa_notice_messages').select('*').eq('wa_message_id', stanzaId).maybeSingle();
+    const rec = rr.data;
+    if (!rec) return;                                       // balasan ke pesan lain: abaikan
+    const cfg = await getBotSettings();
+    if (!cfg.assignment_wa_enabled) return;
+    // Pesan notifikasi hanya ada di chat penerimanya, jadi balasan yang mengutipnya pasti dari orang itu.
+    // Pemeriksaan tambahan: chat/nomor harus cocok (JID @lid tidak memuat nomor, jadi diterima apa adanya).
+    const sender = getSenderPhoneNumber(msg);
+    if (!(from === rec.jid || sender === rec.phone || from.endsWith('@lid'))) { console.log('[BUKTI WA] pengirim tidak cocok, diabaikan'); return; }
+    const reply = function(t) { enqueueTask(function() { return sendSafeMessage(from, { text: t }, { quoted: msg }); }); };
+    if (!rec.assignment_letter_id || !rec.user_id) { reply('⚠️ Foto belum bisa disimpan: akun Pusaka Anda belum terhubung dengan surat tugas ini. Hubungi admin.'); return; }
+    const fname = 'WA-' + msg.key.id + '.jpg';
+    const dupe = await supabase.from('letter_attachments').select('id').eq('assignment_letter_id', rec.assignment_letter_id).eq('file_name', fname).limit(1);
+    if (dupe.data && dupe.data.length) return;              // pesan yang sama terkirim ulang oleh WhatsApp
+    const ownerCol = rec.teacher_id ? 'teacher_id' : 'staff_id';
+    const ownerId = rec.teacher_id || rec.staff_id;
+    const cnt = await supabase.from('letter_attachments').select('id', { count: 'exact', head: true })
+        .eq('assignment_letter_id', rec.assignment_letter_id).eq(ownerCol, ownerId).eq('kind', 'photo');
+    const have = cnt.count || 0;
+    if (have >= NOTICE_MAX_PHOTOS) { reply('⚠️ Batas ' + NOTICE_MAX_PHOTOS + ' foto bukti kunjungan sudah tercapai. Hapus foto lama di akun Pusaka bila ingin mengganti.'); return; }
+    const lt = await supabase.from('assignment_letters').select('letter_number, school_id').eq('id', rec.assignment_letter_id).maybeSingle();
+    if (!lt.data) return;
+    let buffer;
+    try { buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger: pino({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage }); }
+    catch (e) { console.error('[BUKTI WA] gagal mengunduh foto:', e.message); reply('⚠️ Foto gagal diunduh. Silakan kirim ulang.'); return; }
+    if (!buffer || buffer.length === 0) { reply('⚠️ Foto kosong. Silakan kirim ulang.'); return; }
+    if (buffer.length > NOTICE_MAX_BYTES) { reply('⚠️ Ukuran foto terlalu besar (maks. 10 MB).'); return; }
+    const mime = (img && img.mimetype) || 'image/jpeg';
+    const filePath = rec.user_id + '/assignment/' + rec.assignment_letter_id + '/' + crypto.randomUUID() + (mime === 'image/png' ? '.png' : '.jpg');
+    const up = await supabase.storage.from('letter-attachments').upload(filePath, buffer, { contentType: mime, upsert: false });
+    if (up.error) { console.error('[BUKTI WA] upload gagal:', up.error.message); reply('⚠️ Foto gagal disimpan. Coba lagi nanti.'); return; }
+    const ins = await supabase.from('letter_attachments').insert({
+        letter_type: 'assignment', assignment_letter_id: rec.assignment_letter_id, official_travel_id: null,
+        teacher_id: rec.teacher_id || null, staff_id: rec.staff_id || null, kind: 'photo',
+        file_url: filePath, file_path: filePath, file_name: fname, mime_type: mime,
+        latitude: null, longitude: null, location_name: null, captured_at: new Date().toISOString(),
+        notes: (img && img.caption) ? String(img.caption).slice(0, 300) : 'Dikirim lewat WhatsApp',
+        uploaded_by: rec.user_id, school_id: lt.data.school_id
+    });
+    if (ins.error) {
+        await supabase.storage.from('letter-attachments').remove([filePath]);
+        console.error('[BUKTI WA] gagal mencatat lampiran:', ins.error.message);
+        reply('⚠️ Foto gagal disimpan. Coba lagi nanti.');
+        return;
+    }
+    const now = have + 1;
+    reply('✅ Foto bukti kunjungan diterima (' + now + '/' + NOTICE_MAX_PHOTOS + ') untuk surat tugas No. ' + lt.data.letter_number + '. Foto sudah masuk ke akun Pusaka Anda.' + (now >= NOTICE_MAX_PHOTOS ? '\nBatas foto tercapai.' : ' Kirim foto lain dengan membalas pesan notifikasi yang sama.'));
+}
+
 app.post('/travel-created', requireUser, async (req, res) => {
     const travelId = req.body && req.body.travel_id;
     if (typeof travelId !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(travelId)) return res.status(400).json({ status: 'error', message: 'travel_id tidak valid.' });
