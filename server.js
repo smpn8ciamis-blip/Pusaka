@@ -1650,7 +1650,8 @@ function absUrl(u) {
 }
 function stripHtml(h) { return String(h || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim(); }
 async function ogBeritaHandler(req, res) {
-    const slug = String(req.params.slug || '').slice(0, 200);
+    // Tautan bagikan berakhiran .html (https://situs/website/berita/<slug>.html); buang akhiran itu untuk mencari berita.
+    const slug = String(req.params.slug || '').slice(0, 200).replace(/\.html$/i, '');
     try {
         const r = await supabase.from('website_news').select('slug, title, excerpt, content, cover_image_url, published_at')
             .eq('slug', slug).eq('status', 'published').maybeSingle();
@@ -1662,7 +1663,7 @@ async function ogBeritaHandler(req, res) {
             const st = await supabase.from('website_settings').select('logo_url').order('created_at', { ascending: false }).limit(1).maybeSingle();
             image = absUrl(st && st.data && st.data.logo_url) || SITE_URL + '/icon-512.png';
         }
-        const url = SITE_URL + '/website/berita/' + encodeURIComponent(n.slug);
+        const url = SITE_URL + '/website/berita/' + encodeURIComponent(n.slug) + '.html';
         const desc = (stripHtml(n.excerpt) || stripHtml(n.content) || n.title).slice(0, 200);
         const title = String(n.title) + ' - SMPN 8 Ciamis';
         const meta = [
