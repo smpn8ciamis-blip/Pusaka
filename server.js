@@ -1635,6 +1635,55 @@ app.post('/admin/reload-config', requireAdmin, (req, res) => {
     res.json({ status: 'success' });
 });
 
+// ===================== PRATINJAU TAUTAN BERITA (WhatsApp/Telegram/Facebook) =====================
+// Situs ini SPA: tag OG di BeritaDetail baru dibuat lewat JavaScript, padahal crawler WhatsApp tidak menjalankan JS.
+// Nginx mengarahkan permintaan crawler untuk /website/berita/<slug> ke sini (lihat deploy/nginx-og-berita.conf),
+// sehingga pratinjau memuat judul, ringkasan, dan gambar cover. Pengunjung biasa langsung dialihkan ke halaman berita.
+// Hanya membaca berita berstatus published; tanpa login (memang untuk publik).
+const SITE_URL = (process.env.SITE_URL || 'https://pusaka.smpn8ciamis.sch.id').replace(/\/+$/, '');
+function absUrl(u) {
+    const s = String(u || '').trim();
+    if (!s) return '';
+    if (/^https?:\/\//i.test(s)) return s;
+    if (s.startsWith('//')) return 'https:' + s;
+    return SITE_URL + (s.startsWith('/') ? '' : '/') + s;
+}
+function stripHtml(h) { return String(h || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim(); }
+async function ogBeritaHandler(req, res) {
+    const slug = String(req.params.slug || '').slice(0, 200);
+    try {
+        const r = await supabase.from('website_news').select('slug, title, excerpt, content, cover_image_url, published_at')
+            .eq('slug', slug).eq('status', 'published').maybeSingle();
+        if (r.error) throw r.error;
+        if (!r.data) return res.status(404).type('text/plain').send('Berita tidak ditemukan');
+        const n = r.data;
+        let image = absUrl(n.cover_image_url);
+        if (!image) {
+            const st = await supabase.from('website_settings').select('logo_url').order('created_at', { ascending: false }).limit(1).maybeSingle();
+            image = absUrl(st && st.data && st.data.logo_url) || SITE_URL + '/icon-512.png';
+        }
+        const url = SITE_URL + '/website/berita/' + encodeURIComponent(n.slug);
+        const desc = (stripHtml(n.excerpt) || stripHtml(n.content) || n.title).slice(0, 200);
+        const title = String(n.title) + ' - SMPN 8 Ciamis';
+        const meta = [
+            ['og:type', 'article'], ['og:site_name', 'SMPN 8 Ciamis'], ['og:locale', 'id_ID'], ['og:url', url],
+            ['og:title', title], ['og:description', desc], ['og:image', image], ['og:image:secure_url', image],
+            ['twitter:card', 'summary_large_image'], ['twitter:title', title], ['twitter:description', desc], ['twitter:image', image]
+        ];
+        if (n.published_at) meta.push(['article:published_time', new Date(n.published_at).toISOString()]);
+        const tags = meta.map(function(m) { return '<meta property="' + m[0] + '" content="' + escHtml(m[1]) + '">'; }).join('\n');
+        res.set('Cache-Control', 'public, max-age=300');
+        res.type('html').send('<!doctype html><html lang="id"><head><meta charset="utf-8"><title>' + escHtml(title) + '</title>\n' +
+            '<meta name="description" content="' + escHtml(desc) + '">\n<link rel="canonical" href="' + escHtml(url) + '">\n' + tags + '\n' +
+            '<meta http-equiv="refresh" content="0;url=' + escHtml(url) + '"></head><body><p><a href="' + escHtml(url) + '">' + escHtml(n.title) + '</a></p>' +
+            '<script>location.replace(' + JSON.stringify(url).replace(/</g, '\\u003c') + ')</script></body></html>');
+    } catch (e) {
+        console.error('[OG berita]', e.message);
+        res.status(500).type('text/plain').send('Gagal memuat berita');
+    }
+}
+app.get('/og/berita/:slug', rateLimit('ogberita', 120, 60000), ogBeritaHandler);
+
 app.get('/', (req, res) => res.json({
     service: 'Presensi Nedelcis Server',
     status: isReady ? 'Connected' : 'Disconnected',

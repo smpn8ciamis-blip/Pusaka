@@ -191,7 +191,7 @@ export default function BeritaDetail() {
     const shareUrl = `${window.location.origin}/website/berita/${news.slug}`;
     const shareTitle = news.title;
     const shareDescription = news.excerpt || news.title;
-    const shareImage = news.cover_image_url || `${window.location.origin}/og-default.jpg`;
+    const shareImage = news.cover_image_url || `${window.location.origin}/icon-512.png`;
     document.title = `${shareTitle} - SMPN 8 Ciamis`;
     const setMetaTag = (property: string, content: string) => {
       let element = document.querySelector(`meta[property="${property}"]`);

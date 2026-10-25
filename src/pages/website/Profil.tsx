@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { supabase } from "@/integrations/supabase/client";
 
-const SITE_URL = "https://pusaka.lovable.app";
+const SITE_URL = typeof window !== "undefined" ? window.location.origin : "https://pusaka.smpn8ciamis.sch.id";
 
 const asAny = (t: string) => supabase.from(t as any) as any;
 
