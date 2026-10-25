@@ -16,9 +16,9 @@ export default function AdminHero() {
       fields={[
         { key: "title", label: "Judul", required: true, colSpan: 2 },
         { key: "subtitle", label: "Sub judul", type: "textarea", colSpan: 2 },
-        { key: "image_url", label: "URL Gambar", required: true, type: "url", colSpan: 2 },
+        { key: "image_url", label: "Gambar Slider", required: true, type: "image", colSpan: 2 },
         { key: "cta_label", label: "Label Tombol" },
-        { key: "cta_url", label: "URL Tombol", type: "url" },
+        { key: "cta_url", label: "URL Tombol", type: "url", placeholder: "/website/berita atau https://…" },
         { key: "sort_order", label: "Urutan", type: "number" },
         { key: "is_active", label: "Aktif", type: "boolean" },
       ]}

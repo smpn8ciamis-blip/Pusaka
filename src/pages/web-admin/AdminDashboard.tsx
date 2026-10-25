@@ -38,15 +38,24 @@ export default function AdminDashboard() {
   ];
 
   return (
-    <div className="p-8">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-900">Dashboard Website</h1>
-        <p className="text-slate-500 text-sm">Ringkasan pengelolaan konten website sekolah.</p>
+    <div className="p-4 sm:p-6 lg:p-8">
+      <div className="mb-6 overflow-hidden rounded-2xl bg-gradient-to-br from-[#1E40AF] to-[#3B82F6] p-5 text-white shadow-sm sm:p-6">
+        <h1 className="text-xl font-bold sm:text-2xl">Dashboard Website</h1>
+        <p className="mt-1 text-sm text-blue-100">Ringkasan pengelolaan konten website sekolah.</p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {[
+            { to: "/web-admin/berita", label: "Tulis Berita" },
+            { to: "/web-admin/galeri", label: "Unggah Foto" },
+            { to: "/web-admin/agenda", label: "Tambah Agenda" },
+          ].map((a) => (
+            <Link key={a.to} to={a.to} className="rounded-full bg-white/15 px-3.5 py-1.5 text-xs font-medium backdrop-blur hover:bg-white/25">+ {a.label}</Link>
+          ))}
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         {cards.map((c) => (
-          <Link key={c.label} to={c.to} className="bg-white rounded-2xl p-5 border border-slate-100 hover:shadow-md transition">
+          <Link key={c.label} to={c.to} className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition hover:shadow-md sm:p-5">
             <div className={`h-10 w-10 rounded-lg ${c.color} text-white flex items-center justify-center mb-3`}>
               <c.icon className="h-5 w-5" />
             </div>
@@ -57,7 +66,7 @@ export default function AdminDashboard() {
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6">
-        <section className="bg-white rounded-2xl p-6 border border-slate-100">
+        <section className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm sm:p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold">Pesan Terbaru</h3>
             <Link to="/web-admin/pesan" className="text-sm text-[#1E40AF] flex items-center gap-1">Lihat semua <ArrowRight className="h-3 w-3" /></Link>
@@ -72,7 +81,7 @@ export default function AdminDashboard() {
             ))}
           </div>
         </section>
-        <section className="bg-white rounded-2xl p-6 border border-slate-100">
+        <section className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm sm:p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold">Berita Terbaru</h3>
             <Link to="/web-admin/berita" className="text-sm text-[#1E40AF] flex items-center gap-1">Kelola <ArrowRight className="h-3 w-3" /></Link>

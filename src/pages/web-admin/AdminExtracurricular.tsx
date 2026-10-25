@@ -18,7 +18,7 @@ export default function AdminExtracurricular() {
       ]}
       fields={[
         { key: "name", label: "Nama Ekstrakurikuler", required: true },
-        { key: "image_url", label: "URL Gambar", type: "url" },
+        { key: "image_url", label: "Foto Ekstrakurikuler", type: "image", colSpan: 2 },
         { key: "description", label: "Deskripsi", type: "textarea", colSpan: 2 },
         { key: "is_active", label: "Aktif", type: "boolean" },
       ]}

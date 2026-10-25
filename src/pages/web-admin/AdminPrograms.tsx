@@ -17,7 +17,7 @@ export default function AdminPrograms() {
         { key: "name", label: "Nama Program", required: true },
         { key: "slug", label: "Slug", required: true },
         { key: "description", label: "Deskripsi", type: "textarea", colSpan: 2 },
-        { key: "cover_image_url", label: "URL Gambar", type: "url", colSpan: 2 },
+        { key: "cover_image_url", label: "Gambar", type: "image", colSpan: 2 },
         { key: "sort_order", label: "Urutan", type: "number" },
         { key: "is_published", label: "Publikasikan", type: "boolean" },
       ]}

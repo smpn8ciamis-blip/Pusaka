@@ -6,7 +6,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Instagram, ExternalLink } from "lucide-react";
+import { Instagram, ExternalLink, Save, Loader2 } from "lucide-react";
+import ImageField from "@/components/web-admin/ImageField";
 
 const FIELDS: { key: string; label: string; type?: string; hint?: string }[] = [
   { key: "site_name", label: "Nama Website" },
@@ -16,7 +17,7 @@ const FIELDS: { key: string; label: string; type?: string; hint?: string }[] = [
   { key: "phone", label: "Telepon" },
   { key: "email", label: "Email" },
   { key: "whatsapp", label: "WhatsApp (contoh: 6281xxx)" },
-  { key: "logo_url", label: "URL Logo" },
+  { key: "logo_url", label: "Logo Sekolah", type: "image" },
   { key: "facebook_url", label: "Facebook URL" },
   { key: "instagram_url", label: "Instagram URL Profil" },
   { key: "youtube_url", label: "YouTube URL" },
@@ -63,17 +64,19 @@ export default function AdminSettings() {
   };
 
   return (
-    <div className="p-8 max-w-4xl">
+    <div className="max-w-4xl p-4 pb-28 sm:p-6 lg:p-8 lg:pb-8">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Pengaturan Website</h1>
+        <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Pengaturan Website</h1>
         <p className="text-sm text-slate-500">Identitas, kontak, sosial media, dan SEO.</p>
       </div>
 
-      <div className="bg-white rounded-2xl border p-6 grid md:grid-cols-2 gap-4">
+      <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm sm:p-6 grid md:grid-cols-2 gap-4">
         {FIELDS.map((f) => (
-          <div key={f.key} className={f.type === "textarea" ? "md:col-span-2" : ""}>
+          <div key={f.key} className={f.type === "textarea" || f.type === "image" ? "md:col-span-2" : ""}>
             <Label className="mb-1 block">{f.label}</Label>
-            {f.type === "textarea"
+            {f.type === "image"
+              ? <ImageField value={form[f.key] ?? ""} onChange={(v) => setForm((p: any) => ({ ...p, [f.key]: v }))} folder="settings" />
+              : f.type === "textarea"
               ? <Textarea rows={3} value={form[f.key] ?? ""} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })} />
               : <Input value={form[f.key] ?? ""} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })} />}
           </div>
@@ -81,26 +84,26 @@ export default function AdminSettings() {
       </div>
 
       {/* Fitur Halaman Publik */}
-      <div className="bg-white rounded-2xl border p-6 mt-6 space-y-4">
+      <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm sm:p-6 mt-6 space-y-4">
         <div>
           <h2 className="font-bold text-slate-900">Fitur Halaman Publik</h2>
           <p className="text-xs text-slate-500">Aktif/nonaktifkan elemen yang tampil di website publik.</p>
         </div>
-        <div className="flex items-center justify-between rounded-lg border p-3">
+        <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
           <div>
             <Label className="mb-0.5">Tombol Layanan Pengaduan (SP4N-LAPOR)</Label>
             <p className="text-xs text-slate-500">Tampilkan tombol dan FAB pengaduan di beranda.</p>
           </div>
           <Switch checked={form.show_lapor_button ?? true} onCheckedChange={(v) => setForm({ ...form, show_lapor_button: v })} />
         </div>
-        <div className="flex items-center justify-between rounded-lg border p-3">
+        <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
           <div>
             <Label className="mb-0.5">Halaman Guru &amp; Staff (Guru dan Tata Usaha)</Label>
             <p className="text-xs text-slate-500">Tampilkan menu dan halaman Guru &amp; Staff di website publik. Default: disembunyikan.</p>
           </div>
           <Switch checked={form.show_guru_page ?? false} onCheckedChange={(v) => setForm({ ...form, show_guru_page: v })} />
         </div>
-        <div className="flex items-center justify-between rounded-lg border p-3">
+        <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
           <div>
             <Label className="mb-0.5">Chatbot Asisten Sekolah</Label>
             <p className="text-xs text-slate-500">Tampilkan chatbot mengambang di seluruh halaman website.</p>
@@ -120,7 +123,7 @@ export default function AdminSettings() {
       </div>
 
       {/* Instagram Auto-Feed */}
-      <div className="bg-white rounded-2xl border p-6 mt-6">
+      <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm sm:p-6 mt-6">
         <div className="flex items-center gap-3 mb-4">
           <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-pink-500 via-red-500 to-yellow-500 text-white flex items-center justify-center"><Instagram className="h-5 w-5" /></div>
           <div>
@@ -140,7 +143,7 @@ export default function AdminSettings() {
         </div>
 
         <div className="grid md:grid-cols-2 gap-4">
-          <div className="md:col-span-2 flex items-center justify-between rounded-lg border p-3">
+          <div className="md:col-span-2 flex items-center justify-between gap-3 rounded-lg border p-3">
             <div>
               <Label className="mb-0.5">Aktifkan Auto-Fetch</Label>
               <p className="text-xs text-slate-500">Jika aktif, website akan menampilkan 5 post terbaru otomatis.</p>
@@ -163,7 +166,7 @@ export default function AdminSettings() {
             <Label className="mb-1 block">Judul Section</Label>
             <Input value={form.instagram_section_title ?? ""} onChange={(e) => setForm({ ...form, instagram_section_title: e.target.value })} placeholder="Ikuti Instagram Kami" />
           </div>
-          <div className="flex items-center justify-between rounded-lg border p-3">
+          <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
             <Label>Tampilkan Section Instagram</Label>
             <Switch checked={form.instagram_section_enabled ?? true} onCheckedChange={(v) => setForm({ ...form, instagram_section_enabled: v })} />
           </div>
@@ -178,8 +181,8 @@ export default function AdminSettings() {
         </div>
       </div>
 
-      <div className="mt-6 flex justify-end">
-        <Button disabled={loading} onClick={save} className="bg-[#1E40AF] hover:bg-[#1E3A8A]">{loading ? "Menyimpan…" : "Simpan Perubahan"}</Button>
+      <div className="sticky bottom-20 z-20 mt-6 flex justify-end lg:bottom-4">
+        <Button disabled={loading} onClick={save} className="h-11 w-full rounded-xl bg-[#1E40AF] shadow-lg hover:bg-[#1E3A8A] sm:w-auto">{loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}{loading ? "Menyimpan…" : "Simpan Perubahan"}</Button>
       </div>
     </div>
   );

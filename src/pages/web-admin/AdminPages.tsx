@@ -17,7 +17,7 @@ export default function AdminPages() {
         { key: "title", label: "Judul", required: true },
         { key: "slug", label: "Slug", required: true },
         { key: "section", label: "Section (sejarah/visi-misi/sambutan/fasilitas/struktur)", colSpan: 2 },
-        { key: "cover_image_url", label: "URL Gambar", type: "url", colSpan: 2 },
+        { key: "cover_image_url", label: "Gambar", type: "image", colSpan: 2 },
         { key: "content", label: "Konten", type: "richtext", colSpan: 2 },
         { key: "sort_order", label: "Urutan", type: "number" },
         { key: "is_published", label: "Publikasikan", type: "boolean" },
