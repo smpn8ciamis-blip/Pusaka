@@ -295,6 +295,8 @@ DEFAULT_TEMPLATES.weekly_absence_wali = `📊 *REKAP KETIDAKHADIRAN MINGGUAN*\n\
 DEFAULT_TEMPLATES.weekly_absence_group = `📊 *SISWA SERING TIDAK HADIR*\nPeriode *{{periode}}*\n\n{{rekap}}\n_S=Sakit, I=Izin, A=Alfa (jumlah hari)_\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.assignment_notice = `📄 *SURAT TUGAS BARU*\n\nYth. Bapak/Ibu *{{nama}}*,\nAnda mendapat surat tugas berikut:\n• Nomor: {{nomor_surat}}\n• Jenis tugas: *{{jenis}}*\n• Uraian: {{uraian}}\n• Waktu: *{{waktu}}*\n• Lokasi: *{{lokasi}}*\n\nSetelah tugas selesai, mohon:\n1. Mengisi *LPT* (Laporan Pelaksanaan Tugas)\n2. Mengunggah *bukti kunjungan* (foto dan berkas PDF)\npada akun Pusaka, menu *Surat Tugas & SPPD*.\n\n📸 *Cara cepat:* balas (reply) pesan ini dengan foto bukti kunjungan, foto otomatis tersimpan di akun Pusaka Anda (maks. 3 foto).\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.assignment_followup = `⏰ *PENGINGAT BUKTI KUNJUNGAN*\n\nYth. Bapak/Ibu *{{nama}}*,\nSurat tugas berikut sudah selesai, namun *foto bukti kunjungan* Anda belum diunggah:\n• Nomor: {{nomor_surat}}\n• Jenis tugas: *{{jenis}}*\n• Waktu: {{waktu}}\n• Lokasi: {{lokasi}}\n\nMohon segera unggah di akun Pusaka, menu *Surat Tugas & SPPD*.\n\n📸 *Cara cepat:* balas (reply) pesan ini dengan foto bukti kunjungan, foto otomatis tersimpan di akun Anda (maks. 3 foto).\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.parent_points = `⚠️ *POIN PELANGGARAN*\n\nSiswa: *{{nama_siswa}}* ({{kelas}})\nTotal poin: *{{total_poin}}* ({{jumlah_catatan}} catatan)\n\n{{rincian}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.parent_attendance = `📅 *REKAP KEHADIRAN*\n\nSiswa: *{{nama_siswa}}* ({{kelas}})\nPeriode: {{periode}} (30 hari terakhir)\n\n✅ Hadir: *{{hadir}}* hari ({{persen}}%)\n⏰ Terlambat: {{terlambat}} hari (sudah termasuk hadir)\n🤒 Sakit: {{sakit}} hari\n📝 Izin: {{izin}} hari\n❌ Alfa: {{alpa}} hari\nTotal hari tercatat: {{total_hari}}\n\n{{rincian}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.piket_punch = `🕒 *ABSENSI PIKET TERCATAT*\n\nYth. Bapak/Ibu *{{nama}}*,\nAbsen *{{jenis}}* {{shift}} Anda tercatat pada {{tanggal}} pukul *{{jam}} WIB* melalui mesin absensi.\n\nTerima kasih atas pengabdiannya.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.teacher_saturday_greeting = `🌿 *SELAMAT AKHIR PEKAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\n\nTerima kasih atas dedikasi dan kerja keras Bapak/Ibu dalam mendidik anak-anak kita sepanjang pekan ini.\n\nHari {{hari}} adalah waktu untuk berhenti sejenak. Nikmatilah akhir pekan bersama keluarga, karena keluarga adalah sumber kekuatan terbesar seorang pendidik. Istirahatlah yang cukup dan siapkan energi terbaik untuk mengajar kembali di hari Senin.\n\nSemoga sehat dan bahagia selalu. 🙏\n_Pusaka - SMP Negeri 8 Ciamis_`;
 const DEFAULT_BOT_SETTINGS = {
@@ -312,6 +314,7 @@ const DEFAULT_BOT_SETTINGS = {
     saturday_greeting_time: '07:00',  // jam kirim (WIB)
     homeroom_att_reminder_enabled: false, // ingatkan wali kelas bila absensi kelasnya belum diisi guru jam pertama
     homeroom_att_reminder_times: '08:30', // jam pengecekan (WIB), boleh lebih dari satu dipisah koma
+    parent_query_enabled: true,       // orang tua (nomor tertaut) bisa mengetik "cek poin" / "absen" ke bot
     assignment_followup_enabled: true, // pengingat WA H+1 bagi pelaksana SPPD yang belum mengunggah foto bukti kunjungan
     assignment_followup_time: '09:00', // jam kirim (WIB), sekali sehari
     assignment_wa_enabled: true,      // WA ke guru/staf saat SPPD dibuat (jenis, waktu, lokasi + pengingat LPT & bukti kunjungan)
@@ -439,6 +442,9 @@ async function startBot() {
             const cleanText = text.toLowerCase();
             const senderPhone = getSenderPhoneNumber(msg);
             await sock.readMessages([msg.key]).catch(() => {});
+            // Orang tua (nomor sudah tertaut): "cek poin" / "absen". Dicek lebih dulu karena "cek ..." juga dipakai perintah admin.
+            const parentCmd = parentCommand(cleanText);
+            if (parentCmd) { await handleParentQuery(parentCmd, msg, from).catch(function(e) { console.error('[ORTU WA]', e.message); }); continue; }
             if (cleanText.startsWith('cek ') || cleanText.startsWith('info ')) {
                 if (senderPhone !== ADMIN_PHONE) continue; // bukan admin: abaikan tanpa membalas
                 const targetNisn = cleanText.replace(/^(cek|info)\s+/, '').replace(/\D/g, '');
@@ -510,7 +516,7 @@ async function startBot() {
                                 const realPhone = getSenderPhoneNumber(msg);
                                 await supabase.from('students').update({ parent_phone: realPhone }).eq('nisn', session.nisn);
                                 knownUsers.add(from); saveKnownUsers();
-                                await sendSafeMessage(from, { text: 'BERHASIL!\nNomor (' + realPhone + ') tertaut dengan ' + session.full_name + '.' }, { quoted: msg });
+                                await sendSafeMessage(from, { text: 'BERHASIL!\nNomor (' + realPhone + ') tertaut dengan ' + session.full_name + '.\n\nSekarang Anda bisa mengetik:\n• *cek poin* - poin pelanggaran dan rinciannya\n• *absen* - rekap kehadiran 30 hari terakhir' }, { quoted: msg });
                                 regSessions.delete(from);
                             } else { await sendSafeMessage(from, { text: 'Tanggal lahir tidak sesuai. Ketik BATAL.' }, { quoted: msg }); }
                         } catch (e) {}
@@ -1146,6 +1152,106 @@ async function notifyTravelCreated(travelId, userId) {
         queued++;
     }
     return { status: 'ok', queued: queued, no_phone: noPhone };
+}
+
+// ===================== ORANG TUA: CEK POIN PELANGGARAN & KEHADIRAN LEWAT WA =====================
+// Hanya untuk nomor WA yang sudah tertaut ke siswa (lewat alur DAFTAR: NISN + tanggal lahir).
+const PARENT_CMDS = {
+    poin: ['cek poin', 'poin', 'cek pelanggaran', 'pelanggaran'],
+    absen: ['absen', 'cek absen', 'absensi', 'cek absensi', 'kehadiran', 'cek kehadiran']
+};
+function parentCommand(cleanText) {
+    const t = String(cleanText).replace(/\s+/g, ' ').trim();
+    for (const k in PARENT_CMDS) if (PARENT_CMDS[k].indexOf(t) !== -1) return k;
+    return null;
+}
+// Nomor di basis data bisa tersimpan sebagai 62812..., 0812..., +62812..., atau 812...
+function phoneVariants(intl) {
+    const n = String(intl).replace(/\D/g, '');
+    const local = n.startsWith('62') ? n.slice(2) : n.replace(/^0/, '');
+    return Array.from(new Set([n, '+' + n, '0' + local, local]));
+}
+function ddmmyyyy(iso) { return String(iso).slice(0, 10).split('-').reverse().join('/'); }
+const parentQueryLast = new Map();
+const PARENT_QUERY_GAP_MS = 15000;     // jeda per nomor agar tidak membanjiri bot
+async function buildPointsVars(st) {
+    const v = await supabase.from('student_violations').select('points, violation_date, notes, violation_types(name)')
+        .eq('student_id', st.id).order('violation_date', { ascending: false }).order('created_at', { ascending: false });
+    if (v.error) throw v.error;
+    const rows = v.data || [];
+    const total = rows.reduce(function(sum, x) { return sum + (Number(x.points) || 0); }, 0);
+    const MAX = 10;
+    const lines = rows.slice(0, MAX).map(function(x, i) {
+        const nama = (x.violation_types && x.violation_types.name) || 'Pelanggaran';
+        const note = x.notes ? '\n    _' + String(x.notes).replace(/[\r\n*_~`]+/g, ' ').slice(0, 80) + '_' : '';
+        return (i + 1) + '. ' + ddmmyyyy(x.violation_date) + ' - ' + nama + ' (' + (Number(x.points) || 0) + ' poin)' + note;
+    });
+    if (rows.length > MAX) lines.push('... dan ' + (rows.length - MAX) + ' catatan lainnya');
+    return {
+        nama_siswa: st.full_name, kelas: (st.classes && st.classes.name) || '-', total_poin: String(total), jumlah_catatan: String(rows.length),
+        rincian: rows.length ? lines.join('\n') : 'Tidak ada catatan pelanggaran. 👍'
+    };
+}
+// Status harian: absensi guru (jam pelajaran paling awal pada hari itu), cadangan: absensi RFID. Terlambat dihitung hadir (sama seperti di aplikasi).
+async function buildAttendanceVars(st, fromIso, toIso) {
+    const prom = await Promise.all([
+        supabase.from('attendance').select('status, date, sched_start_time').eq('student_id', st.id).gte('date', fromIso).lte('date', toIso),
+        supabase.from('rfid_attendance').select('status, date').eq('student_id', st.id).gte('date', fromIso).lte('date', toIso)
+    ]);
+    if (prom[0].error) throw prom[0].error;
+    const byDate = new Map();
+    const firstLesson = new Map();
+    for (const a of (prom[0].data || [])) {
+        if (!a.date || !a.status) continue;
+        const key = a.sched_start_time ? String(a.sched_start_time) : '99:99';
+        const cur = firstLesson.get(a.date);
+        if (cur === undefined || key < cur) { firstLesson.set(a.date, key); byDate.set(a.date, String(a.status).toLowerCase()); }
+    }
+    for (const a of (prom[1].data || [])) { if (a.date && a.status && !byDate.has(a.date)) byDate.set(a.date, String(a.status).toLowerCase()); }
+    const c = { hadir: 0, terlambat: 0, sakit: 0, izin: 0, alpa: 0 };
+    const absent = [];
+    byDate.forEach(function(status, date) {
+        if (status === 'terlambat') { c.terlambat++; c.hadir++; }
+        else if (status === 'hadir') c.hadir++;
+        else if (status === 'sakit' || status === 'izin' || status === 'alpa') { c[status]++; absent.push({ date: date, status: status }); }
+    });
+    absent.sort(function(x, y) { return x.date < y.date ? -1 : 1; });
+    const total = c.hadir + c.sakit + c.izin + c.alpa;
+    const LABEL = { sakit: 'Sakit', izin: 'Izin', alpa: 'Alfa' };
+    const MAX = 15;
+    const lines = absent.slice(0, MAX).map(function(x) { return '• ' + fmtTanggalHari(x.date) + ' - ' + LABEL[x.status]; });
+    if (absent.length > MAX) lines.push('... dan ' + (absent.length - MAX) + ' hari lainnya');
+    return {
+        nama_siswa: st.full_name, kelas: (st.classes && st.classes.name) || '-', periode: ddmmyyyy(fromIso) + ' - ' + ddmmyyyy(toIso),
+        hadir: String(c.hadir), terlambat: String(c.terlambat), sakit: String(c.sakit), izin: String(c.izin), alpa: String(c.alpa),
+        total_hari: String(total), persen: total ? String(Math.round(c.hadir / total * 100)) : '0',
+        rincian: total === 0 ? 'Belum ada data kehadiran pada periode ini.' : (lines.length ? lines.join('\n') : 'Tidak ada ketidakhadiran. 👍')
+    };
+}
+async function handleParentQuery(kind, msg, from) {
+    const cfg = await getBotSettings();
+    if (!cfg.parent_query_enabled) return;                       // dimatikan admin: abaikan seperti sebelumnya
+    const sender = getSenderPhoneNumber(msg);
+    if (Date.now() - (parentQueryLast.get(sender) || 0) < PARENT_QUERY_GAP_MS) return;
+    parentQueryLast.set(sender, Date.now());
+    if (parentQueryLast.size > 2000) parentQueryLast.clear();
+    const reply = function(t) { enqueueTask(function() { return sendSafeMessage(from, { text: t }, { quoted: msg }); }); };
+    const sRes = await supabase.from('students').select('id, full_name, nisn, classes(name)')
+        .in('parent_phone', phoneVariants(sender)).eq('status', 'aktif').eq('is_alumni', false).order('full_name').limit(5);
+    if (sRes.error) { console.error('[ORTU WA]', sRes.error.message); reply('Database sedang gangguan. Coba lagi nanti.'); return; }
+    const students = sRes.data || [];
+    if (students.length === 0) {
+        reply('Nomor WhatsApp ini belum tertaut dengan siswa mana pun.\n\nKetik *DAFTAR* lalu ikuti petunjuk (NISN dan tanggal lahir siswa) untuk menautkan nomor.');
+        return;
+    }
+    const today = wibNow().date, from30 = addDaysIso(today, -29);
+    for (const st of students) {
+        try {
+            const vars = kind === 'poin' ? await buildPointsVars(st) : await buildAttendanceVars(st, from30, today);
+            const text = await renderMessage(kind === 'poin' ? 'parent_points' : 'parent_attendance', vars);
+            if (text) reply(text);
+        } catch (e) { console.error('[ORTU WA]', e.message); reply('Data ' + st.full_name + ' gagal dimuat. Coba lagi nanti.'); }
+    }
 }
 
 // ===================== BALAS NOTIFIKASI DENGAN FOTO = UNGGAH BUKTI KUNJUNGAN =====================
