@@ -178,7 +178,7 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
       { name: 'waktu', sample: 'Senin, 26/10/2026 s.d. Selasa, 27/10/2026 (2 hari)', hint: 'Tanggal pelaksanaan' },
       { name: 'lokasi', sample: 'Dinas Pendidikan Kab. Ciamis', hint: 'Lokasi tugas' },
     ],
-    defaultBody: `📄 *SURAT TUGAS BARU*\n\nYth. Bapak/Ibu *{{nama}}*,\nAnda mendapat surat tugas berikut:\n• Nomor: {{nomor_surat}}\n• Jenis tugas: *{{jenis}}*\n• Uraian: {{uraian}}\n• Waktu: *{{waktu}}*\n• Lokasi: *{{lokasi}}*\n\nSetelah tugas selesai, mohon:\n1. Mengisi *LPT* (Laporan Pelaksanaan Tugas)\n2. Mengunggah *bukti kunjungan* (foto dan berkas PDF)\npada akun Pusaka, menu *Surat Tugas & SPPD*.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`,
+    defaultBody: `📄 *SURAT TUGAS BARU*\n\nYth. Bapak/Ibu *{{nama}}*,\nAnda mendapat surat tugas berikut:\n• Nomor: {{nomor_surat}}\n• Jenis tugas: *{{jenis}}*\n• Uraian: {{uraian}}\n• Waktu: *{{waktu}}*\n• Lokasi: *{{lokasi}}*\n\nSetelah tugas selesai, mohon:\n1. Mengisi *LPT* (Laporan Pelaksanaan Tugas)\n2. Mengunggah *bukti kunjungan* (foto dan berkas PDF)\npada akun Pusaka, menu *Surat Tugas & SPPD*.\n\n📸 *Cara cepat:* balas (reply) pesan ini dengan foto bukti kunjungan, foto otomatis tersimpan di akun Pusaka Anda (maks. 3 foto).\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`,
   },
   {
     key: 'piket_punch',

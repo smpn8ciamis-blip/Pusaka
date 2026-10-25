@@ -601,7 +601,7 @@ function ReminderTab() {
             <Switch id="as-en" checked={assignWa} onCheckedChange={setAssignWa} />
           </div>
           <p className="text-xs text-muted-foreground">
-            Saat SPPD dibuat, guru/staf pelaksana otomatis menerima WA berisi jenis, waktu, dan lokasi tugas, beserta pengingat mengisi LPT dan mengunggah bukti kunjungan di akun Pusaka. Dikirim sekali per orang saat SPPD dibuat (bot tidak memeriksa berkala); yang nomor HP-nya kosong dilewati. Isi pesan bisa diubah di tab Template.
+            Saat SPPD dibuat, guru/staf pelaksana otomatis menerima WA berisi jenis, waktu, dan lokasi tugas, beserta pengingat mengisi LPT dan mengunggah bukti kunjungan di akun Pusaka. Dikirim sekali per orang saat SPPD dibuat (bot tidak memeriksa berkala); yang nomor HP-nya kosong dilewati. Penerima dapat membalas (reply) pesan itu dengan foto, dan foto otomatis tersimpan sebagai bukti kunjungan di akunnya (maks. 3). Isi pesan bisa diubah di tab Template; template lama perlu ditambah kalimat ajakan membalas dengan foto.
           </p>
         </div>
         <Button onClick={() => save.mutate()} disabled={save.isPending}>
