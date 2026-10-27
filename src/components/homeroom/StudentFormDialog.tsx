@@ -11,9 +11,11 @@ import { useCreateStudent, useUpdateStudent, type Student } from "@/hooks/useHom
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  classId: string;
+  classId: string | null;
   schoolId: string;
   student?: Student | null; // null = create
+  /** Bila diisi (admin), kelas dapat dipilih di formulir; bila tidak, siswa mengikuti `classId` (wali kelas). */
+  classOptions?: { id: string; name: string }[];
 }
 
 const EMPTY: Partial<Student> = {
@@ -29,7 +31,7 @@ const EMPTY: Partial<Student> = {
   status: "aktif",
 };
 
-export default function StudentFormDialog({ open, onOpenChange, classId, schoolId, student }: Props) {
+export default function StudentFormDialog({ open, onOpenChange, classId, schoolId, student, classOptions }: Props) {
   const [form, setForm] = useState<Partial<Student>>(EMPTY);
   const isEdit = !!student?.id;
 
@@ -37,18 +39,19 @@ export default function StudentFormDialog({ open, onOpenChange, classId, schoolI
   const updateMut = useUpdateStudent();
 
   useEffect(() => {
-    if (open) setForm(student ?? EMPTY);
-  }, [open, student]);
+    if (open) setForm(student ?? { ...EMPTY, class_id: classId });
+  }, [open, student, classId]);
 
   const set = <K extends keyof Student>(key: K, value: Student[K] | string) =>
     setForm((f) => ({ ...f, [key]: value as any }));
 
   const submit = async () => {
     if (!form.full_name?.trim() || !form.nis?.trim()) return;
+    if (classOptions && !form.class_id) return;
 
     const payload: any = {
       ...form,
-      class_id: classId,
+      class_id: classOptions ? form.class_id : classId,
       school_id: schoolId,
     };
 
@@ -68,7 +71,7 @@ export default function StudentFormDialog({ open, onOpenChange, classId, schoolI
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit Data Siswa" : "Tambah Siswa Baru"}</DialogTitle>
           <DialogDescription>
-            Data siswa akan otomatis terhubung ke kelas ini.
+            {classOptions ? "Pilih kelas siswa pada isian di bawah." : "Data siswa akan otomatis terhubung ke kelas ini."}
           </DialogDescription>
         </DialogHeader>
 
@@ -77,6 +80,19 @@ export default function StudentFormDialog({ open, onOpenChange, classId, schoolI
             <Label>Nama Lengkap *</Label>
             <Input value={form.full_name ?? ""} onChange={(e) => set("full_name", e.target.value)} />
           </div>
+          {classOptions && (
+            <div className="md:col-span-2">
+              <Label>Kelas *</Label>
+              <Select value={form.class_id ?? ""} onValueChange={(v) => set("class_id", v)}>
+                <SelectTrigger><SelectValue placeholder="Pilih kelas..." /></SelectTrigger>
+                <SelectContent>
+                  {classOptions.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div>
             <Label>NIS *</Label>
             <Input value={form.nis ?? ""} onChange={(e) => set("nis", e.target.value)} placeholder="20260001" />
@@ -131,7 +147,7 @@ export default function StudentFormDialog({ open, onOpenChange, classId, schoolI
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Batal</Button>
-          <Button onClick={submit} disabled={loading || !form.full_name || !form.nis}>
+          <Button onClick={submit} disabled={loading || !form.full_name || !form.nis || (!!classOptions && !form.class_id)}>
             {loading ? "Menyimpan..." : "Simpan"}
           </Button>
         </DialogFooter>

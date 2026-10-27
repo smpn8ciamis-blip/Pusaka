@@ -1,24 +1,22 @@
-import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAcademicYear } from '@/contexts/AcademicYearContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import HomeroomStudentTab from '@/components/homeroom/HomeroomStudentTab';
+import SchoolStudentTab from '@/components/homeroom/SchoolStudentTab';
 
 /**
- * Akun Siswa: data siswa & akun login per kelas, plus cetak PDF daftar akun.
+ * Akun Siswa: data siswa & akun login, plus cetak PDF daftar akun.
  * - Guru wali kelas: otomatis kelas yang diampu.
- * - Admin / kesiswaan: pilih kelas.
+ * - Admin / kesiswaan / super admin: seluruh siswa satu sekolah (filter tahun, kelas, akun) —
+ *   seperti wali kelas, tetapi cakupannya sekolah.
  */
 export default function ClassStudentAccounts() {
   const { user, userRole } = useAuth();
   const { selectedYear } = useAcademicYear();
   const isTeacher = userRole === 'teacher';
-  const [pickedClassId, setPickedClassId] = useState<string>('');
 
   const { data: teacher } = useQuery({
     queryKey: ['student-accounts-teacher', user?.id],
@@ -44,21 +42,24 @@ export default function ClassStudentAccounts() {
     },
   });
 
-  // Admin / kesiswaan: semua kelas pada tahun pelajaran terpilih
-  const { data: allClasses = [] } = useQuery({
-    queryKey: ['student-accounts-classes', selectedYear],
-    enabled: !isTeacher && !!selectedYear,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('classes').select('id, name, academic_year, school_id')
-        .eq('academic_year', selectedYear!).order('name');
-      if (error) throw error;
-      return data ?? [];
-    },
-  });
+  if (!isTeacher) {
+    return (
+      <DashboardLayout>
+        <div className="space-y-4 p-4 md:p-6">
+          <div>
+            <h1 className="text-2xl font-bold">Akun Siswa</h1>
+            <p className="text-sm text-muted-foreground">
+              Data siswa dan akun login seluruh kelas di sekolah — akses penuh seperti wali kelas, dengan cakupan satu sekolah.
+            </p>
+          </div>
+          <SchoolStudentTab />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
-  const cls = isTeacher ? homeroomClass : allClasses.find((c) => c.id === pickedClassId) ?? null;
-  const schoolId = (cls as any)?.school_id ?? teacher?.school_id ?? null;
+  const cls = homeroomClass;
+  const schoolId = cls?.school_id ?? teacher?.school_id ?? null;
 
   return (
     <DashboardLayout>
@@ -69,20 +70,6 @@ export default function ClassStudentAccounts() {
             Data siswa dan akun login per kelas{cls ? ` — ${cls.name} (${cls.academic_year})` : ''}.
           </p>
         </div>
-
-        {!isTeacher && (
-          <div className="max-w-xs space-y-1">
-            <Label>Kelas</Label>
-            <Select value={pickedClassId} onValueChange={setPickedClassId}>
-              <SelectTrigger><SelectValue placeholder="Pilih kelas" /></SelectTrigger>
-              <SelectContent>
-                {allClasses.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
 
         {cls?.id && schoolId ? (
           <HomeroomStudentTab
@@ -95,11 +82,9 @@ export default function ClassStudentAccounts() {
         ) : (
           <Card>
             <CardContent className="py-10 text-center text-muted-foreground">
-              {isTeacher
-                ? (teacher && selectedYear
-                    ? 'Anda belum menjadi wali kelas pada tahun pelajaran ini.'
-                    : 'Memuat data kelas...')
-                : 'Pilih kelas untuk menampilkan akun siswa.'}
+              {teacher && selectedYear
+                ? 'Anda belum menjadi wali kelas pada tahun pelajaran ini.'
+                : 'Memuat data kelas...'}
             </CardContent>
           </Card>
         )}
