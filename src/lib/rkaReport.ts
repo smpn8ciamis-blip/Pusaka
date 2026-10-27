@@ -54,6 +54,37 @@ export function summarizeMonths(entries: MonthEntry[][]): MonthSummaryRow[] {
     .map((r) => { cum += r.total; return { ...r, cumulative: cum }; });
 }
 
+/* ================= TABULASI KEGIATAN × BULAN ================= */
+export interface ActivityMonthRow { name: string; months: number[]; total: number }
+export interface ActivityMonthMatrix {
+  rows: ActivityMonthRow[];
+  /** total tiap bulan, indeks 0..11, 12 = tanpa bulan */
+  colTotals: number[];
+  grand: number;
+  hasNoMonth: boolean;
+}
+export type MatrixOrder = 'urut' | 'besar' | 'kecil' | 'nama';
+
+/** Anggaran tiap kegiatan per bulan. Item yang berlangsung beberapa bulan dibagi rata (sama dengan rincian per bulan). */
+export function buildActivityMonthMatrix(items: RkaItemLite[]): ActivityMonthMatrix {
+  const entries = buildMonthEntries(items);
+  const byName = new Map<string, number[]>();
+  for (const item of items) if (!byName.has(item.activity_name)) byName.set(item.activity_name, new Array(13).fill(0));
+  entries.forEach((list, idx) => list.forEach((e) => { const row = byName.get(e.item.activity_name); if (row) row[idx] += e.share; }));
+  const rows = Array.from(byName, ([name, months]) => ({ name, months, total: months.reduce((a, b) => a + b, 0) }));
+  const colTotals = new Array(13).fill(0);
+  rows.forEach((r) => r.months.forEach((v, i) => { colTotals[i] += v; }));
+  return { rows, colTotals, grand: colTotals.reduce((a, b) => a + b, 0), hasNoMonth: colTotals[NO_MONTH] > 0 };
+}
+
+export function sortMatrixRows(rows: ActivityMonthRow[], order: MatrixOrder): ActivityMonthRow[] {
+  const out = [...rows];
+  if (order === 'besar') out.sort((a, b) => b.total - a.total);
+  else if (order === 'kecil') out.sort((a, b) => a.total - b.total);
+  else if (order === 'nama') out.sort((a, b) => a.name.localeCompare(b.name, 'id'));
+  return out;
+}
+
 const itemText = (i: RkaItemLite) => [i.activity_name, i.description].filter(Boolean).join(' — ');
 const qtyText = (i: RkaItemLite) => `${Number(i.volume) || 0}${i.unit ? ' ' + i.unit : ''}`;
 const idDate = () => new Date().toISOString().slice(0, 10);
@@ -140,8 +171,24 @@ export function exportRkaCsv(opts: { rows: Array<{ bulan: string; item: RkaItemL
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+export function exportRkaMatrixCsv(opts: { matrix: ActivityMonthMatrix; rows: ActivityMonthRow[]; fileName: string }) {
+  const { matrix, rows } = opts;
+  const esc = (v: unknown) => { const s = String(v ?? ''); return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const mc = matrix.hasNoMonth ? 13 : 12;
+  const head = ['Kegiatan', ...MONTH_NAMES, ...(matrix.hasNoMonth ? ['Tanpa Bulan'] : []), 'Total'];
+  const lines = [head.join(',')];
+  rows.forEach((r) => lines.push([r.name, ...r.months.slice(0, mc).map((v) => Math.round(v)), Math.round(r.total)].map(esc).join(',')));
+  lines.push(['TOTAL', ...matrix.colTotals.slice(0, mc).map((v) => Math.round(v)), Math.round(matrix.grand)].map(esc).join(','));
+  const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = opts.fileName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
 /* ================= PDF ================= */
-export type RkaPdfMode = 'bulan' | 'semua-bulan' | 'rincian';
+export type RkaPdfMode = 'bulan' | 'semua-bulan' | 'rincian' | 'tabulasi';
 
 export interface BuildRkaPdfOptions {
   mode: RkaPdfMode;
@@ -155,6 +202,8 @@ export interface BuildRkaPdfOptions {
   /** Keterangan filter/pencarian yang sedang aktif */
   filterLines?: string[];
   penjabName?: string | null;
+  /** Urutan kegiatan pada tabel tabulasi bulan (bawaan: urutan RKA) */
+  matrixOrder?: MatrixOrder;
 }
 
 const rp = (n: number) => formatRupiah(Math.round(n));
@@ -174,6 +223,7 @@ export async function buildRkaPdf(opts: BuildRkaPdfOptions): Promise<jsPDF> {
   const heading =
     mode === 'bulan' ? `RINCIAN RKA BULAN ${monthTitle(opts.monthIdx ?? 0).toUpperCase()}`
     : mode === 'semua-bulan' ? 'RINCIAN RKA PER BULAN'
+    : mode === 'tabulasi' ? 'TABULASI ANGGARAN RKA PER BULAN'
     : 'RINCIAN RENCANA KEGIATAN DAN ANGGARAN';
   doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(0, 0, 0);
   doc.text(heading, W / 2, y, { align: 'center' }); y += 5;
@@ -216,7 +266,40 @@ export async function buildRkaPdf(opts: BuildRkaPdfOptions): Promise<jsPDF> {
     y = lastY() + 6;
   };
 
-  if (mode === 'bulan') {
+  /** Tabel kegiatan × 12 bulan (+ tanpa bulan bila ada) dengan total tiap bulan. */
+  const matrixTable = () => {
+    const m = buildActivityMonthMatrix(items);
+    const list = sortMatrixRows(m.rows, opts.matrixOrder ?? 'urut');
+    if (list.length === 0) {
+      doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(60, 60, 60);
+      doc.text('Tidak ada data kegiatan.', W / 2, y + 6, { align: 'center' }); y += 12;
+      return;
+    }
+    const maxCell = Math.max(0, ...list.flatMap((r) => r.months));
+    const inK = maxCell >= 100_000_000; // angka besar: tampilkan dalam ribuan agar muat di kolom
+    const fmt = (n: number) => (n > 0 ? (inK ? Math.round(n / 1000) : Math.round(n)).toLocaleString('id-ID') : '-');
+    const mc = m.hasNoMonth ? 13 : 12;
+    const noW = 8, totW = 24, kegW = m.hasNoMonth ? 40 : 46;
+    const monW = (W - 2 * M - noW - kegW - totW) / mc;
+    doc.setFont('helvetica', 'italic'); doc.setFontSize(8); doc.setTextColor(60, 60, 60);
+    doc.text(`Nilai dalam ${inK ? 'ribuan rupiah' : 'rupiah'}. Anggaran kegiatan yang berlangsung beberapa bulan dibagi rata ke bulan pelaksanaan.`, M, y + 3); y += 5;
+    const colStyles: Record<number, any> = { 0: { halign: 'center', cellWidth: noW }, 1: { cellWidth: kegW }, [mc + 2]: { halign: 'right', cellWidth: totW, fontStyle: 'bold' } };
+    for (let i = 0; i < mc; i++) colStyles[i + 2] = { halign: 'right', cellWidth: monW };
+    autoTable(doc, {
+      ...base, startY: y,
+      styles: { ...base.styles, fontSize: 6.5, cellPadding: 1.2 },
+      head: [['No', 'Kegiatan', ...MONTH_SHORT_PDF, ...(m.hasNoMonth ? ['Tanpa Bln'] : []), 'Total']],
+      body: list.map((r, i) => [i + 1, r.name, ...r.months.slice(0, mc).map(fmt), fmt(r.total)]),
+      foot: [[{ content: 'TOTAL', colSpan: 2, styles: { halign: 'right' } }, ...m.colTotals.slice(0, mc).map(fmt), fmt(m.grand)]],
+      footStyles: { fillColor: [229, 231, 235], textColor: [17, 24, 39], fontStyle: 'bold' },
+      columnStyles: colStyles,
+    });
+    y = lastY() + 6;
+  };
+
+  if (mode === 'tabulasi') {
+    matrixTable();
+  } else if (mode === 'bulan') {
     if (entries[opts.monthIdx ?? 0].length === 0) {
       doc.setFont('helvetica', 'italic'); doc.text('Tidak ada kegiatan pada bulan ini.', W / 2, y + 6, { align: 'center' }); y += 12;
     } else monthTable(opts.monthIdx ?? 0);
@@ -230,6 +313,10 @@ export async function buildRkaPdf(opts: BuildRkaPdfOptions): Promise<jsPDF> {
       columnStyles: { 1: { halign: 'center' }, 2: { halign: 'right' }, 3: { halign: 'center' }, 4: { halign: 'right' } },
     });
     y = lastY() + 8;
+    if (y > H - 50) { doc.addPage(); y = 16; }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(0, 0, 0);
+    doc.text('Tabulasi Kegiatan per Bulan', M, y); y += 1;
+    matrixTable();
     summary.forEach((r) => {
       if (entries[r.idx].length === 0) return;
       if (y > H - 50) { doc.addPage(); y = 16; }

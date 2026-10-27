@@ -14,7 +14,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { DataPagination } from '@/components/ui/data-pagination';
 import { formatMonths, formatRupiah, MONTH_SHORT } from '@/lib/rkaParser';
 import {
-  buildMonthEntries, buildRkaPdf, exportRkaCsv, exportRkaXlsx, monthTitle, NO_MONTH, summarizeMonths,
+  buildActivityMonthMatrix, buildMonthEntries, buildRkaPdf, exportRkaCsv, exportRkaMatrixCsv, exportRkaXlsx, monthTitle, NO_MONTH,
+  sortMatrixRows, summarizeMonths,
   type RkaItemLite, type RkaPdfMode,
 } from '@/lib/rkaReport';
 import type { PaperSize } from '@/lib/journalReport';
@@ -22,6 +23,8 @@ import type { PaperSize } from '@/lib/journalReport';
 type SortKey = 'urut' | 'besar' | 'kecil' | 'nama';
 const SORT_LABEL: Record<SortKey, string> = { urut: 'Urutan RKA', besar: 'Anggaran terbesar', kecil: 'Anggaran terkecil', nama: 'Nama kegiatan A–Z' };
 const ALL = 'all';
+const nf = new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 });
+const cell = (n: number) => (n > 0 ? nf.format(Math.round(n)) : '-');
 
 interface Props {
   items: RkaItemLite[];
@@ -33,7 +36,7 @@ interface Props {
 const lc = (s: unknown) => String(s ?? '').toLowerCase();
 
 export function RkaDetailPanel({ items, standardName, fiscalYear, penjabName }: Props) {
-  const [view, setView] = useState<'bulan' | 'semua'>('bulan');
+  const [view, setView] = useState<'bulan' | 'semua' | 'tabulasi'>('bulan');
   const [month, setMonth] = useState<number | 'all'>(() => Math.min(new Date().getMonth(), 11));
   const [search, setSearch] = useState('');
   const [activity, setActivity] = useState<string>(ALL);
@@ -77,6 +80,11 @@ export function RkaDetailPanel({ items, standardName, fiscalYear, penjabName }: 
   const maxMonth = Math.max(1, ...summary.map((r) => r.total));
   const filteredEntries = useMemo(() => buildMonthEntries(filteredItems), [filteredItems]);
 
+  // Tabulasi kegiatan × bulan (mengikuti pencarian, filter kegiatan, dan urutan)
+  const matrix = useMemo(() => buildActivityMonthMatrix(filteredItems), [filteredItems]);
+  const matrixRows = useMemo(() => sortMatrixRows(matrix.rows, sort), [matrix, sort]);
+  const matrixMax = Math.max(1, ...matrixRows.flatMap((r) => r.months));
+
   // Baris tabel untuk tampilan terpilih
   type Row = { key: string; bulan: string; item: RkaItemLite; share: number; spread: number };
   const rows: Row[] = useMemo(() => {
@@ -94,10 +102,13 @@ export function RkaDetailPanel({ items, standardName, fiscalYear, penjabName }: 
     return out;
   }, [view, month, filteredEntries, filteredItems, sort, items]);
 
+  const isTab = view === 'tabulasi';
   const rowsTotal = rows.reduce((a, r) => a + r.share, 0);
-  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const listLen = isTab ? matrixRows.length : rows.length;
+  const totalPages = Math.max(1, Math.ceil(listLen / pageSize));
   const safePage = Math.min(page, totalPages);
   const pageRows = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const matrixPageRows = matrixRows.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   const curSummary = month === 'all' ? null : summary.find((r) => r.idx === month) ?? null;
   const hasNoMonth = allEntries[NO_MONTH].length > 0;
@@ -110,11 +121,11 @@ export function RkaDetailPanel({ items, standardName, fiscalYear, penjabName }: 
     return l;
   }, [view, month, activity, search]);
 
-  const pdfMode: RkaPdfMode = view === 'semua' ? 'rincian' : month === 'all' ? 'semua-bulan' : 'bulan';
+  const pdfMode: RkaPdfMode = view === 'semua' ? 'rincian' : view === 'tabulasi' ? 'tabulasi' : month === 'all' ? 'semua-bulan' : 'bulan';
 
   const makePdf = async () => buildRkaPdf({
     mode: pdfMode, items: filteredItems, monthIdx: month === 'all' ? 0 : month, standardName, fiscalYear, paper,
-    settings: schoolSettings as any, filterLines, penjabName,
+    settings: schoolSettings as any, filterLines, penjabName, matrixOrder: sort,
   });
 
   const run = async (fn: () => Promise<void> | void) => {
@@ -122,7 +133,7 @@ export function RkaDetailPanel({ items, standardName, fiscalYear, penjabName }: 
     try { await fn(); } catch (e) { console.error(e); toast.error('Gagal memproses dokumen'); } finally { setBusy(false); }
   };
 
-  const fileBase = `rka-${standardName.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}${view === 'bulan' && month !== 'all' ? '-' + monthTitle(month).toLowerCase() : ''}`;
+  const fileBase = `rka-${standardName.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}${view === 'bulan' && month !== 'all' ? '-' + monthTitle(month).toLowerCase() : ''}${isTab ? '-tabulasi-bulan' : ''}`;
   const doPreview = () => run(async () => {
     const doc = await makePdf();
     setPreviewUrl(URL.createObjectURL(doc.output('blob')));
@@ -137,15 +148,18 @@ export function RkaDetailPanel({ items, standardName, fiscalYear, penjabName }: 
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   });
   const doExcel = () => run(() => exportRkaXlsx({ items: filteredItems, standardName, fiscalYear }));
-  const doCsv = () => exportRkaCsv({ rows: rows.map((r) => ({ bulan: r.bulan, item: r.item, share: r.share })), fileName: `${fileBase}.csv` });
+  const doCsv = () => (isTab
+    ? exportRkaMatrixCsv({ matrix, rows: matrixRows, fileName: `${fileBase}.csv` })
+    : exportRkaCsv({ rows: rows.map((r) => ({ bulan: r.bulan, item: r.item, share: r.share })), fileName: `${fileBase}.csv` }));
 
   const noData = items.length === 0;
 
   return (
     <div className="space-y-4">
-      <Tabs value={view} onValueChange={(v) => setView(v as 'bulan' | 'semua')}>
-        <TabsList>
+      <Tabs value={view} onValueChange={(v) => setView(v as 'bulan' | 'semua' | 'tabulasi')}>
+        <TabsList className="h-auto flex-wrap">
           <TabsTrigger value="bulan">Rincian per Bulan</TabsTrigger>
+          <TabsTrigger value="tabulasi">Tabulasi Bulan</TabsTrigger>
           <TabsTrigger value="semua">Semua Rincian</TabsTrigger>
         </TabsList>
 
@@ -190,13 +204,14 @@ export function RkaDetailPanel({ items, standardName, fiscalYear, penjabName }: 
           )}
         </TabsContent>
 
+        <TabsContent value="tabulasi" />
         <TabsContent value="semua" />
       </Tabs>
 
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
-            {view === 'bulan' ? `Kegiatan ${month === 'all' ? 'Semua Bulan' : 'Bulan ' + monthTitle(month)}` : 'Semua Rincian RKA'}
+            {isTab ? 'Tabulasi Anggaran Kegiatan per Bulan' : view === 'bulan' ? `Kegiatan ${month === 'all' ? 'Semua Bulan' : 'Bulan ' + monthTitle(month)}` : 'Semua Rincian RKA'}
           </CardTitle>
           <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center">
             <div className="relative md:w-72">
@@ -233,13 +248,65 @@ export function RkaDetailPanel({ items, standardName, fiscalYear, penjabName }: 
             <Button variant="outline" size="sm" className="gap-1.5" onClick={doPrint} disabled={busy || noData}><Printer className="h-4 w-4" /> Cetak</Button>
             <Button variant="outline" size="sm" className="gap-1.5" onClick={doDownload} disabled={busy || noData}><FileText className="h-4 w-4" /> PDF</Button>
             <Button variant="outline" size="sm" className="gap-1.5" onClick={doExcel} disabled={busy || noData}><FileSpreadsheet className="h-4 w-4" /> Excel</Button>
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={doCsv} disabled={noData || rows.length === 0}><Download className="h-4 w-4" /> CSV</Button>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={doCsv} disabled={noData || listLen === 0}><Download className="h-4 w-4" /> CSV</Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            {rows.length} baris{(search || activity !== ALL) && ` (dari ${view === 'bulan' ? 'hasil filter' : items.length + ' rincian'})`} · Total {formatRupiah(Math.round(rowsTotal))}. PDF & Excel mengikuti pencarian dan filter aktif.
+            {isTab
+              ? `${matrixRows.length} kegiatan · Total ${formatRupiah(Math.round(matrix.grand))}. Nilai dalam rupiah; kegiatan yang berlangsung beberapa bulan dibagi rata. PDF, Pratinjau, dan CSV mengikuti pencarian, filter, dan urutan aktif.`
+              : `${rows.length} baris${(search || activity !== ALL) ? ` (dari ${view === 'bulan' ? 'hasil filter' : items.length + ' rincian'})` : ''} · Total ${formatRupiah(Math.round(rowsTotal))}. PDF & Excel mengikuti pencarian dan filter aktif.`}
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
+          {isTab ? (
+            <div className="overflow-x-auto rounded-md border">
+              <Table className="min-w-[1100px] text-xs">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="sticky left-0 z-10 w-10 bg-background">No</TableHead>
+                    <TableHead className="sticky left-10 z-10 min-w-[180px] bg-background">Kegiatan</TableHead>
+                    {MONTH_SHORT.map((m, i) => (
+                      <TableHead key={m} className="p-0 text-right">
+                        <button
+                          type="button" title={`Lihat rincian ${monthTitle(i)}`}
+                          onClick={() => { setMonth(i); setView('bulan'); }}
+                          className="h-full w-full px-2 py-3 text-right font-medium hover:bg-muted/60"
+                        >{m}</button>
+                      </TableHead>
+                    ))}
+                    {matrix.hasNoMonth && <TableHead className="text-right">Tanpa Bulan</TableHead>}
+                    <TableHead className="text-right">Total</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {matrixPageRows.length === 0 ? (
+                    <TableRow><TableCell colSpan={16} className="py-8 text-center text-muted-foreground">{noData ? 'Belum ada data.' : 'Tidak ada kegiatan yang cocok.'}</TableCell></TableRow>
+                  ) : matrixPageRows.map((r, i) => (
+                    <TableRow key={r.name + i}>
+                      <TableCell className="sticky left-0 z-10 bg-background">{(safePage - 1) * pageSize + i + 1}</TableCell>
+                      <TableCell className="sticky left-10 z-10 min-w-[180px] bg-background font-medium">{r.name}</TableCell>
+                      {r.months.slice(0, matrix.hasNoMonth ? 13 : 12).map((v, mi) => (
+                        <TableCell
+                          key={mi}
+                          className={`whitespace-nowrap text-right ${v > 0 ? 'font-medium' : 'text-muted-foreground'}`}
+                          style={v > 0 ? { backgroundColor: `hsl(var(--primary) / ${(0.06 + 0.22 * (v / matrixMax)).toFixed(3)})` } : undefined}
+                        >{cell(v)}</TableCell>
+                      ))}
+                      <TableCell className="whitespace-nowrap text-right font-semibold">{cell(r.total)}</TableCell>
+                    </TableRow>
+                  ))}
+                  {matrixRows.length > 0 && (
+                    <TableRow className="bg-muted/40">
+                      <TableCell colSpan={2} className="sticky left-0 z-10 bg-muted text-right font-semibold">Total{(search || activity !== ALL) ? ' (hasil filter)' : ''}</TableCell>
+                      {matrix.colTotals.slice(0, matrix.hasNoMonth ? 13 : 12).map((v, mi) => (
+                        <TableCell key={mi} className="whitespace-nowrap text-right font-bold">{cell(v)}</TableCell>
+                      ))}
+                      <TableCell className="whitespace-nowrap text-right font-bold">{cell(matrix.grand)}</TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
@@ -282,8 +349,9 @@ export function RkaDetailPanel({ items, standardName, fiscalYear, penjabName }: 
               </TableBody>
             </Table>
           </div>
+          )}
           <DataPagination
-            currentPage={safePage} totalPages={totalPages} totalItems={rows.length} pageSize={pageSize}
+            currentPage={safePage} totalPages={totalPages} totalItems={listLen} pageSize={pageSize}
             onPageChange={setPage} onPageSizeChange={setPageSize}
           />
         </CardContent>
@@ -291,7 +359,7 @@ export function RkaDetailPanel({ items, standardName, fiscalYear, penjabName }: 
 
       <Dialog open={!!previewUrl} onOpenChange={(o) => { if (!o) setPreviewUrl(null); }}>
         <DialogContent className="max-w-5xl h-[90dvh] flex flex-col">
-          <DialogHeader><DialogTitle>Pratinjau {view === 'bulan' ? 'Rincian per Bulan' : 'Rincian RKA'}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Pratinjau {isTab ? 'Tabulasi Anggaran per Bulan' : view === 'bulan' ? 'Rincian per Bulan' : 'Rincian RKA'}</DialogTitle></DialogHeader>
           {previewUrl && <iframe src={previewUrl} title="Pratinjau RKA" className="min-h-0 w-full flex-1 rounded border" />}
           <div className="flex flex-wrap justify-end gap-2">
             <Button variant="outline" onClick={() => setPreviewUrl(null)}>Tutup</Button>
