@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -28,6 +29,178 @@ interface BotStatus {
   pairing_code: string | null;
   pairing_phone: string | null;
   last_disconnect: { reason: string; statusCode: number; at: string } | null;
+}
+
+/* ------------------------ Antrian & log pesan ------------------------ */
+interface QueueItem { position?: number; to: string | null; kind: string; queued_at: string }
+interface LogItem { at: string; queued_at: string | null; to: string; kind: string; status: 'terkirim' | 'gagal'; error: string | null; preview: string | null }
+interface QueueResponse {
+  queue_length: number;
+  processing: QueueItem | null;
+  pending: QueueItem[];
+  log: LogItem[];
+  log_source: 'database' | 'memori';
+}
+
+const EXTRA_KIND_LABELS: Record<string, string> = {
+  balasan: 'Balasan perintah WA',
+  tes_kirim: 'Pesan uji',
+  rekap_kelas: 'Rekap absensi ke grup',
+  rekap_grup_kelas: 'Rekap grup kelas',
+  langsung: 'Kirim langsung',
+  lainnya: 'Lainnya',
+};
+const kindLabel = (k: string) => WA_TEMPLATES.find((t) => t.key === k)?.title ?? EXTRA_KIND_LABELS[k] ?? k;
+
+function formatTarget(jid: string | null): string {
+  if (!jid) return '-';
+  if (jid.endsWith('@g.us')) return 'Grup WhatsApp';
+  const num = jid.split('@')[0];
+  return /^\d+$/.test(num) ? `+${num}` : num;
+}
+const fmtTime = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
+
+function QueueLogCard() {
+  const [logStatus, setLogStatus] = useState<'all' | 'terkirim' | 'gagal'>('all');
+  const [limit, setLimit] = useState('50');
+
+  const { data, error, isLoading, isFetching, refetch } = useQuery({
+    queryKey: ['wa-bot-queue', logStatus, limit],
+    queryFn: () => waAdminFetch<QueueResponse>(`/admin/queue?limit=${limit}${logStatus === 'all' ? '' : `&status=${logStatus}`}`),
+    refetchInterval: 5000,
+    retry: false,
+  });
+
+  const waiting = data?.pending.length ?? 0;
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <CardTitle>Antrian &amp; Log Pesan</CardTitle>
+            <CardDescription>Pesan yang menunggu giliran kirim dan riwayat pengiriman terakhir (disegarkan otomatis tiap 5 detik).</CardDescription>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+            <RefreshCw className={`h-4 w-4 mr-1 ${isFetching ? 'animate-spin' : ''}`} /> Muat ulang
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {isLoading && <p className="text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Memuat…</p>}
+        {error && (
+          <p className="text-sm text-destructive">
+            {(error as Error).message}. Bila pesan ini menyebut halaman tidak ditemukan, salin server.js terbaru ke bot lalu restart.
+          </p>
+        )}
+        {data && (
+          <Tabs defaultValue="antrian">
+            <TabsList>
+              <TabsTrigger value="antrian">Antrian ({waiting + (data.processing ? 1 : 0)})</TabsTrigger>
+              <TabsTrigger value="log">Log Pengiriman</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="antrian" className="mt-3">
+              {waiting === 0 && !data.processing ? (
+                <p className="text-sm text-muted-foreground py-4">Tidak ada pesan dalam antrian.</p>
+              ) : (
+                <div className="overflow-x-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-16">Urutan</TableHead>
+                        <TableHead>Tujuan</TableHead>
+                        <TableHead>Jenis pesan</TableHead>
+                        <TableHead>Masuk antrian</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {data.processing && (
+                        <TableRow className="bg-muted/40">
+                          <TableCell><Badge variant="default" className="gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Kirim</Badge></TableCell>
+                          <TableCell>{formatTarget(data.processing.to)}</TableCell>
+                          <TableCell>{kindLabel(data.processing.kind)}</TableCell>
+                          <TableCell className="text-xs">{fmtTime(data.processing.queued_at)}</TableCell>
+                        </TableRow>
+                      )}
+                      {data.pending.map((p) => (
+                        <TableRow key={`${p.position}-${p.queued_at}-${p.to}`}>
+                          <TableCell>{p.position}</TableCell>
+                          <TableCell>{formatTarget(p.to)}</TableCell>
+                          <TableCell>{kindLabel(p.kind)}</TableCell>
+                          <TableCell className="text-xs">{fmtTime(p.queued_at)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground mt-2">Jeda 3–6 detik antar pesan agar nomor tidak diblokir WhatsApp. Isi pesan baru dibuat saat gilirannya tiba, jadi tampil di Log setelah dikirim.</p>
+            </TabsContent>
+
+            <TabsContent value="log" className="mt-3 space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <Select value={logStatus} onValueChange={(v) => setLogStatus(v as typeof logStatus)}>
+                  <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Semua status</SelectItem>
+                    <SelectItem value="terkirim">Terkirim</SelectItem>
+                    <SelectItem value="gagal">Gagal</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={limit} onValueChange={setLimit}>
+                  <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="50">50 terakhir</SelectItem>
+                    <SelectItem value="100">100 terakhir</SelectItem>
+                    <SelectItem value="200">200 terakhir</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {data.log_source === 'memori' && (
+                <p className="text-xs text-amber-600">
+                  Tabel log belum dibuat, jadi hanya pesan sejak bot terakhir dihidupkan yang tampil. Jalankan migrasi <code>20261027140000_wa_message_log.sql</code> agar log tersimpan permanen (30 hari).
+                </p>
+              )}
+              {data.log.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4">Belum ada log pengiriman.</p>
+              ) : (
+                <div className="overflow-x-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Waktu</TableHead>
+                        <TableHead>Tujuan</TableHead>
+                        <TableHead>Jenis pesan</TableHead>
+                        <TableHead>Isi (ringkas)</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {data.log.map((l, i) => (
+                        <TableRow key={`${l.at}-${l.to}-${i}`}>
+                          <TableCell className="text-xs whitespace-nowrap">{fmtTime(l.at)}</TableCell>
+                          <TableCell className="whitespace-nowrap">{formatTarget(l.to)}</TableCell>
+                          <TableCell>{kindLabel(l.kind)}</TableCell>
+                          <TableCell className="max-w-[320px] truncate text-xs text-muted-foreground" title={l.preview ?? ''}>{l.preview || '-'}</TableCell>
+                          <TableCell>
+                            {l.status === 'terkirim'
+                              ? <Badge variant="default">Terkirim</Badge>
+                              : <div><Badge variant="destructive">Gagal</Badge>{l.error && <div className="text-xs text-destructive mt-1">{l.error}</div>}</div>}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 /* ------------------------------ Koneksi ------------------------------ */
@@ -119,6 +292,8 @@ function ConnectionTab() {
           )}
         </CardContent>
       </Card>
+
+      <QueueLogCard />
 
       {status && !status.connected && (
         <Card>
