@@ -180,7 +180,7 @@ async function notifyPiketWa(sn, pin, at) {
         jam: at.toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false }).replace('.', ':')
     };
     const jid = formatToInternational(phone) + '@s.whatsapp.net';
-    enqueueTask(async () => { const text = await renderMessage('piket_punch', vars); if (text) await sendSafeMessage(jid, { text: text }); });
+    enqueueTask(async () => { const text = await renderMessage('piket_punch', vars); if (text) await sendSafeMessage(jid, { text: text }); }, { to: jid, kind: 'piket_punch' });
 }
 
 // Kirim ke semua perangkat milik satu akun; langganan kedaluwarsa dibersihkan otomatis.
@@ -358,29 +358,80 @@ async function getBotSettings() {
     return settingsCache.value;
 }
 
+// ---- Antrian kirim + log pesan ----
+// Setiap tugas membawa keterangan { to, kind } agar daftar antrian bisa ditampilkan di aplikasi.
+// Log pengiriman disimpan di memori (cadangan) dan tabel wa_message_log (bertahan setelah restart).
 const taskQueue = [];
 let isProcessingQueue = false;
-function enqueueTask(taskFn) { taskQueue.push(taskFn); processQueue(); }
+let currentTask = null;
+const SEND_LOG_MAX = 300;
+const SEND_LOG_KEEP_DAYS = 30;
+const sendLog = [];
+let sendLogDbOffUntil = 0;
+let sendLogLastPurge = 0;
+function enqueueTask(taskFn, meta) { taskQueue.push({ fn: taskFn, meta: meta || {}, at: Date.now() }); processQueue(); }
 async function processQueue() {
     if (isProcessingQueue || taskQueue.length === 0) return;
     isProcessingQueue = true;
     while (taskQueue.length > 0) {
-        const task = taskQueue.shift();
-        try { await task(); } catch (err) { console.error('[QUEUE ERROR]:', err.message); }
+        const item = taskQueue.shift();
+        currentTask = { meta: item.meta, at: item.at, startedAt: Date.now() };
+        try { await item.fn(); } catch (err) { console.error('[QUEUE ERROR]:', err.message); }
+        currentTask = null;
         await new Promise(r => setTimeout(r, Math.floor(Math.random() * 3000) + 3000));
     }
     isProcessingQueue = false;
 }
+function previewOfContent(content, kind) {
+    if (kind === 'balasan') return '(balasan perintah WhatsApp)'; // isi balasan bisa memuat data siswa; tidak disimpan
+    if (!content) return '';
+    const t = String(content.text || content.caption || '');
+    if (!t) return content.image ? '[gambar]' : content.document ? '[dokumen]' : '[pesan]';
+    const one = t.replace(/\s+/g, ' ').trim();
+    return one.length > 160 ? one.slice(0, 160) + '…' : one;
+}
+// Catat hasil kirim. Tidak boleh mengganggu pengiriman: semua galat ditelan.
+function recordSend(entry) {
+    try {
+        sendLog.unshift(entry);
+        if (sendLog.length > SEND_LOG_MAX) sendLog.length = SEND_LOG_MAX;
+        if (Date.now() < sendLogDbOffUntil) return;
+        Promise.resolve(supabase.from('wa_message_log').insert({
+            created_at: entry.at, queued_at: entry.queued_at, to_jid: entry.to, kind: entry.kind,
+            status: entry.status, error: entry.error || null, preview: entry.preview, wa_message_id: entry.wa_id || null
+        })).then((r) => {
+            if (r && r.error) { sendLogDbOffUntil = Date.now() + 10 * 60 * 1000; console.error('[LOG WA] tabel wa_message_log belum siap, memakai memori:', r.error.message); return; }
+            if (Date.now() - sendLogLastPurge > 24 * 3600 * 1000) { // pembersihan harian, dipicu saat ada pengiriman
+                sendLogLastPurge = Date.now();
+                const cutoff = new Date(Date.now() - SEND_LOG_KEEP_DAYS * 86400 * 1000).toISOString();
+                return supabase.from('wa_message_log').delete().lt('created_at', cutoff);
+            }
+        }).catch((e) => { sendLogDbOffUntil = Date.now() + 10 * 60 * 1000; console.error('[LOG WA]', e && e.message); });
+    } catch (e) { /* abaikan */ }
+}
 async function sendSafeMessage(jid, content, options) {
     options = options || {};
-    if (!sock || !isReady) return;
+    const meta = currentTask ? currentTask.meta : {};
+    const kind = meta.kind || 'langsung';
+    const entry = {
+        at: new Date().toISOString(), queued_at: currentTask ? new Date(currentTask.at).toISOString() : null,
+        to: jid, kind: kind, status: 'terkirim', error: null, preview: previewOfContent(content, kind), wa_id: null
+    };
+    if (!sock || !isReady) { entry.status = 'gagal'; entry.error = 'Bot belum terhubung ke WhatsApp'; recordSend(entry); return; }
     try {
         await sock.sendPresenceUpdate('composing', jid);
         await new Promise(r => setTimeout(r, 1500));
         const sent = await sock.sendMessage(jid, content, options);
         await sock.sendPresenceUpdate('paused', jid);
+        entry.at = new Date().toISOString();
+        entry.wa_id = sent && sent.key && sent.key.id ? sent.key.id : null;
+        recordSend(entry);
         return sent;
-    } catch (e) { console.error('[SEND ERROR to ' + jid + ']:', e.message); }
+    } catch (e) {
+        console.error('[SEND ERROR to ' + jid + ']:', e.message);
+        entry.status = 'gagal'; entry.error = String(e.message || e).slice(0, 200); entry.at = new Date().toISOString();
+        recordSend(entry);
+    }
 }
 
 async function startBot() {
@@ -448,7 +499,7 @@ async function startBot() {
             if (cleanText.startsWith('cek ') || cleanText.startsWith('info ')) {
                 if (senderPhone !== ADMIN_PHONE) continue; // bukan admin: abaikan tanpa membalas
                 const targetNisn = cleanText.replace(/^(cek|info)\s+/, '').replace(/\D/g, '');
-                if (!targetNisn) { enqueueTask(() => sendSafeMessage(from, { text: 'Format: cek NISN' }, { quoted: msg })); continue; }
+                if (!targetNisn) { enqueueTask(() => sendSafeMessage(from, { text: 'Format: cek NISN' }, { quoted: msg }), { to: from, kind: 'balasan' }); continue; }
                 enqueueTask(async () => {
                     try {
                         let res1 = await supabase.from('students').select('*, classes(name)').eq('nisn', targetNisn).maybeSingle();
@@ -462,7 +513,7 @@ async function startBot() {
                         const parentPhone = student.parent_phone ? '*' + student.parent_phone + '*' : '_Belum tertaut_';
                         await sendSafeMessage(from, { text: 'DATA NISN\n\nNama: ' + student.full_name + '\nNISN: ' + student.nisn + '\nKelas: ' + className + '\nOrtu: ' + (student.parent_name || '-') + '\nTgl Lahir: ' + (student.birth_date || '-') + '\nNo WA: ' + parentPhone }, { quoted: msg });
                     } catch (e) { await sendSafeMessage(from, { text: 'Database gangguan.' }, { quoted: msg }); }
-                });
+                }, { to: from, kind: 'balasan' });
                 continue;
             }
             if (cleanText.startsWith('hapus ') || cleanText.startsWith('reset ') || cleanText.startsWith('unreg ')) {
@@ -481,10 +532,10 @@ async function startBot() {
                         await supabase.from('students').update({ parent_phone: null }).eq('nisn', student.nisn);
                         await sendSafeMessage(from, { text: 'Tautan dihapus untuk ' + student.full_name + '.' }, { quoted: msg });
                     } catch (e) {}
-                });
+                }, { to: from, kind: 'balasan' });
                 continue;
             }
-            if (cleanText === 'batal') { if (regSessions.has(from)) { regSessions.delete(from); enqueueTask(() => sendSafeMessage(from, { text: 'Pendaftaran dibatalkan.' }, { quoted: msg })); } continue; }
+            if (cleanText === 'batal') { if (regSessions.has(from)) { regSessions.delete(from); enqueueTask(() => sendSafeMessage(from, { text: 'Pendaftaran dibatalkan.' }, { quoted: msg }), { to: from, kind: 'balasan' }); } continue; }
             if (regSessions.has(from) && Date.now() - (regSessions.get(from).at || 0) > REG_SESSION_TTL) regSessions.delete(from);
             if (regSessions.has(from)) {
                 const session = regSessions.get(from);
@@ -504,7 +555,7 @@ async function startBot() {
                             const rombel = (student.classes && student.classes.name) || '';
                             await sendSafeMessage(from, { text: 'Data ditemukan!\nNama: ' + student.full_name + '\nKelas: ' + rombel + '\n\nMasukkan Tanggal Lahir (DDMMYYYY):' }, { quoted: msg });
                         } catch (e) {}
-                    });
+                    }, { to: from, kind: 'balasan' });
                     continue;
                 }
                 if (session.step === 'WAIT_DOB') {
@@ -520,11 +571,11 @@ async function startBot() {
                                 regSessions.delete(from);
                             } else { await sendSafeMessage(from, { text: 'Tanggal lahir tidak sesuai. Ketik BATAL.' }, { quoted: msg }); }
                         } catch (e) {}
-                    });
+                    }, { to: from, kind: 'balasan' });
                     continue;
                 }
             }
-            if (cleanText === 'daftar') { regSessions.set(from, { step: 'WAIT_NISN', at: Date.now() }); enqueueTask(() => sendSafeMessage(from, { text: 'PENDAFTARAN PRESENSI\n\nMasukkan NISN:\n\n(Ketik BATAL untuk batal)' }, { quoted: msg })); continue; }
+            if (cleanText === 'daftar') { regSessions.set(from, { step: 'WAIT_NISN', at: Date.now() }); enqueueTask(() => sendSafeMessage(from, { text: 'PENDAFTARAN PRESENSI\n\nMasukkan NISN:\n\n(Ketik BATAL untuk batal)' }, { quoted: msg }), { to: from, kind: 'balasan' }); continue; }
             // Pesan lain di luar perintah yang ditentukan (daftar, batal, cek/info/hapus/reset/unreg khusus admin, dan alur pendaftaran) diabaikan: bot tidak membalas.
         }
     });
@@ -541,7 +592,7 @@ app.post('/send-attendance', requireAdmin, async (req, res) => {
         enqueueTask(async () => {
             const messageText = await renderMessage('attendance_batch', { nama_siswa: student_name, tanggal: date || 'Hari ini', waktu: time, status: status });
             if (messageText) await sendSafeMessage(targetJid, { text: messageText });
-        });
+        }, { to: targetJid, kind: 'attendance_batch' });
         enqueuedCount++;
     }
     return res.json({ status: 'success', message: enqueuedCount + ' antrian masuk.' });
@@ -575,7 +626,7 @@ app.post('/notify-parent', rateLimit('notifyparent', 120, 60000), async (req, re
         enqueueTask(async () => {
             const messageText = await renderMessage('parent_presence', { nama_siswa: student.full_name, tanggal: date || 'Hari ini', waktu: time || '-', jenis: typeText, status: statusText });
             if (messageText) await sendSafeMessage(targetJid, { text: messageText });
-        });
+        }, { to: targetJid, kind: 'parent_presence' });
         return res.json({ status: 'success', message: 'Notifikasi masuk antrian untuk ' + student.full_name + '.' });
     } catch (e) { return res.status(500).json({ status: 'error', message: e.message }); }
 });
@@ -659,7 +710,7 @@ async function runTeacherReminders() {
                 const rekap = list.map(function(x, i) { return (i + 1) + '. ' + String(x.start_time).slice(0, 5) + '-' + String(x.end_time).slice(0, 5) + ' | ' + (className.get(x.class_id) || '-') + ' | ' + x.subject; }).join('\n');
                 const vars = { nama_guru: prof.full_name, hari: HARI[now.dow], tanggal: tgl, jumlah_jam: list.length, rekap: rekap };
                 const jid = formatToInternational(prof.phone) + '@s.whatsapp.net';
-                enqueueTask(async () => { const text = await renderMessage('teacher_daily_recap', vars); if (text) await sendSafeMessage(jid, { text: text }); });
+                enqueueTask(async () => { const text = await renderMessage('teacher_daily_recap', vars); if (text) await sendSafeMessage(jid, { text: text }); }, { to: jid, kind: 'teacher_daily_recap' });
             }
             markReminderSent('recap:done');
         }
@@ -675,7 +726,7 @@ async function runTeacherReminders() {
                 const key = 'pre:' + s.id; if (reminderSent.has(key)) continue; markReminderSent(key);
                 const tplKey = isFirst ? 'teacher_first' : 'teacher_next';
                 const vars = { nama_guru: prof.full_name, kelas: kelas, mapel: s.subject, jam: jam };
-                enqueueTask(async () => { const text = await renderMessage(tplKey, vars); if (text) await sendSafeMessage(jid, { text: text }); });
+                enqueueTask(async () => { const text = await renderMessage(tplKey, vars); if (text) await sendSafeMessage(jid, { text: text }); }, { to: jid, kind: tplKey });
             } else {
                 const key = 'post:' + s.id; if (reminderSent.has(key)) continue;
                 let journalDone = true, attDone = true;
@@ -695,7 +746,7 @@ async function runTeacherReminders() {
                 if (journalDone && attDone) continue;
                 const todo = []; if (!attDone) todo.push('*absensi siswa*'); if (!journalDone) todo.push('*jurnal mengajar*');
                 const vars = { nama_guru: prof.full_name, kelas: kelas, mapel: s.subject, jam: jam, belum_terisi: todo.map(function(t){ return '- ' + t; }).join('\n') };
-                enqueueTask(async () => { const text = await renderMessage('teacher_followup', vars); if (text) await sendSafeMessage(jid, { text: text }); });
+                enqueueTask(async () => { const text = await renderMessage('teacher_followup', vars); if (text) await sendSafeMessage(jid, { text: text }); }, { to: jid, kind: 'teacher_followup' });
             }
         }
     } catch (e) { console.error('[REMINDER ERROR]:', e.message); }
@@ -752,7 +803,7 @@ async function runHomeroomAttendanceReminder() {
                 guru_pengajar: (guru && guru.full_name) || '-'
             };
             const jid = formatToInternational(wali.phone) + '@s.whatsapp.net';
-            enqueueTask(async () => { const text = await renderMessage('homeroom_attendance_reminder', vars); if (text) await sendSafeMessage(jid, { text: text }); });
+            enqueueTask(async () => { const text = await renderMessage('homeroom_attendance_reminder', vars); if (text) await sendSafeMessage(jid, { text: text }); }, { to: jid, kind: 'homeroom_attendance_reminder' });
         }
     } catch (e) { console.error('[HOMEROOM REMINDER ERROR]:', e.message); }
     finally { homeroomRunning = false; }
@@ -797,7 +848,7 @@ async function sendWeeklyAbsenceRecap(range, cfg) {
                 : 'Tidak ada siswa yang sering tidak hadir pekan ini.';
             const vars = { nama_wali: wali.full_name, kelas: c.name, periode: periode, jumlah_siswa: c.list.length, rekap: rekap, sering: sering };
             const jid = formatToInternational(wali.phone) + '@s.whatsapp.net';
-            enqueueTask(async () => { const text = await renderMessage('weekly_absence_wali', vars); if (text) await sendSafeMessage(jid, { text: text }); });
+            enqueueTask(async () => { const text = await renderMessage('weekly_absence_wali', vars); if (text) await sendSafeMessage(jid, { text: text }); }, { to: jid, kind: 'weekly_absence_wali' });
             queued++;
         }
     }
@@ -815,7 +866,7 @@ async function sendWeeklyAbsenceRecap(range, cfg) {
         if (parts.length) {
             const vars = { periode: periode, rekap: parts.join('\n\n') + (extra ? '\n\n...dan ' + extra + ' siswa lainnya' : '') };
             const gjid = cfg.class_recap_group_jid;
-            enqueueTask(async () => { const text = await renderMessage('weekly_absence_group', vars); if (text) await sendSafeMessage(gjid, { text: text }); });
+            enqueueTask(async () => { const text = await renderMessage('weekly_absence_group', vars); if (text) await sendSafeMessage(gjid, { text: text }); }, { to: gjid, kind: 'weekly_absence_group' });
             group = true;
         }
     }
@@ -882,7 +933,7 @@ async function runSaturdayGreeting() {
             const key = 'sat:' + t.id; if (reminderSent.has(key)) continue; markReminderSent(key);
             const vars = { nama_guru: prof.full_name, hari: 'Sabtu' };
             const jid = formatToInternational(prof.phone) + '@s.whatsapp.net';
-            enqueueTask(async () => { const text = await renderMessage('teacher_saturday_greeting', vars); if (text) await sendSafeMessage(jid, { text: text }); });
+            enqueueTask(async () => { const text = await renderMessage('teacher_saturday_greeting', vars); if (text) await sendSafeMessage(jid, { text: text }); }, { to: jid, kind: 'teacher_saturday_greeting' });
         }
         markReminderSent('sat:done');
     } catch (e) { console.error('[SATURDAY GREETING ERROR]:', e.message); }
@@ -1048,7 +1099,7 @@ async function runAssignmentFollowup() {
                     const ri = await supabase.from('wa_notice_messages').insert(Object.assign({ wa_message_id: sent.key.id }, rec));
                     if (ri.error) console.error('[BUKTI WA] gagal mencatat pesan:', ri.error.message);
                 }
-            });
+            }, { to: jid, kind: 'assignment_followup' });
             queued++;
         }
     }
@@ -1148,7 +1199,7 @@ async function notifyTravelCreated(travelId, userId) {
                 const ri = await supabase.from('wa_notice_messages').insert(Object.assign({ wa_message_id: sent.key.id }, rec));
                 if (ri.error) console.error('[SPPD WA] gagal mencatat pesan:', ri.error.message);
             }
-        });
+        }, { to: jid, kind: 'assignment_notice' });
         queued++;
     }
     return { status: 'ok', queued: queued, no_phone: noPhone };
@@ -1235,7 +1286,7 @@ async function handleParentQuery(kind, msg, from) {
     if (Date.now() - (parentQueryLast.get(sender) || 0) < PARENT_QUERY_GAP_MS) return;
     parentQueryLast.set(sender, Date.now());
     if (parentQueryLast.size > 2000) parentQueryLast.clear();
-    const reply = function(t) { enqueueTask(function() { return sendSafeMessage(from, { text: t }, { quoted: msg }); }); };
+    const reply = function(t) { enqueueTask(function() { return sendSafeMessage(from, { text: t }, { quoted: msg }); }, { to: from, kind: 'balasan' }); };
     const sRes = await supabase.from('students').select('id, full_name, nisn, classes(name)')
         .in('parent_phone', phoneVariants(sender)).eq('status', 'aktif').eq('is_alumni', false).order('full_name').limit(5);
     if (sRes.error) { console.error('[ORTU WA]', sRes.error.message); reply('Database sedang gangguan. Coba lagi nanti.'); return; }
@@ -1275,7 +1326,7 @@ async function doNoticePhotoReply(msg, img, stanzaId, from) {
     // Pemeriksaan tambahan: chat/nomor harus cocok (JID @lid tidak memuat nomor, jadi diterima apa adanya).
     const sender = getSenderPhoneNumber(msg);
     if (!(from === rec.jid || sender === rec.phone || from.endsWith('@lid'))) { console.log('[BUKTI WA] pengirim tidak cocok, diabaikan'); return; }
-    const reply = function(t) { enqueueTask(function() { return sendSafeMessage(from, { text: t }, { quoted: msg }); }); };
+    const reply = function(t) { enqueueTask(function() { return sendSafeMessage(from, { text: t }, { quoted: msg }); }, { to: from, kind: 'balasan' }); };
     if (!rec.assignment_letter_id || !rec.user_id) { reply('⚠️ Foto belum bisa disimpan: akun Pusaka Anda belum terhubung dengan surat tugas ini. Hubungi admin.'); return; }
     const fname = 'WA-' + msg.key.id + '.jpg';
     const dupe = await supabase.from('letter_attachments').select('id').eq('assignment_letter_id', rec.assignment_letter_id).eq('file_name', fname).limit(1);
@@ -1329,11 +1380,35 @@ app.get('/admin/status', requireAdmin, (req, res) => {
         connected: isReady,
         phone: isReady ? botPhone() : null,
         name: isReady && sock.user ? sock.user.name || null : null,
-        queue_length: taskQueue.length,
+        queue_length: taskQueue.length + (currentTask ? 1 : 0),
         pairing_code: pairingValid ? botState.pairingCode : null,
         pairing_phone: pairingValid ? botState.pairingPhone : null,
         last_disconnect: botState.lastDisconnect
     });
+});
+
+// Daftar antrian yang menunggu + log pengiriman terakhir (untuk tab Koneksi di aplikasi).
+app.get('/admin/queue', requireAdmin, async (req, res) => {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+    const statusFilter = req.query.status === 'terkirim' || req.query.status === 'gagal' ? req.query.status : null;
+    const pending = taskQueue.slice(0, 200).map((t, i) => ({ position: i + 1, to: t.meta.to || null, kind: t.meta.kind || 'lainnya', queued_at: new Date(t.at).toISOString() }));
+    const processing = currentTask ? { to: currentTask.meta.to || null, kind: currentTask.meta.kind || 'lainnya', queued_at: new Date(currentTask.at).toISOString() } : null;
+    let log = null, source = 'database';
+    if (Date.now() >= sendLogDbOffUntil) {
+        try {
+            let q = supabase.from('wa_message_log').select('created_at, queued_at, to_jid, kind, status, error, preview').order('created_at', { ascending: false }).limit(limit);
+            if (statusFilter) q = q.eq('status', statusFilter);
+            const r = await q;
+            if (r.error) throw r.error;
+            log = (r.data || []).map((x) => ({ at: x.created_at, queued_at: x.queued_at, to: x.to_jid, kind: x.kind, status: x.status, error: x.error, preview: x.preview }));
+        } catch (e) { sendLogDbOffUntil = Date.now() + 60 * 1000; log = null; }
+    }
+    if (log === null) {
+        source = 'memori';
+        log = sendLog.filter((x) => !statusFilter || x.status === statusFilter).slice(0, limit)
+            .map((x) => ({ at: x.at, queued_at: x.queued_at, to: x.to, kind: x.kind, status: x.status, error: x.error, preview: x.preview }));
+    }
+    res.json({ status: 'success', queue_length: taskQueue.length + (currentTask ? 1 : 0), processing: processing, pending: pending, log: log, log_source: source });
 });
 
 app.post('/admin/pair', requireAdmin, async (req, res) => {
@@ -1377,7 +1452,7 @@ app.post('/admin/test-send', requireAdmin, async (req, res) => {
     }
     if (!message) return res.status(400).json({ status: 'error', message: 'Pesan kosong.' });
     const jid = formatToInternational(phone) + '@s.whatsapp.net';
-    enqueueTask(async () => { await sendSafeMessage(jid, { text: message }); });
+    enqueueTask(async () => { await sendSafeMessage(jid, { text: message }); }, { to: jid, kind: 'tes_kirim' });
     res.json({ status: 'success', message: 'Pesan uji masuk antrian.' });
 });
 
@@ -1423,7 +1498,7 @@ app.post('/admin/test-connection-teachers', requireAdmin, async (req, res) => {
                 if (!text) return;
                 console.log('[TES KONEKSI] ' + c.name + ' (' + c.phone + ')');
                 await sendSafeMessage(jid, { text });
-            });
+            }, { to: jid, kind: 'test_connection' });
         }
         res.json({ status: 'success', queued: contacts.length, skipped_no_phone: total - contacts.length,
             message: contacts.length + ' pesan masuk antrian (jeda 3-6 detik per pesan).' });
@@ -1482,7 +1557,7 @@ function buildClassRecapVars(rows, date) {
 async function queueClassRecap(rows, date, jid) {
     const text = await renderMessage('class_attendance_recap', buildClassRecapVars(rows, date));
     if (!text) return false;
-    enqueueTask(async () => { console.log('[REKAP KELAS] kirim ke grup ' + jid); await sendSafeMessage(jid, { text: text }); });
+    enqueueTask(async () => { console.log('[REKAP KELAS] kirim ke grup ' + jid); await sendSafeMessage(jid, { text: text }); }, { to: jid, kind: 'rekap_kelas' });
     return true;
 }
 
@@ -1596,13 +1671,17 @@ async function runClassGroupRecaps(date, opts) {
                 console.log('[REKAP GRUP KELAS] ' + c.class_name + ' -> ' + g.group_jid);
                 await sock.sendPresenceUpdate('composing', g.group_jid);
                 await new Promise(function(r) { setTimeout(r, 1500); });
-                await sock.sendMessage(g.group_jid, { text: text });
+                const sentG = await sock.sendMessage(g.group_jid, { text: text });
                 await sock.sendPresenceUpdate('paused', g.group_jid);
+                recordSend({ at: new Date().toISOString(), queued_at: currentTask ? new Date(currentTask.at).toISOString() : null, to: g.group_jid,
+                    kind: 'rekap_grup_kelas', status: 'terkirim', error: null, preview: previewOfContent({ text: text }, 'rekap_grup_kelas'), wa_id: sentG && sentG.key ? sentG.key.id : null });
             } catch (e) {
+                recordSend({ at: new Date().toISOString(), queued_at: currentTask ? new Date(currentTask.at).toISOString() : null, to: g.group_jid,
+                    kind: 'rekap_grup_kelas', status: 'gagal', error: String(e.message || e).slice(0, 200), preview: previewOfContent({ text: text }, 'rekap_grup_kelas'), wa_id: null });
                 console.error('[REKAP GRUP KELAS GAGAL ' + c.class_name + ']:', e.message);
                 sent.delete(c.class_id); saveClassGroupSent(date, sent); // boleh dicoba lagi pada simpan absen berikutnya
             } finally { classGroupInflight.delete(c.class_id); }
-        });
+        }, { to: g.group_jid, kind: 'rekap_grup_kelas' });
     }
     return result;
 }
