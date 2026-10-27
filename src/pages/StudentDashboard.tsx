@@ -20,7 +20,7 @@ import {
   MapPin, CalendarDays, Hash, Users, GraduationCap, CreditCard, IdCard,
   UserCircle, Home, Box, BarChart3, ChevronRight, AlertCircle, BadgeCheck,
   Search, Grid3X3, CalendarCheck, Megaphone, Hourglass, ExternalLink, Link2,
-  Trash2, X, Upload, CheckCircle2, Wifi, WifiOff,
+  Trash2, X, Upload, CheckCircle2, Wifi, WifiOff, Monitor,
 } from "lucide-react";
 import { format, isValid, formatDistanceToNow } from "date-fns";
 import { id as localeId } from "date-fns/locale";
@@ -36,19 +36,17 @@ import StudentElearningTab from "@/components/dashboard/StudentElearningTab";
 import AttendanceTrendChart from "@/components/dashboard/AttendanceTrendChart";
 import StudentIdCardTab from "@/components/dashboard/StudentIdCardTab";
 import AttendanceLogList from "@/components/dashboard/AttendanceLogList";
+import { DesktopShell } from "@/components/student-dashboard/DesktopShell";
+import { DesktopOverview, type DesktopStat } from "@/components/student-dashboard/DesktopOverview";
+import { useStudentDashboardView } from "@/hooks/useStudentDashboardView";
+import {
+  safeFormatDate, calcPercent, DAY_NAMES, toMinutes, greetingFor, resolveLesson, humanMinutes,
+  type AttendanceSummary, type HeroNews, type LessonState,
+} from "@/lib/studentDashboard";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
 // ═══════════════════════════════════════════════════════════════════════════
-
-interface AttendanceSummary {
-  total: number;
-  hadir: number;
-  terlambat: number;
-  izin: number;
-  sakit: number;
-  alpa: number;
-}
 
 interface AttendanceLog {
   id: string;
@@ -70,25 +68,9 @@ interface NotificationItem {
   metadata?: { status?: string; source?: string };
 }
 
-interface HeroNews {
-  id: string;
-  title: string;
-  slug: string;
-  excerpt: string | null;
-  cover_image_url: string | null;
-  published_at: string | null;
-  website_news_categories?: { name: string } | null;
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════════════════════
-
-const safeFormatDate = (date: any, fmt: string, fallback = '-'): string => {
-  if (!date) return fallback;
-  const d = new Date(date);
-  return isValid(d) ? format(d, fmt, { locale: localeId }) : fallback;
-};
 
 const safeFormatTime = (date: any, fallback = '-'): string => {
   if (!date) return fallback;
@@ -96,55 +78,12 @@ const safeFormatTime = (date: any, fallback = '-'): string => {
   return isValid(d) ? format(d, 'HH:mm', { locale: localeId }) : fallback;
 };
 
-const calcPercent = (value: number, total: number): number => {
-  if (!total || total <= 0) return 0;
-  return Math.min(100, Math.max(0, Math.round((value / total) * 100)));
-};
-
-const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+// Tab selain beranda (dipakai tampilan desktop untuk memilih konten)
+const NON_HOME_TABS = ['schedule', 'idcard', 'grades', 'elearning', 'profile', 'attendance', 'violations', 'achievements', 'ekskul', 'announcements', 'dispensasi', 'salat', 'uploads', 'settings'];
 
 // Palet: biru tinta seragam + kuning kapur sebagai satu-satunya aksen
 const INK = 'bg-gradient-to-br from-[#1E6FE0] via-[#2F7FE8] to-[#4F97F2]';
 const FONT_STACK = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
-
-const toMinutes = (t?: string | null): number | null => {
-  if (!t) return null;
-  const [h, m] = t.split(':').map(Number);
-  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
-};
-
-const greetingFor = (d: Date) => {
-  const h = d.getHours();
-  if (h < 11) return 'Selamat pagi';
-  if (h < 15) return 'Selamat siang';
-  if (h < 18) return 'Selamat sore';
-  return 'Selamat malam';
-};
-
-type LessonState =
-  | { kind: 'none' }
-  | { kind: 'done'; count: number }
-  | { kind: 'now'; lesson: any; elapsed: number; total: number; minsLeft: number; next?: any }
-  | { kind: 'next'; lesson: any; minsUntil: number };
-
-/** Tentukan pelajaran yang sedang berlangsung / berikutnya dari jadwal hari ini. */
-const resolveLesson = (schedules: any[] | undefined, now: Date): LessonState => {
-  if (!schedules || schedules.length === 0) return { kind: 'none' };
-  const nowMin = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
-  const sorted = [...schedules].sort((a, b) => (toMinutes(a.start_time) ?? 0) - (toMinutes(b.start_time) ?? 0));
-  for (let i = 0; i < sorted.length; i++) {
-    const st = toMinutes(sorted[i].start_time);
-    const en = toMinutes(sorted[i].end_time);
-    if (st == null || en == null) continue;
-    if (nowMin >= st && nowMin < en) {
-      return { kind: 'now', lesson: sorted[i], elapsed: nowMin - st, total: en - st, minsLeft: Math.ceil(en - nowMin), next: sorted[i + 1] };
-    }
-    if (nowMin < st) return { kind: 'next', lesson: sorted[i], minsUntil: Math.ceil(st - nowMin) };
-  }
-  return { kind: 'done', count: sorted.length };
-};
-
-const humanMinutes = (m: number) => (m >= 60 ? `${Math.floor(m / 60)} jam ${m % 60 ? `${m % 60} menit` : ''}`.trim() : `${m} menit`);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SMALL REUSABLE COMPONENTS (memoized)
@@ -372,6 +311,7 @@ const StudentDashboardPage = () => {
 
   const activeTab = searchParams.get('tab') || 'overview';
   const liveClock = useLiveClock();
+  const { isDesktop, canChoose, setPreference } = useStudentDashboardView();
 
   const [showData, setShowData] = useState(true);
   const [showAllMenu, setShowAllMenu] = useState(false);
@@ -1655,12 +1595,122 @@ const StudentDashboardPage = () => {
     }
   };
 
+  const renderNotifPanel = (cls: string) => showNotifications ? (
+        <div data-notif-panel
+          className={cls}>
+          <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+            <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">Notifikasi</h3>
+            <div className="flex items-center gap-2">
+              {unreadCount > 0 && (
+                <button onClick={() => markNotificationsRead()}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
+                  <CheckCircle className="h-3 w-3" /> Tandai dibaca
+                </button>
+              )}
+              {notifications.length > 0 && (
+                <button onClick={() => setDeleteAllConfirm(true)}
+                  className="text-xs text-red-500 hover:text-red-700 font-medium flex items-center gap-1">
+                  <Trash2 className="h-3 w-3" /> Hapus Semua
+                </button>
+              )}
+              <button onClick={() => setShowNotifications(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          <div className="max-h-80 overflow-y-auto">
+            {notifications.length > 0 ? notifications.map((notif) => (
+              <div key={notif.id}
+                onClick={() => { if (!notif.is_read) markNotificationsRead([notif.id]); }}
+                className={`p-3 border-b border-gray-50 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-start justify-between gap-2 ${notif.is_read ? '' : 'bg-blue-50/60 dark:bg-blue-900/10 cursor-pointer'}`}>
+                <div className="flex items-start gap-3 min-w-0 flex-1">
+                  <div className="w-8 h-8 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center shrink-0">
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-gray-800 dark:text-gray-100">
+                      {!notif.is_read && <span className="inline-block w-2 h-2 bg-blue-500 rounded-full mr-1.5 align-middle" />}
+                      {notif.title}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{notif.message}</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      {safeFormatDate(notif.created_at, 'dd MMM yyyy HH:mm')}
+                    </p>
+                  </div>
+                </div>
+                <button onClick={(e) => { e.stopPropagation(); handleDeleteNotification(notif.id); }}
+                  className="text-gray-300 hover:text-red-500 transition-colors shrink-0">
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            )) : (
+              <div className="p-6 text-center text-gray-400 text-sm">
+                <Bell className="h-8 w-8 mx-auto mb-2 text-gray-300" />
+                Belum ada notifikasi
+              </div>
+            )}
+          </div>
+        </div>
+  ) : null;
+
+  const renderSuggestions = (cls: string) => showSearchSuggestions && searchQuery.length >= 3 ? (
+        <div data-search-panel
+          className={cls}>
+          {filteredSuggestions.length > 0 ? filteredSuggestions.map((menu) => (
+            <button key={menu.label}
+              onClick={() => {
+                setSearchQuery('');
+                setShowSearchSuggestions(false);
+                if (menu.isExternal) window.location.href = menu.url!;
+                else handleTabChange(menu.tab!);
+              }}
+              className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors border-b border-gray-50 dark:border-gray-800 last:border-b-0">
+              <div className={`w-8 h-8 rounded-lg ${menu.color} flex items-center justify-center text-white shrink-0`}>
+                <menu.icon className="h-4 w-4" />
+              </div>
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">{menu.label}</span>
+            </button>
+          )) : (
+            <div className="p-4 text-center text-xs text-gray-400">Menu tidak ditemukan</div>
+          )}
+        </div>
+  ) : null;
+
   // ═════════════════════════════════════════════════════════════════════════
   // RENDER MAIN
   // ═════════════════════════════════════════════════════════════════════════
 
-  return (
-    <div className="min-h-screen bg-[#F1F6FD] dark:bg-slate-950 pb-28" style={{ fontFamily: FONT_STACK }}>
+  const sharedDialogs = (
+    <>
+      {/* LOGOUT MODAL */}
+      <LogoutModal
+        open={showLogoutModal}
+        loading={isLoggingOut}
+        onConfirm={handleLogoutConfirm}
+        onCancel={() => setShowLogoutModal(false)}
+      />
+
+      {/* DELETE ALL CONFIRM */}
+      <AlertDialog open={deleteAllConfirm} onOpenChange={setDeleteAllConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Hapus Semua Notifikasi?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Semua notifikasi akan dihapus permanen. Data absensi Anda <strong>tidak akan terpengaruh</strong>.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteAllNotifications}
+              className="bg-red-500 hover:bg-red-600">Hapus Semua</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+
+  const mobileView = (
+    <div className={`min-h-screen bg-[#F1F6FD] dark:bg-slate-950 pb-28 ${canChoose ? 'mx-auto max-w-md shadow-2xl' : ''}`} style={{ fontFamily: FONT_STACK }}>
       {/* HEADER */}
       {(() => {
         const isHome = activeTab === 'overview' || !['schedule', 'idcard', 'grades', 'elearning', 'profile', 'attendance', 'violations', 'achievements', 'ekskul', 'announcements', 'dispensasi', 'salat', 'uploads', 'settings'].includes(activeTab);
@@ -1842,87 +1892,10 @@ const StudentDashboardPage = () => {
       })()}
 
       {/* NOTIFICATIONS PANEL */}
-      {showNotifications && (
-        <div data-notif-panel
-          className="fixed top-16 right-4 w-[calc(100vw-2rem)] max-w-sm bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-800 z-[100] overflow-hidden animate-in slide-in-from-top-2 fade-in">
-          <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">Notifikasi</h3>
-            <div className="flex items-center gap-2">
-              {unreadCount > 0 && (
-                <button onClick={() => markNotificationsRead()}
-                  className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
-                  <CheckCircle className="h-3 w-3" /> Tandai dibaca
-                </button>
-              )}
-              {notifications.length > 0 && (
-                <button onClick={() => setDeleteAllConfirm(true)}
-                  className="text-xs text-red-500 hover:text-red-700 font-medium flex items-center gap-1">
-                  <Trash2 className="h-3 w-3" /> Hapus Semua
-                </button>
-              )}
-              <button onClick={() => setShowNotifications(false)} className="text-gray-400 hover:text-gray-600">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-          <div className="max-h-80 overflow-y-auto">
-            {notifications.length > 0 ? notifications.map((notif) => (
-              <div key={notif.id}
-                onClick={() => { if (!notif.is_read) markNotificationsRead([notif.id]); }}
-                className={`p-3 border-b border-gray-50 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-start justify-between gap-2 ${notif.is_read ? '' : 'bg-blue-50/60 dark:bg-blue-900/10 cursor-pointer'}`}>
-                <div className="flex items-start gap-3 min-w-0 flex-1">
-                  <div className="w-8 h-8 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center shrink-0">
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-gray-800 dark:text-gray-100">
-                      {!notif.is_read && <span className="inline-block w-2 h-2 bg-blue-500 rounded-full mr-1.5 align-middle" />}
-                      {notif.title}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{notif.message}</p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">
-                      {safeFormatDate(notif.created_at, 'dd MMM yyyy HH:mm')}
-                    </p>
-                  </div>
-                </div>
-                <button onClick={(e) => { e.stopPropagation(); handleDeleteNotification(notif.id); }}
-                  className="text-gray-300 hover:text-red-500 transition-colors shrink-0">
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-            )) : (
-              <div className="p-6 text-center text-gray-400 text-sm">
-                <Bell className="h-8 w-8 mx-auto mb-2 text-gray-300" />
-                Belum ada notifikasi
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {renderNotifPanel(`fixed top-16 ${canChoose ? 'left-1/2 -ml-44 w-96' : 'right-4 w-[calc(100vw-2rem)] max-w-sm'} bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-800 z-[100] overflow-hidden animate-in slide-in-from-top-2 fade-in`)}
 
       {/* SEARCH SUGGESTIONS */}
-      {showSearchSuggestions && searchQuery.length >= 3 && (
-        <div data-search-panel
-          className="fixed top-[4.75rem] left-4 right-4 bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-100 dark:border-gray-800 z-[999] overflow-hidden">
-          {filteredSuggestions.length > 0 ? filteredSuggestions.map((menu) => (
-            <button key={menu.label}
-              onClick={() => {
-                setSearchQuery('');
-                setShowSearchSuggestions(false);
-                if (menu.isExternal) window.location.href = menu.url!;
-                else handleTabChange(menu.tab!);
-              }}
-              className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors border-b border-gray-50 dark:border-gray-800 last:border-b-0">
-              <div className={`w-8 h-8 rounded-lg ${menu.color} flex items-center justify-center text-white shrink-0`}>
-                <menu.icon className="h-4 w-4" />
-              </div>
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">{menu.label}</span>
-            </button>
-          )) : (
-            <div className="p-4 text-center text-xs text-gray-400">Menu tidak ditemukan</div>
-          )}
-        </div>
-      )}
+      {renderSuggestions(`fixed top-[4.75rem] ${canChoose ? 'left-1/2 -ml-[13rem] w-[26rem]' : 'left-4 right-4'} bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-100 dark:border-gray-800 z-[999] overflow-hidden`)}
 
       {/* CONTENT */}
       <main>{renderContent()}</main>
@@ -1955,32 +1928,108 @@ const StudentDashboardPage = () => {
         </div>
       </nav>
 
-      {/* LOGOUT MODAL */}
-      <LogoutModal
-        open={showLogoutModal}
-        loading={isLoggingOut}
-        onConfirm={handleLogoutConfirm}
-        onCancel={() => setShowLogoutModal(false)}
-      />
-
-      {/* DELETE ALL CONFIRM */}
-      <AlertDialog open={deleteAllConfirm} onOpenChange={setDeleteAllConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Hapus Semua Notifikasi?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Semua notifikasi akan dihapus permanen. Data absensi Anda <strong>tidak akan terpengaruh</strong>.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Batal</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteAllNotifications}
-              className="bg-red-500 hover:bg-red-600">Hapus Semua</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {sharedDialogs}
     </div>
   );
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // TAMPILAN DESKTOP (layar >= 1024px) — sidebar + bilah atas + konten lega
+  // ═════════════════════════════════════════════════════════════════════════
+  if (isDesktop) {
+    const isHome = !NON_HOME_TABS.includes(activeTab);
+    const desktopStats: DesktopStat[] = [
+      { label: 'Kehadiran', value: showData ? `${attendancePercentage}%` : '•••', unit: showData ? `${attendanceSummary?.hadir || 0} dari ${attendanceSummary?.total || 0} hari` : '•••', tab: 'attendance', icon: CalendarCheck, tone: 'blue' },
+      { label: 'Rata-rata Nilai', value: showData ? (averageGrade ?? '-') : '•••', unit: showData ? `${grades?.length || 0} Mapel` : '•••', tab: 'grades', icon: BookOpen, tone: 'green' },
+      { label: 'Poin Pelanggaran', value: showData ? totalViolationPoints : '•••', unit: showData ? `${violations?.length || 0} Catatan` : '•••', tab: 'violations', icon: AlertTriangle, tone: 'amber' },
+      { label: 'Prestasi', value: showData ? (achievements?.length || 0) : '•••', unit: 'Penghargaan', tab: 'achievements', icon: Trophy, tone: 'violet' },
+    ];
+
+    return (
+      <div style={{ fontFamily: FONT_STACK }}>
+        <DesktopShell
+          activeTab={isHome ? 'overview' : activeTab}
+          onNavigate={handleTabChange}
+          onOpenUrl={(url) => { window.location.href = url; }}
+          schoolName={schoolSetting?.school_name}
+          schoolLogo={schoolSetting?.logo_url}
+          studentName={student?.full_name || 'Siswa'}
+          className={classInfo?.name}
+          photoUrl={student?.photo_url}
+          onProfile={() => handleTabChange('profile')}
+          onLogout={() => setShowLogoutModal(true)}
+          onSwitchToMobile={() => setPreference('mobile')}
+          searchValue={searchQuery}
+          onSearchChange={(v) => { setSearchQuery(v); setShowSearchSuggestions(true); }}
+          onSearchFocus={() => setShowSearchSuggestions(true)}
+          searchPanel={renderSuggestions('absolute left-0 right-0 top-12 z-[999] overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900')}
+          topbarRight={(
+            <>
+              <div className="hidden xl:block"><AcademicYearSelector /></div>
+              <EnablePushButton className="h-10 w-10 shrink-0 rounded-full border border-slate-200 bg-white p-0 text-slate-600 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900" />
+              <div className="relative">
+                <button
+                  data-notif-btn
+                  onClick={() => setShowNotifications((v) => !v)}
+                  aria-label="Notifikasi"
+                  className="relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1E6FE0] dark:border-slate-700 dark:bg-slate-900"
+                >
+                  <Bell className="h-[18px] w-[18px]" />
+                  {unreadCount > 0 && (
+                    <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#FFC93C] px-1 text-[10px] font-extrabold text-[#1E6FE0]">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
+                </button>
+                {renderNotifPanel('absolute right-0 top-[calc(100%+0.75rem)] z-[100] w-[26rem] overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-2xl animate-in fade-in slide-in-from-top-2 dark:border-gray-800 dark:bg-gray-900')}
+              </div>
+            </>
+          )}
+        >
+          {isHome ? (
+            <DesktopOverview
+              firstName={student?.full_name?.split(' ')[0] || 'Siswa'}
+              className={classInfo?.name}
+              now={liveClock}
+              schoolLogo={schoolSetting?.logo_url}
+              slides={heroSlides}
+              slideIdx={newsIdx}
+              onSlide={setNewsIdx}
+              onOpenNews={(n) => navigate(`/website/berita/${n.slug}`)}
+              onAllNews={() => navigate('/website/berita')}
+              news={heroNews}
+              lesson={resolveLesson(todaySchedules, liveClock)}
+              todaySchedules={todaySchedules}
+              schedulesLoading={schedulesLoading}
+              stats={desktopStats}
+              showData={showData}
+              onToggleData={() => setShowData((v) => !v)}
+              summary={attendanceSummary || null}
+              attendanceLoading={attendanceLoading}
+              attendancePercent={attendancePercentage}
+              logsNode={<AttendanceLogList logs={attendanceLogs} loading={logsLoading} limit={6} onSeeAll={() => handleTabChange('attendance')} />}
+              onNavigate={handleTabChange}
+            />
+          ) : (
+            // Konten tab lain memakai tampilan yang sama dengan mobile, dibatasi lebarnya agar tetap nyaman dibaca
+            <div className="-mx-4 -mt-4 max-w-5xl">{renderContent()}</div>
+          )}
+        </DesktopShell>
+        {sharedDialogs}
+      </div>
+    );
+  }
+
+  return canChoose ? (
+    <div className="min-h-screen bg-slate-300/60 dark:bg-black">
+      <button
+        onClick={() => setPreference('auto')}
+        className="fixed right-6 top-6 z-[60] inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-[#1E6FE0] shadow-lg ring-1 ring-slate-200 transition-colors hover:bg-[#E8F2FF] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1E6FE0]"
+      >
+        <Monitor className="h-4 w-4" /> Tampilan Desktop
+      </button>
+      {mobileView}
+    </div>
+  ) : mobileView;
 };
 
 const Dashboard = () => (
