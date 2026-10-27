@@ -82,7 +82,6 @@ const ImportantEventNotes = lazy(() => import("./pages/ImportantEventNotes"));
 const StudentRegistration = lazy(() => import("./pages/StudentRegistration"));
 const StudentSelfRegister = lazy(() => import("./pages/StudentSelfRegister"));
 const StudentDashboard = lazy(() => import("./pages/StudentDashboard"));
-const StudentAccounts = lazy(() => import("./pages/StudentAccounts"));
 const KesiswaanDashboard = lazy(() => import("./pages/KesiswaanDashboard"));
 const PublicServices = lazy(() => import("./pages/PublicServices"));
 const CashAudit = lazy(() => import("./pages/CashAudit"));
@@ -334,7 +333,7 @@ const App = () => (
               <Route path="/tata-usaha-dashboard" element={<ProtectedRoute><TataUsahaDashboard /></ProtectedRoute>} />
               <Route path="/important-event-notes" element={<ProtectedRoute><ImportantEventNotes /></ProtectedRoute>} />
               <Route path="/student-registration" element={<ProtectedRoute requireRole="admin"><StudentRegistration /></ProtectedRoute>} />
-              <Route path="/student-accounts" element={<ProtectedRoute requireRole="admin"><StudentAccounts /></ProtectedRoute>} />
+              <Route path="/student-accounts" element={<ProtectedRoute requireRole="admin"><ClassStudentAccounts /></ProtectedRoute>} />
               <Route path="/daftar-siswa" element={<StudentSelfRegister />} />
               <Route path="/student-dashboard" element={<StudentDashboard />} />
               <Route path="/kesiswaan-dashboard" element={<ProtectedRoute allowedRoles={['kesiswaan', 'admin']}><KesiswaanDashboard /></ProtectedRoute>} />

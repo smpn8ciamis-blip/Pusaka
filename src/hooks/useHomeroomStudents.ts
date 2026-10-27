@@ -47,28 +47,48 @@ export function useHomeroomStudents(classId?: string) {
   });
 }
 
+/** Pecah daftar ID agar URL permintaan tidak kepanjangan (ratusan UUID pada satu `.in()` membuat permintaan gagal). */
+export function chunkIds<T>(ids: T[], size = 80): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
+  return out;
+}
+
 export function useStudentAccounts(studentIds: string[]) {
   return useQuery({
-    queryKey: ["student-accounts", studentIds.sort().join(",")],
+    queryKey: ["student-accounts", [...studentIds].sort().join(",")],
     enabled: studentIds.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("student_accounts")
-        .select("student_id, user_id")
-        .in("student_id", studentIds);
-      if (error) throw error;
+      const accountRows = (
+        await Promise.all(
+          chunkIds(studentIds).map(async (ids) => {
+            const { data, error } = await supabase
+              .from("student_accounts")
+              .select("student_id, user_id")
+              .in("student_id", ids);
+            if (error) throw error;
+            return data ?? [];
+          })
+        )
+      ).flat();
 
-      if (!data || data.length === 0) return [] as StudentAccountInfo[];
+      if (accountRows.length === 0) return [] as StudentAccountInfo[];
 
-      const userIds = data.map((d) => d.user_id);
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("id, full_name, email")
-        .in("id", userIds);
+      const profiles = (
+        await Promise.all(
+          chunkIds(accountRows.map((d) => d.user_id)).map(async (ids) => {
+            const { data } = await supabase
+              .from("profiles")
+              .select("id, full_name, email")
+              .in("id", ids);
+            return data ?? [];
+          })
+        )
+      ).flat();
 
-      const profileMap = new Map(profiles?.map((p) => [p.id, p]) ?? []);
+      const profileMap = new Map(profiles.map((p) => [p.id, p]));
 
-      return data.map<StudentAccountInfo>((d) => {
+      return accountRows.map<StudentAccountInfo>((d) => {
         const p = profileMap.get(d.user_id);
         return {
           student_id: d.student_id,
@@ -97,6 +117,7 @@ export function useCreateStudent() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["homeroom-students-crud"] });
+      qc.invalidateQueries({ queryKey: ["student-accounts"] });
       toast.success("Siswa berhasil ditambahkan");
     },
     onError: (e: Error) => toast.error("Gagal tambah siswa: " + e.message),
@@ -118,6 +139,7 @@ export function useUpdateStudent() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["homeroom-students-crud"] });
+      qc.invalidateQueries({ queryKey: ["student-accounts"] });
       toast.success("Data siswa berhasil diperbarui");
     },
     onError: (e: Error) => toast.error("Gagal update siswa: " + e.message),
@@ -137,6 +159,7 @@ export function useDeleteStudent() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["homeroom-students-crud"] });
+      qc.invalidateQueries({ queryKey: ["student-accounts"] });
       toast.success("Siswa dinonaktifkan");
     },
     onError: (e: Error) => toast.error("Gagal hapus siswa: " + e.message),
