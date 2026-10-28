@@ -2267,7 +2267,8 @@ app.get('/backup/oauth/callback', async function(req, res) {
         let email = null;
         try { const about = await gjson('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)'); email = about.user && about.user.emailAddress; } catch (e) { /* tidak wajib */ }
         writeGdriveToken({ refresh_token: j.refresh_token, email: email, scope: j.scope || '', connected_at: new Date().toISOString() });
-        page(true, email ? 'Akun: ' + email : 'Berhasil.');
+        const gotContacts = String(j.scope || '').split(/\s+/).indexOf(GOOGLE_CONTACTS_SCOPE) !== -1;
+        page(true, (email ? 'Akun: ' + email + '. ' : '') + (gotContacts ? 'Izin Kontak: diberikan.' : 'Izin Kontak: BELUM diberikan (sinkron kontak tidak akan jalan). Hubungkan ulang dan pastikan kotak izin Kontak dicentang; jika tidak ada pilihan Kontak sama sekali, server bot masih memakai server.js versi lama.'));
     } catch (e) { console.error('[BACKUP OAUTH ERROR]:', e.message); page(false, e.message); }
 });
 app.post('/admin/backup/disconnect', requireAdmin, function(req, res) {
