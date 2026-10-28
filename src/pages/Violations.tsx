@@ -31,6 +31,7 @@ import { StudentSearchSelect } from '@/components/StudentSearchSelect';
 import { HighlightText } from '@/components/HighlightText';
 import { DataPagination } from '@/components/ui/data-pagination';
 import { cn } from '@/lib/utils';
+import { notifyBotViolationCreated } from '@/lib/waBot';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
@@ -703,13 +704,16 @@ export default function Violations() {
 
   const createViolationMutation = useMutation({
     mutationFn: async (data: any) => {
-      const { error } = await supabase.from('student_violations').insert([{
+      const { data: created, error } = await supabase.from('student_violations').insert([{
         ...data,
         reported_by: user?.id,
-      }]);
+      }]).select('id').maybeSingle();
       if (error) throw error;
+      return created?.id as string | undefined;
     },
-    onSuccess: () => {
+    onSuccess: (createdId) => {
+      // WA ke orang tua secara realtime (bot yang menentukan: pengaturan aktif, nomor tertaut, bot terhubung)
+      if (createdId) void notifyBotViolationCreated(createdId);
       queryClient.invalidateQueries({ queryKey: ['student-violations'] });
       queryClient.invalidateQueries({ queryKey: ['student-violations-count'] });
       queryClient.invalidateQueries({ queryKey: ['student-violations-summary'] });
