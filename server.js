@@ -1950,7 +1950,7 @@ app.post('/admin/fingerprint/reload', requireAdmin, (req, res) => { fpSeen.clear
 
 // ===================== AUTO BACKUP KE GOOGLE DRIVE =====================
 // Database (pg_dump -> .sql.gz) dan isi tiap bucket Storage (.tar.gz) diunggah ke Google Drive sesuai jadwal di tabel backup_settings.
-// Akses Drive lewat OAuth (scope drive.file: bot hanya dapat mengakses berkas/folder yang dibuatnya sendiri).
+// Akses Drive lewat OAuth (scope drive.file: bot hanya dapat mengakses berkas/folder yang dibuatnya sendiri). Scope contacts dipakai untuk sinkron kontak siswa (lihat bagian bawah).
 // Env: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI (opsional), BACKUP_DB_COMMAND / BACKUP_DATABASE_URL / BACKUP_DB_CONTAINER (opsional).
 const { spawn } = require('child_process');
 const os = require('os');
@@ -1961,10 +1961,15 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'https://pusaka.smpn8ciamis.sch.id/wa-api/backup/oauth/callback';
 const GDRIVE_TOKEN_FILE = process.env.GDRIVE_TOKEN_FILE || path.join(__dirname, 'gdrive-token.json');
+const GOOGLE_CONTACTS_SCOPE = 'https://www.googleapis.com/auth/contacts';
+const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/drive.file ' + GOOGLE_CONTACTS_SCOPE;
+const CONTACT_GROUP_NAME = 'Pusaka Siswa';
 const APP_BACKUP_PAGE = process.env.APP_BACKUP_PAGE_URL || 'https://pusaka.smpn8ciamis.sch.id/database-backup';
-const DEFAULT_BACKUP_SETTINGS = { enabled: false, schedule_time: '02:00', days: [1, 2, 3, 4, 5, 6, 7], include_db: true, include_storage: true, keep_count: 7, drive_folder_id: null, last_run_date: null };
+const DEFAULT_BACKUP_SETTINGS = { enabled: false, schedule_time: '02:00', days: [1, 2, 3, 4, 5, 6, 7], include_db: true, include_storage: true, include_contacts: false, keep_count: 7, drive_folder_id: null, last_run_date: null };
 
 let backupRunning = false;
+let contactsRunning = false;
+let contactsLastDone = 0;
 let gAccess = { token: '', exp: 0 };
 const oauthStates = new Map(); // state -> kedaluwarsa (ms)
 
@@ -2153,7 +2158,7 @@ async function runBackup(trigger) {
         const ins = await supabase.from('backup_runs').insert({ trigger: trigger, status: 'running', started_at: startedAt.toISOString() }).select('id').single();
         if (ins.data) runId = ins.data.id;
         const cfg = await loadBackupSettings();
-        if (!cfg.include_db && !cfg.include_storage) throw new Error('Tidak ada yang dipilih untuk di-backup (database/bucket).');
+        if (!cfg.include_db && !cfg.include_storage && !cfg.include_contacts) throw new Error('Tidak ada yang dipilih untuk di-backup (database/bucket/kontak).');
         const folderId = await gdriveEnsureFolder(cfg);
         const w = wibNow();
         const stamp = w.date + '_' + String(Math.floor(w.minutes / 60)).padStart(2, '0') + String(w.minutes % 60).padStart(2, '0');
@@ -2188,10 +2193,16 @@ async function runBackup(trigger) {
                 } catch (e) { details.errors.push('Bucket ' + bucket + ': ' + e.message); console.error('[BACKUP] bucket ' + bucket + ' gagal:', e.message); }
             }
         }
+        if (cfg.include_contacts) {
+            try { details.contacts = await syncStudentContacts(); }
+            catch (e) { details.errors.push('Kontak: ' + e.message); console.error('[BACKUP] kontak gagal:', e.message); }
+        }
         const uploaded = details.files.filter(function(f) { return f.size > 0; }).length;
-        if (uploaded === 0) { status = 'failed'; message = details.errors.join(' | ') || 'Tidak ada berkas yang diunggah.'; }
-        else if (details.errors.length) { status = 'partial'; message = details.errors.join(' | '); }
-        else message = uploaded + ' berkas terunggah (' + fmtMB(details.files.reduce(function(a, f) { return a + f.size; }, 0)) + ').';
+        const done = uploaded + (details.contacts ? 1 : 0);
+        const contactsInfo = details.contacts ? ' Kontak: ' + contactsSummary(details.contacts) : '';
+        if (done === 0) { status = 'failed'; message = details.errors.join(' | ') || 'Tidak ada berkas yang diunggah.'; }
+        else if (details.errors.length) { status = 'partial'; message = details.errors.join(' | ') + (contactsInfo ? ' |' + contactsInfo : ''); }
+        else message = (uploaded ? uploaded + ' berkas terunggah (' + fmtMB(details.files.reduce(function(a, f) { return a + f.size; }, 0)) + ').' : '') + contactsInfo;
     } catch (e) {
         status = 'failed'; message = e.message; console.error('[BACKUP ERROR]:', e.message);
     } finally {
@@ -2223,13 +2234,13 @@ async function checkBackupSchedule() {
 
 app.get('/admin/backup/status', requireAdmin, function(req, res) {
     const t = readGdriveToken();
-    res.json({ status: 'success', google_configured: !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET), connected: !!(t && t.refresh_token), email: (t && t.email) || null, running: backupRunning, redirect_uri: GOOGLE_REDIRECT_URI });
+    res.json({ status: 'success', google_configured: !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET), connected: !!(t && t.refresh_token), contacts_granted: hasContactsScope(t), email: (t && t.email) || null, running: backupRunning || contactsRunning, redirect_uri: GOOGLE_REDIRECT_URI });
 });
 app.post('/admin/backup/auth-url', requireAdmin, function(req, res) {
     if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) return res.status(400).json({ status: 'error', message: 'GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET belum diset di server bot.' });
     const state = crypto.randomBytes(24).toString('hex');
     oauthStates.set(state, Date.now() + 10 * 60 * 1000);
-    const params = new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, redirect_uri: GOOGLE_REDIRECT_URI, response_type: 'code', scope: 'https://www.googleapis.com/auth/drive.file', access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state: state });
+    const params = new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, redirect_uri: GOOGLE_REDIRECT_URI, response_type: 'code', scope: GOOGLE_SCOPES, access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state: state });
     res.json({ status: 'success', url: 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString() });
 });
 // Tujuan pengalihan dari Google (dibuka di browser admin, tanpa header login): dilindungi parameter state sekali pakai
@@ -2255,7 +2266,7 @@ app.get('/backup/oauth/callback', async function(req, res) {
         gAccess = { token: j.access_token, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000 };
         let email = null;
         try { const about = await gjson('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)'); email = about.user && about.user.emailAddress; } catch (e) { /* tidak wajib */ }
-        writeGdriveToken({ refresh_token: j.refresh_token, email: email, connected_at: new Date().toISOString() });
+        writeGdriveToken({ refresh_token: j.refresh_token, email: email, scope: j.scope || '', connected_at: new Date().toISOString() });
         page(true, email ? 'Akun: ' + email : 'Berhasil.');
     } catch (e) { console.error('[BACKUP OAUTH ERROR]:', e.message); page(false, e.message); }
 });
@@ -2269,6 +2280,163 @@ app.post('/admin/backup/run', requireAdmin, function(req, res) {
     if (!readGdriveToken()) return res.status(400).json({ status: 'error', message: 'Hubungkan Google Drive dulu.' });
     runBackup('manual').catch(function(e) { console.error('[BACKUP]', e.message); });
     res.json({ status: 'success', message: 'Backup dimulai. Hasilnya muncul di riwayat di bawah.' });
+});
+
+// ===================== SINKRON KONTAK SISWA -> GOOGLE KONTAK =====================
+// Setiap siswa aktif ber-NISN dengan nomor HP wali menjadi satu kontak di akun Google yang terhubung (People API, scope "contacts").
+// Nama kontak: "<kelas> <nama siswa>", mis. "7A Budi Santoso". NISN disimpan sebagai ID eksternal (tipe "NISN") sehingga
+// sinkron berikutnya memperbarui kontak yang sama (ganti kelas/nama/nomor), bukan membuat duplikat. Semua kontak dimasukkan
+// ke label "Pusaka Siswa". Kontak yang dibuat sistem hanya dikenali lewat label + NISN; kontak pribadi lain tidak disentuh.
+function hasContactsScope(t) { return !!(t && t.refresh_token && String(t.scope || '').split(/\s+/).indexOf(GOOGLE_CONTACTS_SCOPE) !== -1); }
+function contactsSummary(c) {
+    return c.created + ' baru, ' + c.updated + ' diperbarui, ' + c.unchanged + ' tetap' +
+        (c.no_phone ? ', ' + c.no_phone + ' dilewati (nomor wali kosong/tidak valid)' : '') +
+        (c.stale ? ', ' + c.stale + ' kontak lama tidak lagi berstatus siswa aktif (tidak dihapus)' : '') + '.';
+}
+// Ambil nomor pertama yang valid dari isian wali (boleh berisi beberapa nomor dipisah / , ;), hasil format +62...
+function contactPhone(raw) {
+    const parts = String(raw || '').split(/[\/,;]+/);
+    for (let i = 0; i < parts.length; i++) {
+        let n = parts[i].replace(/\D/g, '');
+        if (!n) continue;
+        if (n.startsWith('0')) n = '62' + n.slice(1);
+        else if (n.startsWith('8')) n = '62' + n;
+        if (/^62\d{8,13}$/.test(n)) return '+' + n;
+    }
+    return null;
+}
+function sleepMs(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+async function gpeople(pathAndQuery, init) {
+    let last = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+        const r = await gfetch('https://people.googleapis.com/v1/' + pathAndQuery, init);
+        const j = await r.json().catch(function() { return {}; });
+        if (r.ok) return j;
+        const msg = (j.error && (j.error.message || j.error)) || r.status;
+        last = new Error('Google Kontak: ' + msg);
+        if (r.status === 403 && /has not been used|is disabled|SERVICE_DISABLED/i.test(String(msg))) throw new Error('Google Kontak: aktifkan "People API" di Google Cloud Console (project yang sama dengan Drive), lalu coba lagi.');
+        if (r.status === 403 && /insufficient|scope/i.test(String(msg))) throw new Error('Izin Kontak belum diberikan. Klik "Hubungkan ulang" di halaman Backup dan centang izin Kontak.');
+        if (r.status !== 429 && r.status < 500) throw last;
+        await sleepMs(2000 * (attempt + 1));
+    }
+    throw last;
+}
+async function ensureContactGroup() {
+    const j = await gpeople('contactGroups?pageSize=200');
+    const g = (j.contactGroups || []).find(function(x) { return x.name === CONTACT_GROUP_NAME && x.groupType === 'USER_CONTACT_GROUP'; });
+    if (g) return g.resourceName;
+    const c = await gpeople('contactGroups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contactGroup: { name: CONTACT_GROUP_NAME } }) });
+    return c.resourceName;
+}
+async function listGroupContacts(groupRes) {
+    const byNisn = new Map();
+    let pageToken = '';
+    do {
+        const j = await gpeople('people/me/connections?pageSize=1000&personFields=names,phoneNumbers,externalIds,biographies,memberships' + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''));
+        (j.connections || []).forEach(function(p) {
+            const inGroup = (p.memberships || []).some(function(m) { return m.contactGroupMembership && m.contactGroupMembership.contactGroupResourceName === groupRes; });
+            if (!inGroup) return;
+            const ext = (p.externalIds || []).find(function(e) { return e.type === 'NISN' && e.value; });
+            if (ext && !byNisn.has(String(ext.value))) byNisn.set(String(ext.value), p);
+        });
+        pageToken = j.nextPageToken || '';
+    } while (pageToken);
+    return byNisn;
+}
+async function loadStudentsForContacts() {
+    const out = [];
+    for (let from = 0; ; from += 1000) {
+        const r = await supabase.from('students').select('id, nisn, full_name, parent_name, parent_phone, classes(name)')
+            .eq('status', 'aktif').or('is_alumni.is.null,is_alumni.eq.false').not('nisn', 'is', null)
+            .order('id').range(from, from + 999);
+        if (r.error) throw r.error;
+        out.push.apply(out, r.data || []);
+        if (!r.data || r.data.length < 1000) break;
+    }
+    return out;
+}
+function contactFields(st, phone) {
+    const cls = Array.isArray(st.classes) ? st.classes[0] : st.classes;
+    const name = ((cls && cls.name ? String(cls.name).trim() + ' ' : '') + String(st.full_name || '').trim()).trim();
+    const note = 'NISN: ' + String(st.nisn).trim() + (st.parent_name ? '\nWali: ' + String(st.parent_name).trim() : '');
+    return { name: name, note: note, person: {
+        names: [{ givenName: name }],
+        phoneNumbers: [{ value: phone, type: 'mobile' }],
+        externalIds: [{ value: String(st.nisn).trim(), type: 'NISN' }],
+        biographies: [{ value: note, contentType: 'TEXT_PLAIN' }]
+    } };
+}
+function contactChanged(existing, f, phone) {
+    const exName = (existing.names && existing.names[0] && (existing.names[0].givenName || existing.names[0].displayName)) || '';
+    const exPhone = ((existing.phoneNumbers && existing.phoneNumbers[0] && existing.phoneNumbers[0].value) || '').replace(/\D/g, '');
+    const exNote = ((existing.biographies && existing.biographies[0] && existing.biographies[0].value) || '').trim();
+    return exName !== f.name || exPhone !== phone.replace(/\D/g, '') || exNote !== f.note;
+}
+async function syncStudentContacts() {
+    if (contactsRunning) throw new Error('Sinkron kontak sedang berjalan.');
+    contactsRunning = true;
+    try {
+        if (!hasContactsScope(readGdriveToken())) throw new Error('Izin Kontak belum diberikan. Klik "Hubungkan ulang" di halaman Backup dan centang izin Kontak.');
+        const students = await loadStudentsForContacts();
+        const groupRes = await ensureContactGroup();
+        const existing = await listGroupContacts(groupRes);
+        const res = { total: 0, created: 0, updated: 0, unchanged: 0, no_phone: 0, stale: 0 };
+        const toCreate = [], toUpdate = [], seen = new Set();
+        students.forEach(function(st) {
+            const nisn = String(st.nisn || '').trim();
+            if (!nisn || seen.has(nisn)) return;
+            seen.add(nisn);
+            const phone = contactPhone(st.parent_phone);
+            if (!phone) { res.no_phone++; return; }
+            res.total++;
+            const f = contactFields(st, phone);
+            const ex = existing.get(nisn);
+            if (!ex) toCreate.push(f.person);
+            else if (contactChanged(ex, f, phone)) toUpdate.push({ resourceName: ex.resourceName, etag: ex.etag, person: f.person });
+            else res.unchanged++;
+        });
+        existing.forEach(function(_p, nisn) { if (!seen.has(nisn)) res.stale++; });
+        const BATCH = 100;
+        for (let i = 0; i < toCreate.length; i += BATCH) {
+            const chunk = toCreate.slice(i, i + BATCH).map(function(p) {
+                return { contactPerson: Object.assign({}, p, { memberships: [{ contactGroupMembership: { contactGroupResourceName: groupRes } }] }) };
+            });
+            await gpeople('people:batchCreateContacts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contacts: chunk, readMask: 'names' }) });
+            res.created += chunk.length;
+            await sleepMs(1200);
+        }
+        for (let i = 0; i < toUpdate.length; i += BATCH) {
+            const contacts = {};
+            toUpdate.slice(i, i + BATCH).forEach(function(u) { contacts[u.resourceName] = Object.assign({ etag: u.etag }, u.person); });
+            await gpeople('people:batchUpdateContacts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contacts: contacts, updateMask: 'names,phoneNumbers,externalIds,biographies', readMask: 'names' }) });
+            res.updated += Object.keys(contacts).length;
+            await sleepMs(1200);
+        }
+        contactsLastDone = Date.now();
+        console.log('[KONTAK] ' + contactsSummary(res));
+        return res;
+    } finally { contactsRunning = false; }
+}
+async function runContactsSync(trigger) {
+    let runId = null, status = 'success', message = '';
+    const details = { files: [], errors: [] };
+    try {
+        const ins = await supabase.from('backup_runs').insert({ trigger: trigger, status: 'running', started_at: new Date().toISOString() }).select('id').single();
+        if (ins.data) runId = ins.data.id;
+        details.contacts = await syncStudentContacts();
+        message = 'Kontak: ' + contactsSummary(details.contacts);
+    } catch (e) { status = 'failed'; message = e.message; console.error('[KONTAK ERROR]:', e.message); }
+    if (runId) await supabase.from('backup_runs').update({ status: status, message: message.slice(0, 1500), finished_at: new Date().toISOString(), details: details }).eq('id', runId);
+}
+app.post('/admin/backup/contacts', requireAdmin, function(req, res) {
+    if (backupRunning || contactsRunning) return res.status(409).json({ status: 'error', message: 'Backup/sinkron kontak sedang berjalan.' });
+    const t = readGdriveToken();
+    if (!t) return res.status(400).json({ status: 'error', message: 'Hubungkan Google dulu.' });
+    if (!hasContactsScope(t)) return res.status(400).json({ status: 'error', message: 'Izin Kontak belum diberikan. Klik "Hubungkan ulang" dan centang izin Kontak.' });
+    // Daftar kontak di Google bisa terlambat terlihat beberapa menit setelah penulisan; jeda ini mencegah kontak ganda.
+    if (Date.now() - contactsLastDone < 5 * 60 * 1000) return res.status(429).json({ status: 'error', message: 'Sinkron kontak baru saja selesai. Tunggu beberapa menit sebelum mengulang.' });
+    runContactsSync('kontak').catch(function(e) { console.error('[KONTAK]', e.message); });
+    res.json({ status: 'success', message: 'Sinkron kontak dimulai. Hasilnya muncul di riwayat di bawah.' });
 });
 
 // ===== Snapshot jumlah siswa akhir bulan (riwayat per rombel/tingkat) =====
