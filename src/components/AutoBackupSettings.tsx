@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Loader2, Cloud, CloudOff, Save, Play, ExternalLink, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
+import { Loader2, Cloud, CloudOff, Save, Play, ExternalLink, CheckCircle2, AlertTriangle, XCircle, Contact } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { waAdminFetch } from '@/lib/waBot';
@@ -18,6 +18,7 @@ const db = supabase as any;
 interface BackupStatus {
   google_configured: boolean;
   connected: boolean;
+  contacts_granted?: boolean;
   email: string | null;
   running: boolean;
   redirect_uri: string;
@@ -40,6 +41,7 @@ export function AutoBackupSettings() {
   const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5, 6, 7]);
   const [incDb, setIncDb] = useState(true);
   const [incStorage, setIncStorage] = useState(true);
+  const [incContacts, setIncContacts] = useState(false);
   const [keep, setKeep] = useState(7);
 
   const { data: settings, isLoading } = useQuery({
@@ -57,6 +59,7 @@ export function AutoBackupSettings() {
     setDays(Array.isArray(settings.days) ? settings.days : [1, 2, 3, 4, 5, 6, 7]);
     setIncDb(!!settings.include_db);
     setIncStorage(!!settings.include_storage);
+    setIncContacts(!!settings.include_contacts);
     setKeep(Number(settings.keep_count) || 7);
   }, [settings]);
 
@@ -81,9 +84,9 @@ export function AutoBackupSettings() {
     mutationFn: async () => {
       if (!/^\d{2}:\d{2}$/.test(time)) throw new Error('Format jam tidak valid');
       if (days.length === 0) throw new Error('Pilih minimal satu hari');
-      if (!incDb && !incStorage) throw new Error('Pilih minimal database atau bucket');
+      if (!incDb && !incStorage && !incContacts) throw new Error('Pilih minimal database, bucket, atau kontak');
       const { error } = await db.from('backup_settings').upsert({
-        id: 1, enabled, schedule_time: time, days, include_db: incDb, include_storage: incStorage,
+        id: 1, enabled, schedule_time: time, days, include_db: incDb, include_storage: incStorage, include_contacts: incContacts,
         keep_count: Math.min(90, Math.max(1, keep || 7)), updated_at: new Date().toISOString(), updated_by: user?.id ?? null,
       });
       if (error) throw error;
@@ -104,6 +107,12 @@ export function AutoBackupSettings() {
   });
   const runNow = useMutation({
     mutationFn: () => waAdminFetch<{ message: string }>('/admin/backup/run', { method: 'POST' }),
+    onSuccess: (r) => { toast.success(r.message); qc.invalidateQueries({ queryKey: ['backup-runs'] }); refetchStatus(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const syncContacts = useMutation({
+    mutationFn: () => waAdminFetch<{ message: string }>('/admin/backup/contacts', { method: 'POST' }),
     onSuccess: (r) => { toast.success(r.message); qc.invalidateQueries({ queryKey: ['backup-runs'] }); refetchStatus(); },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -136,6 +145,11 @@ export function AutoBackupSettings() {
               </a>
             )}
           </div>
+          {botStatus?.connected && !botStatus.contacts_granted && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              Izin <b>Kontak</b> belum diberikan, jadi sinkron kontak siswa belum bisa dipakai. Klik “Hubungkan ulang” dan centang izin Kontak di layar Google.
+            </p>
+          )}
           {botError && <p className="text-xs text-destructive">{(botError as Error).message}</p>}
           {botStatus && !botStatus.google_configured && (
             <p className="text-xs text-amber-600 dark:text-amber-400">
@@ -144,7 +158,14 @@ export function AutoBackupSettings() {
           )}
           <div className="flex flex-wrap gap-2">
             {botStatus?.connected ? (
-              <Button size="sm" variant="outline" onClick={() => disconnect.mutate()} disabled={disconnect.isPending}>Putuskan</Button>
+              <>
+                {!botStatus.contacts_granted && (
+                  <Button size="sm" onClick={() => connect.mutate()} disabled={connect.isPending}>
+                    {connect.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />} Hubungkan ulang (izin Kontak)
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" onClick={() => disconnect.mutate()} disabled={disconnect.isPending}>Putuskan</Button>
+              </>
             ) : (
               <Button size="sm" onClick={() => connect.mutate()} disabled={connect.isPending || !botStatus?.google_configured}>
                 {connect.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />} Hubungkan Google Drive
@@ -182,6 +203,10 @@ export function AutoBackupSettings() {
               <Label htmlFor="bk-st" className="font-normal">Isi bucket (foto, berkas upload)</Label>
               <Switch id="bk-st" checked={incStorage} onCheckedChange={setIncStorage} />
             </div>
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="bk-ct" className="font-normal">Kontak wali siswa ke Google Kontak (nama: kelas + nama siswa)</Label>
+              <Switch id="bk-ct" checked={incContacts} onCheckedChange={setIncContacts} />
+            </div>
           </div>
           <div className="space-y-1">
             <Label>Simpan berapa backup terakhir di Drive</Label>
@@ -196,7 +221,13 @@ export function AutoBackupSettings() {
               {running || runNow.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Play className="h-4 w-4 mr-1" />}
               {running ? 'Backup berjalan…' : 'Backup sekarang'}
             </Button>
+            <Button variant="outline" onClick={() => syncContacts.mutate()} disabled={syncContacts.isPending || running || !botStatus?.connected || !botStatus?.contacts_granted}>
+              {syncContacts.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Contact className="h-4 w-4 mr-1" />} Sinkronkan kontak sekarang
+            </Button>
           </div>
+          <p className="text-xs text-muted-foreground">
+            Kontak dibuat dari siswa aktif yang punya NISN dan nomor HP wali, dikumpulkan di label “Pusaka Siswa” dengan nama “kelas + nama siswa” (mis. 7A Budi Santoso). NISN disimpan di kontak, sehingga sinkron berikutnya memperbarui kontak yang sama (pindah kelas, ganti nama/nomor), bukan membuat ganda. Perubahan manual pada nama, nomor, atau catatan kontak tersebut akan ditimpa; kontak lain tidak disentuh dan kontak lama tidak pernah dihapus otomatis.
+          </p>
         </div>
 
         {/* Riwayat */}
@@ -213,7 +244,7 @@ export function AutoBackupSettings() {
                     {r.status === 'partial' && <Badge variant="secondary" className="gap-1"><AlertTriangle className="h-3 w-3" /> Sebagian</Badge>}
                     {r.status === 'failed' && <Badge variant="destructive" className="gap-1"><XCircle className="h-3 w-3" /> Gagal</Badge>}
                     {r.status === 'running' && <Badge variant="outline" className="gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Berjalan</Badge>}
-                    <span className="text-muted-foreground">{fmtWib(r.started_at)} · {r.trigger === 'schedule' ? 'terjadwal' : 'manual'}</span>
+                    <span className="text-muted-foreground">{fmtWib(r.started_at)} · {r.trigger === 'schedule' ? 'terjadwal' : r.trigger === 'kontak' ? 'sinkron kontak' : 'manual'}</span>
                   </div>
                   {r.message && <p className="text-xs mt-1 break-words">{r.message}</p>}
                   {Array.isArray(r.details?.files) && r.details.files.length > 0 && (
@@ -231,11 +262,11 @@ export function AutoBackupSettings() {
         <details className="rounded-lg border p-3 text-sm">
           <summary className="cursor-pointer font-medium">Panduan satu kali: menyiapkan akses Google Drive</summary>
           <ol className="list-decimal pl-5 mt-2 space-y-1 text-muted-foreground">
-            <li>Buka <b>console.cloud.google.com</b> → buat project → aktifkan <b>Google Drive API</b>.</li>
+            <li>Buka <b>console.cloud.google.com</b> → buat project → aktifkan <b>Google Drive API</b> dan <b>People API</b> (untuk sinkron kontak).</li>
             <li><b>OAuth consent screen</b>: tipe External, isi nama aplikasi, lalu <b>Publish app (In production)</b>. Bila dibiarkan “Testing”, izin Google kedaluwarsa tiap 7 hari dan backup berhenti.</li>
             <li><b>Credentials → Create credentials → OAuth client ID</b>, tipe <b>Web application</b>. Pada <i>Authorized redirect URIs</i> isi: <code className="break-all">{botStatus?.redirect_uri || 'https://pusaka.smpn8ciamis.sch.id/wa-api/backup/oauth/callback'}</code></li>
             <li>Di server bot, tambahkan <code>GOOGLE_CLIENT_ID</code> dan <code>GOOGLE_CLIENT_SECRET</code> (file .env atau pm2), lalu <code>pm2 restart wa-bot --update-env</code>.</li>
-            <li>Kembali ke sini, klik <b>Hubungkan Google Drive</b>, pilih akun, dan izinkan. Bot hanya mendapat akses ke folder/berkas yang dibuatnya sendiri.</li>
+            <li>Kembali ke sini, klik <b>Hubungkan Google Drive</b>, pilih akun, dan izinkan (centang juga izin <b>Kontak</b>). Untuk Drive, bot hanya mengakses folder/berkas buatannya sendiri. Izin Kontak mencakup seluruh kontak akun tersebut, jadi sebaiknya pakai akun Google khusus sekolah. Bila muncul layar “Google belum memverifikasi aplikasi ini”, pilih Lanjutan → lanjutkan (wajar untuk aplikasi milik sendiri).</li>
             <li>Server perlu perintah <code>tar</code> dan akses ke database: default memakai <code>docker exec supabase-db pg_dump</code>. Bila nama kontainer berbeda, set <code>BACKUP_DB_CONTAINER</code>; atau set <code>BACKUP_DATABASE_URL</code> (butuh <code>pg_dump</code> terpasang).</li>
           </ol>
         </details>
