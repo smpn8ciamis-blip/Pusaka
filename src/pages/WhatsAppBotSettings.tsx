@@ -541,6 +541,7 @@ function ReminderTab() {
   const [assignWa, setAssignWa] = useState(true);
   const [assignFu, setAssignFu] = useState(true);
   const [parentQuery, setParentQuery] = useState(true);
+  const [violationWa, setViolationWa] = useState(true);
   const [assignFuTime, setAssignFuTime] = useState('09:00');
   const [wkOn, setWkOn] = useState(false);
   const [wkDay, setWkDay] = useState('6');
@@ -576,6 +577,7 @@ function ReminderTab() {
       setAssignWa(data.assignment_wa_enabled !== false);
       setAssignFu(data.assignment_followup_enabled !== false);
       setParentQuery(data.parent_query_enabled !== false);
+      setViolationWa(data.violation_wa_enabled !== false);
       setAssignFuTime(String(data.assignment_followup_time || '09:00').slice(0, 5));
       setWkOn(!!data.weekly_absence_enabled);
       setWkDay(String(data.weekly_absence_day || 6));
@@ -605,6 +607,7 @@ function ReminderTab() {
         assignment_wa_enabled: assignWa,
         assignment_followup_enabled: assignFu,
         parent_query_enabled: parentQuery,
+        violation_wa_enabled: violationWa,
         assignment_followup_time: /^\d{2}:\d{2}$/.test(assignFuTime) ? assignFuTime : '09:00',
         weekly_absence_enabled: wkOn,
         weekly_absence_day: Math.min(7, Math.max(1, parseInt(wkDay, 10) || 6)),
@@ -799,6 +802,15 @@ function ReminderTab() {
           )}
           <p className="text-xs text-muted-foreground">
             Sekali sehari pada jam di atas (bot tidak memeriksa tiap menit), bot mengirim pengingat ke pelaksana SPPD yang tanggal kembalinya kemarin dan belum punya foto bukti kunjungan. Tiap orang dikirimi sekali. Penerima juga bisa membalas pengingat itu dengan foto.
+          </p>
+        </div>
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="vw-en">WA ke orang tua saat siswa mendapat pelanggaran baru</Label>
+            <Switch id="vw-en" checked={violationWa} onCheckedChange={setViolationWa} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Begitu guru/petugas menyimpan catatan pelanggaran di menu Pelanggaran, bot langsung mengirim WA ke nomor orang tua yang sudah tertaut: nama pelanggaran, poin baru, dan total poin. Siswa tanpa nomor tertaut dilewati. Isi pesan dapat diubah di tab Template (<b>Orang Tua: Pelanggaran Baru</b>).
           </p>
         </div>
         <div className="space-y-2 rounded-lg border p-3">

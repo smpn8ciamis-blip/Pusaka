@@ -207,6 +207,23 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     defaultBody: `⚠️ *POIN PELANGGARAN*\n\nSiswa: *{{nama_siswa}}* ({{kelas}})\nTotal poin: *{{total_poin}}* ({{jumlah_catatan}} catatan)\n\n{{rincian}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
   },
   {
+    key: 'parent_violation_new',
+    title: 'Orang Tua: Pelanggaran Baru',
+    description: 'Dikirim otomatis ke orang tua (nomor tertaut) tepat setelah guru/petugas mencatat pelanggaran baru untuk anaknya.',
+    variables: [
+      { name: 'nama_siswa', sample: 'Ahmad Fauzi', hint: 'Nama siswa' },
+      { name: 'kelas', sample: 'VII-A', hint: 'Kelas siswa' },
+      { name: 'tanggal', sample: '28/10/2026', hint: 'Tanggal pelanggaran' },
+      { name: 'pelanggaran', sample: 'Terlambat masuk sekolah', hint: 'Nama pelanggaran' },
+      { name: 'kategori', sample: 'ringan', hint: 'Kategori: ringan / sedang / berat' },
+      { name: 'poin', sample: '5', hint: 'Poin pelanggaran baru ini' },
+      { name: 'keterangan', sample: 'Terlambat 20 menit', hint: 'Catatan petugas (tanda "-" bila kosong)' },
+      { name: 'total_poin', sample: '15', hint: 'Jumlah seluruh poin siswa' },
+      { name: 'jumlah_catatan', sample: '3', hint: 'Banyaknya catatan pelanggaran siswa' },
+    ],
+    defaultBody: `⚠️ *PELANGGARAN BARU*\n\nYth. Bapak/Ibu Orang Tua/Wali,\nAnanda *{{nama_siswa}}* ({{kelas}}) mendapat catatan pelanggaran:\n• Tanggal: {{tanggal}}\n• Pelanggaran: *{{pelanggaran}}* ({{kategori}})\n• Poin: *+{{poin}}*\n• Keterangan: {{keterangan}}\n\nTotal poin ananda saat ini: *{{total_poin}}* ({{jumlah_catatan}} catatan).\nMohon bimbingan Bapak/Ibu di rumah. Ketik *cek poin* untuk melihat rinciannya.\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
+  },
+  {
     key: 'parent_attendance',
     title: 'Orang Tua: Cek Rekap Kehadiran',
     description: 'Balasan bot saat orang tua (nomor sudah tertaut ke NISN) mengetik "absen": rekap kehadiran anaknya 30 hari terakhir.',
@@ -329,6 +346,22 @@ export async function notifyBotIfAttendanceComplete(savedDate?: string): Promise
   } catch (e) {
     // Bot tidak aktif / belum diatur: tidak mengganggu simpan absen, tetapi dicatat di konsol untuk diagnosis.
     console.warn('[Rekap grup] tidak dapat memberi tahu bot:', (e as Error)?.message);
+  }
+}
+
+/**
+ * Dipanggil sekali tepat setelah catatan pelanggaran siswa tersimpan: bot mengirim WA ke orang tua (nomor tertaut)
+ * berisi pelanggaran, poin baru, dan total poin. Bot tidak melakukan pengecekan berkala. Hasil dikembalikan agar
+ * pemanggil dapat memberi info; gagal diam-diam agar tidak mengganggu pencatatan pelanggaran.
+ */
+export async function notifyBotViolationCreated(violationId: string): Promise<string> {
+  try {
+    const res = await waAdminFetch<{ status: string }>('/violation-created', { method: 'POST', body: { violation_id: violationId } });
+    console.info('[WA Pelanggaran] bot menjawab:', res.status);
+    return res.status;
+  } catch (e) {
+    console.warn('[WA Pelanggaran] tidak dapat memberi tahu bot:', (e as Error)?.message);
+    return 'error';
   }
 }
 

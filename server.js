@@ -296,6 +296,7 @@ DEFAULT_TEMPLATES.weekly_absence_group = `📊 *SISWA SERING TIDAK HADIR*\nPerio
 DEFAULT_TEMPLATES.assignment_notice = `📄 *SURAT TUGAS BARU*\n\nYth. Bapak/Ibu *{{nama}}*,\nAnda mendapat surat tugas berikut:\n• Nomor: {{nomor_surat}}\n• Jenis tugas: *{{jenis}}*\n• Uraian: {{uraian}}\n• Waktu: *{{waktu}}*\n• Lokasi: *{{lokasi}}*\n\nSetelah tugas selesai, mohon:\n1. Mengisi *LPT* (Laporan Pelaksanaan Tugas)\n2. Mengunggah *bukti kunjungan* (foto dan berkas PDF)\npada akun Pusaka, menu *Surat Tugas & SPPD*.\n\n📸 *Cara cepat:* balas (reply) pesan ini dengan foto bukti kunjungan, foto otomatis tersimpan di akun Pusaka Anda (maks. 3 foto).\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.assignment_followup = `⏰ *PENGINGAT BUKTI KUNJUNGAN*\n\nYth. Bapak/Ibu *{{nama}}*,\nSurat tugas berikut sudah selesai, namun *foto bukti kunjungan* Anda belum diunggah:\n• Nomor: {{nomor_surat}}\n• Jenis tugas: *{{jenis}}*\n• Waktu: {{waktu}}\n• Lokasi: {{lokasi}}\n\nMohon segera unggah di akun Pusaka, menu *Surat Tugas & SPPD*.\n\n📸 *Cara cepat:* balas (reply) pesan ini dengan foto bukti kunjungan, foto otomatis tersimpan di akun Anda (maks. 3 foto).\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.parent_points = `⚠️ *POIN PELANGGARAN*\n\nSiswa: *{{nama_siswa}}* ({{kelas}})\nTotal poin: *{{total_poin}}* ({{jumlah_catatan}} catatan)\n\n{{rincian}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.parent_violation_new = `⚠️ *PELANGGARAN BARU*\n\nYth. Bapak/Ibu Orang Tua/Wali,\nAnanda *{{nama_siswa}}* ({{kelas}}) mendapat catatan pelanggaran:\n• Tanggal: {{tanggal}}\n• Pelanggaran: *{{pelanggaran}}* ({{kategori}})\n• Poin: *+{{poin}}*\n• Keterangan: {{keterangan}}\n\nTotal poin ananda saat ini: *{{total_poin}}* ({{jumlah_catatan}} catatan).\nMohon bimbingan Bapak/Ibu di rumah. Ketik *cek poin* untuk melihat rinciannya.\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.parent_attendance = `📅 *REKAP KEHADIRAN*\n\nSiswa: *{{nama_siswa}}* ({{kelas}})\nPeriode: {{periode}} (30 hari terakhir)\n\n✅ Hadir: *{{hadir}}* hari ({{persen}}%)\n⏰ Terlambat: {{terlambat}} hari (sudah termasuk hadir)\n🤒 Sakit: {{sakit}} hari\n📝 Izin: {{izin}} hari\n❌ Alfa: {{alpa}} hari\nTotal hari tercatat: {{total_hari}}\n\n{{rincian}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.piket_punch = `🕒 *ABSENSI PIKET TERCATAT*\n\nYth. Bapak/Ibu *{{nama}}*,\nAbsen *{{jenis}}* {{shift}} Anda tercatat pada {{tanggal}} pukul *{{jam}} WIB* melalui mesin absensi.\n\nTerima kasih atas pengabdiannya.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.teacher_saturday_greeting = `🌿 *SELAMAT AKHIR PEKAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\n\nTerima kasih atas dedikasi dan kerja keras Bapak/Ibu dalam mendidik anak-anak kita sepanjang pekan ini.\n\nHari {{hari}} adalah waktu untuk berhenti sejenak. Nikmatilah akhir pekan bersama keluarga, karena keluarga adalah sumber kekuatan terbesar seorang pendidik. Istirahatlah yang cukup dan siapkan energi terbaik untuk mengajar kembali di hari Senin.\n\nSemoga sehat dan bahagia selalu. 🙏\n_Pusaka - SMP Negeri 8 Ciamis_`;
@@ -323,7 +324,8 @@ const DEFAULT_BOT_SETTINGS = {
     weekly_absence_day: 6,            // hari kirim: 1=Senin ... 7=Minggu
     weekly_absence_time: '13:00',     // jam kirim (WIB)
     weekly_absence_threshold: 3,      // "sering": total hari tidak hadir >= nilai ini, atau alfa >= 2
-    weekly_absence_to_group: false    // kirim juga ringkasan siswa yang sering tidak hadir ke grup rekap
+    weekly_absence_to_group: false,   // kirim juga ringkasan siswa yang sering tidak hadir ke grup rekap
+    violation_wa_enabled: true        // WA ke orang tua (nomor tertaut) saat siswa mendapat catatan pelanggaran baru
 };
 const CONFIG_TTL_MS = 30 * 1000;
 let templateCache = { at: 0, rows: new Map() };
@@ -1365,6 +1367,62 @@ async function doNoticePhotoReply(msg, img, stanzaId, from) {
     const now = have + 1;
     reply('✅ Foto bukti kunjungan diterima (' + now + '/' + NOTICE_MAX_PHOTOS + ') untuk surat tugas No. ' + lt.data.letter_number + '. Foto sudah masuk ke akun Pusaka Anda.' + (now >= NOTICE_MAX_PHOTOS ? '\nBatas foto tercapai.' : ' Kirim foto lain dengan membalas pesan notifikasi yang sama.'));
 }
+
+// ===================== NOTIFIKASI PELANGGARAN BARU KE ORANG TUA =====================
+// Dipicu aplikasi tepat setelah catatan pelanggaran disimpan (tanpa polling). Satu catatan = satu WA.
+const violationNotified = new Map(); // id catatan -> waktu; mencegah kirim ganda bila aplikasi memanggil dua kali
+async function notifyViolationCreated(violationId, userId) {
+    if (violationNotified.has(violationId)) return { status: 'already_sent' };
+    violationNotified.set(violationId, Date.now()); // tandai dulu agar dua panggilan bersamaan tidak mengirim ganda
+    if (violationNotified.size > 500) violationNotified.delete(violationNotified.keys().next().value);
+    let r;
+    try { r = await notifyViolationInner(violationId, userId); }
+    catch (e) { violationNotified.delete(violationId); throw e; }
+    if (r.status !== 'queued') violationNotified.delete(violationId); // tidak terkirim: boleh dicoba lagi
+    return r;
+}
+async function notifyViolationInner(violationId, userId) {
+    const cfg = await getBotSettings();
+    if (!cfg.violation_wa_enabled) return { status: 'disabled' };
+    if (!isReady) return { status: 'bot_offline' };
+    const vr = await supabase.from('student_violations')
+        .select('id, student_id, points, violation_date, notes, reported_by, created_at, violation_types(name, category), students(full_name, parent_phone, classes(name))')
+        .eq('id', violationId).maybeSingle();
+    if (vr.error) throw vr.error;
+    const v = vr.data;
+    if (!v) return { status: 'not_found' };
+    if (Date.now() - new Date(v.created_at).getTime() > 6 * 3600 * 1000) return { status: 'expired' }; // hanya catatan baru
+    if (v.reported_by !== userId) {
+        const r = await supabase.from('user_roles').select('role').eq('user_id', userId);
+        if (!(r.data || []).some(function(x) { return ['admin', 'super_admin', 'kesiswaan'].includes(x.role); })) return { status: 'forbidden' };
+    }
+    const st = v.students;
+    if (!st) return { status: 'not_found' };
+    const phone = st.parent_phone ? formatToInternational(st.parent_phone) : '';
+    if (!phone || phone.length < 10) return { status: 'no_phone' };
+    const all = await supabase.from('student_violations').select('points').eq('student_id', v.student_id);
+    if (all.error) throw all.error;
+    const rows = all.data || [];
+    const total = rows.reduce(function(sum, x) { return sum + (Number(x.points) || 0); }, 0);
+    const note = v.notes ? String(v.notes).replace(/[\r\n*_~`]+/g, ' ').trim().slice(0, 120) : '';
+    const vars = {
+        nama_siswa: st.full_name, kelas: (st.classes && st.classes.name) || '-', tanggal: ddmmyyyy(v.violation_date),
+        pelanggaran: (v.violation_types && v.violation_types.name) || 'Pelanggaran', kategori: (v.violation_types && v.violation_types.category) || '-',
+        poin: String(Number(v.points) || 0), keterangan: note || '-', total_poin: String(total), jumlah_catatan: String(rows.length)
+    };
+    const jid = phone + '@s.whatsapp.net';
+    enqueueTask(async function() {
+        const text = await renderMessage('parent_violation_new', vars);
+        if (text) await sendSafeMessage(jid, { text: text });
+    }, { to: jid, kind: 'parent_violation_new' });
+    return { status: 'queued' };
+}
+app.post('/violation-created', requireUser, async (req, res) => {
+    const id = req.body && req.body.violation_id;
+    if (typeof id !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(id)) return res.status(400).json({ status: 'error', message: 'violation_id tidak valid.' });
+    try { return res.json(await notifyViolationCreated(id, req.userId)); }
+    catch (e) { console.error('[WA PELANGGARAN]', e.message); return res.status(500).json({ status: 'error', message: e.message }); }
+});
 
 app.post('/travel-created', requireUser, async (req, res) => {
     const travelId = req.body && req.body.travel_id;
