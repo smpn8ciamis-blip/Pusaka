@@ -1822,6 +1822,70 @@ async function ogBeritaHandler(req, res) {
 }
 app.get('/og/berita/:slug', rateLimit('ogberita', 120, 60000), ogBeritaHandler);
 
+// Pratinjau tautan halaman website lain (beranda, profil, akademik, dst.). Sama alasannya dengan berita di atas:
+// crawler WhatsApp tidak menjalankan JavaScript, jadi tag OG harus ada di HTML awal. Nginx mengirim crawler ke
+// GET /og/halaman?path=<jalur> (lihat deploy/nginx-sekolah-app.conf). Hanya jalur pada daftar ini yang dilayani.
+const OG_PAGES = {
+    '/': { title: null, desc: null },
+    '/website/profil': { title: 'Profil Sekolah', desc: 'Mengenal lebih dekat visi, misi, sejarah, dan struktur SMP Negeri 8 Ciamis.' },
+    '/website/akademik': { title: 'Akademik', desc: 'Program pembelajaran dan kurikulum di SMP Negeri 8 Ciamis.' },
+    '/website/ekstrakurikuler': { title: 'Ekstrakurikuler', desc: 'Wadah pengembangan bakat, minat, dan karakter peserta didik SMP Negeri 8 Ciamis.' },
+    '/website/berita': { title: 'Berita & Informasi', desc: 'Berita, kegiatan, dan informasi terbaru dari SMP Negeri 8 Ciamis.' },
+    '/website/galeri': { title: 'Galeri', desc: 'Dokumentasi kegiatan, momen, dan prestasi SMP Negeri 8 Ciamis.' },
+    '/website/guru': { title: 'Guru & Staff', desc: 'Tenaga pendidik dan kependidikan SMP Negeri 8 Ciamis.' },
+    '/website/kontak': { title: 'Hubungi Kami', desc: 'Alamat, kontak, dan lokasi SMP Negeri 8 Ciamis.' }
+};
+const OG_ALLOWED_HOSTS = new Set(['pusaka.smpn8ciamis.sch.id', 'www.pusaka.smpn8ciamis.sch.id', 'smpn8ciamis.sch.id', 'www.smpn8ciamis.sch.id']);
+async function ogHalamanHandler(req, res) {
+    let pth = String(req.query.path || '/').slice(0, 100).replace(/\/+$/, '') || '/';
+    pth = pth.toLowerCase();
+    const page = OG_PAGES[pth];
+    if (!page) return res.status(404).type('text/plain').send('Halaman tidak ditemukan');
+    try {
+        const host = String(req.headers.host || '').toLowerCase().split(':')[0];
+        const base = OG_ALLOWED_HOSTS.has(host) ? 'https://' + host : SITE_URL;
+        const prom = await Promise.all([
+            supabase.from('website_settings').select('site_name, tagline, about_short, meta_title, meta_description, logo_url, address, phone').order('created_at', { ascending: false }).limit(1).maybeSingle(),
+            supabase.from('website_hero_slides').select('image_url').eq('is_active', true).order('sort_order').limit(1)
+        ]);
+        const st = (prom[0] && prom[0].data) || {};
+        const hero = prom[1] && prom[1].data && prom[1].data[0];
+        const site = 'SMPN 8 Ciamis';
+        let title, desc;
+        if (pth === '/') {
+            title = stripHtml(st.meta_title) || ((stripHtml(st.site_name) || 'SMP Negeri 8 Ciamis') + (st.tagline ? ' - ' + stripHtml(st.tagline) : ''));
+            desc = stripHtml(st.meta_description) || stripHtml(st.about_short) || 'Website resmi SMP Negeri 8 Ciamis: berita, profil, akademik, ekstrakurikuler, dan informasi sekolah.';
+        } else {
+            title = page.title + ' - ' + site;
+            desc = page.desc;
+            if (pth === '/website/kontak') {
+                const extra = [stripHtml(st.address), st.phone ? 'Telp. ' + stripHtml(st.phone) : ''].filter(Boolean).join(' · ');
+                if (extra) desc = (desc + ' ' + extra).slice(0, 200);
+            }
+        }
+        // Gambar: foto hero beranda (lebar) bila ada; cadangan: kartu bawaan 1200x630 berlogo sekolah.
+        const image = absUrl(hero && hero.image_url) || base + '/og-default.jpg';
+        const url = base + (pth === '/' ? '/' : pth);
+        const meta = [
+            ['og:type', 'website'], ['og:site_name', site], ['og:locale', 'id_ID'], ['og:url', url],
+            ['og:title', title], ['og:description', desc], ['og:image', image], ['og:image:secure_url', image],
+            ['twitter:card', 'summary_large_image'], ['twitter:title', title], ['twitter:description', desc], ['twitter:image', image]
+        ];
+        if (image === base + '/og-default.jpg') { meta.push(['og:image:width', '1200'], ['og:image:height', '630'], ['og:image:type', 'image/jpeg']); }
+        const tags = meta.map(function(m) { return '<meta property="' + m[0] + '" content="' + escHtml(m[1]) + '">'; }).join('\n');
+        res.set('Cache-Control', 'public, max-age=300');
+        res.type('html').send('<!doctype html><html lang="id"><head><meta charset="utf-8"><title>' + escHtml(title) + '</title>\n' +
+            '<meta name="description" content="' + escHtml(desc) + '">\n<link rel="canonical" href="' + escHtml(url) + '">\n' + tags + '\n' +
+            '<meta http-equiv="refresh" content="0;url=' + escHtml(url) + '"></head><body><p><a href="' + escHtml(url) + '">' + escHtml(title) + '</a></p>' +
+            '<script>location.replace(' + JSON.stringify(url).replace(/</g, '\\u003c') + ')</script></body></html>');
+    } catch (e) {
+        console.error('[OG halaman]', e.message);
+        res.status(500).type('text/plain').send('Gagal memuat halaman');
+    }
+}
+app.get('/og/halaman', rateLimit('oghalaman', 120, 60000), ogHalamanHandler);
+
+
 app.get('/', (req, res) => res.json({
     service: 'Presensi Nedelcis Server',
     status: isReady ? 'Connected' : 'Disconnected',
