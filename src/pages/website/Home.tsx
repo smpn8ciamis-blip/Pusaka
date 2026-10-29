@@ -41,7 +41,7 @@ export default function Home() {
   const [news, setNews] = useState<any[]>([]);
   const [programs, setPrograms] = useState<any[]>([]);
   const [agenda, setAgenda] = useState<any[]>([]);
-  const [stats, setStats] = useState({ students: 0, teachers: 0, classes: 0, achievements: 0 });
+  const [stats, setStats] = useState({ students: 0, teachers: 0, classes: 0, achievements: 0, year: "" as string });
   const [slideIdx, setSlideIdx] = useState(0);
   const [igPostsAuto, setIgPostsAuto] = useState<any[]>([]);
   const igRef = useRef<HTMLDivElement>(null);
@@ -62,17 +62,33 @@ export default function Home() {
       setPrograms(pr.data ?? []);
       setAgenda(((ag.data ?? []) as AgendaItem[]).filter((a) => agendaStatus(a) !== "past").slice(0, 5));
 
-      const [st, tc, cl, ach] = await Promise.all([
-        asAny("students").select("id", { count: "exact", head: true }),
+      // Statistik mengikuti tahun pelajaran aktif (Pengaturan > Tahun Pelajaran).
+      // Dihitung lewat fungsi database agar bisa dibaca pengunjung tanpa login.
+      const { data: pub, error: pubErr } = await supabase.rpc("get_website_public_stats" as any);
+      if (!pubErr && pub) {
+        const r = pub as any;
+        setStats({
+          students: r.students ?? 0, teachers: r.teachers ?? 0, classes: r.classes ?? 0,
+          achievements: r.achievements ?? 0, year: r.academic_year ?? "",
+        });
+        return;
+      }
+
+      // Cadangan bila migrasi belum dijalankan: hitung langsung (hanya akurat untuk pengguna yang login).
+      const { data: ay } = await asAny("academic_years").select("year").eq("is_active", true).maybeSingle();
+      const year: string = ay?.year ?? "";
+      const { data: yc } = year ? await asAny("classes").select("id").eq("academic_year", year) : { data: [] };
+      const classIds = (yc ?? []).map((c: any) => c.id);
+      const [st, tc, ach] = await Promise.all([
+        classIds.length
+          ? asAny("students").select("id", { count: "exact", head: true }).in("class_id", classIds).eq("status", "aktif").eq("is_alumni", false)
+          : Promise.resolve({ count: 0 }),
         asAny("teachers").select("id", { count: "exact", head: true }),
-        asAny("classes").select("id", { count: "exact", head: true }),
         asAny("student_achievements").select("id", { count: "exact", head: true }),
       ]);
       setStats({
-        students: st.count ?? 0,
-        teachers: tc.count ?? 0,
-        classes: cl.count ?? 0,
-        achievements: ach.count ?? 0,
+        students: st.count ?? 0, teachers: tc.count ?? 0, classes: classIds.length,
+        achievements: ach.count ?? 0, year,
       });
     })();
   }, []);
@@ -236,11 +252,12 @@ export default function Home() {
       {/* Statistik */}
       <section className="container relative z-10 mx-auto -mt-12 px-4 md:-mt-14">
         <div className="grid grid-cols-2 divide-slate-100 overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-xl shadow-slate-900/5 md:grid-cols-4 md:divide-x [&>*:nth-child(-n+2)]:border-b [&>*:nth-child(-n+2)]:border-slate-100 md:[&>*:nth-child(-n+2)]:border-b-0">
-          <StatItem icon={Users} value={stats.students} label="Peserta didik" />
-          <StatItem icon={GraduationCap} value={stats.teachers} label="Guru dan staf" />
-          <StatItem icon={BookOpen} value={stats.classes} label="Rombel" />
+          <StatItem icon={Users} value={stats.students} label="Siswa aktif" />
+          <StatItem icon={GraduationCap} value={stats.teachers} label="Guru aktif" />
+          <StatItem icon={BookOpen} value={stats.classes} label="Rombel aktif" />
           <StatItem icon={Trophy} value={stats.achievements} label="Prestasi" />
         </div>
+        {stats.year && <p className="mt-3 text-center text-xs text-slate-500">Data tahun pelajaran {stats.year}</p>}
       </section>
 
       {/* Agenda */}
