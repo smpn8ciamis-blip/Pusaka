@@ -17,6 +17,9 @@ export default defineConfig(({ mode }) => ({
   build: {
     target: "esnext",
     outDir: "dist",
+    // Jangan hapus chunk lama saat build: tab yang masih terbuka dengan versi lama tetap bisa memuat halaman.
+    // File lama dibersihkan oleh langkah deploy (lebih dari 14 hari).
+    emptyOutDir: false,
     assetsDir: "assets",
     sourcemap: false,
     rollupOptions: {
