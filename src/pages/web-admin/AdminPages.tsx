@@ -1,4 +1,5 @@
 import AdminCrudPage from "./AdminCrudPage";
+import { YesNo } from "@/components/web-admin/ui";
 export default function AdminPages() {
   return (
     <AdminCrudPage
@@ -6,12 +7,14 @@ export default function AdminPages() {
       description="Kelola konten Sejarah, Visi Misi, Sambutan, Fasilitas, dan Struktur."
       table="website_pages"
       orderBy={{ column: "sort_order" }}
+      listSelect="id,title,slug,section,is_published,sort_order,cover_image_url"
+      thumbKey="cover_image_url"
       defaults={{ is_published: true, sort_order: 0 }}
       columns={[
         { key: "title", label: "Judul" },
         { key: "slug", label: "Slug" },
         { key: "section", label: "Section" },
-        { key: "is_published", label: "Publik", render: (r) => r.is_published ? "Ya" : "Tidak" },
+        { key: "is_published", label: "Publik", render: (r) => <YesNo value={r.is_published} /> },
       ]}
       fields={[
         { key: "title", label: "Judul", required: true },

@@ -1,4 +1,5 @@
 import AdminCrudPage from "./AdminCrudPage";
+import { YesNo, fmtDateTime } from "@/components/web-admin/ui";
 export default function AdminAgenda() {
   return (
     <AdminCrudPage
@@ -9,9 +10,9 @@ export default function AdminAgenda() {
       defaults={{ is_published: true }}
       columns={[
         { key: "title", label: "Kegiatan" },
-        { key: "start_at", label: "Mulai", render: (r) => new Date(r.start_at).toLocaleString("id-ID") },
+        { key: "start_at", label: "Mulai", render: (r) => fmtDateTime(r.start_at) },
         { key: "location", label: "Lokasi" },
-        { key: "is_published", label: "Publik", render: (r) => r.is_published ? "Ya" : "Tidak" },
+        { key: "is_published", label: "Publik", render: (r) => <YesNo value={r.is_published} /> },
       ]}
       fields={[
         { key: "title", label: "Nama Kegiatan", required: true, colSpan: 2 },

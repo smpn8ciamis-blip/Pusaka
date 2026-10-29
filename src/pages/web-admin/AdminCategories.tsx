@@ -8,7 +8,7 @@ export default function AdminCategories() {
       columns={[
         { key: "name", label: "Nama" },
         { key: "slug", label: "Slug" },
-        { key: "color", label: "Warna", render: (r) => <span className="inline-block px-3 py-1 rounded text-white text-xs" style={{ background: r.color }}>{r.color}</span> },
+        { key: "color", label: "Warna", render: (r) => <span className="inline-flex items-center gap-2 text-xs text-slate-600"><span className="h-4 w-4 rounded-full ring-1 ring-black/10" style={{ background: r.color }} />{r.color}</span> },
       ]}
       fields={[
         { key: "name", label: "Nama", required: true },

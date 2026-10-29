@@ -1,4 +1,5 @@
 import AdminCrudPage from "./AdminCrudPage";
+import { YesNo } from "@/components/web-admin/ui";
 
 export default function AdminExtracurricular() {
   return (
@@ -7,14 +8,12 @@ export default function AdminExtracurricular() {
       description="Kelola daftar kegiatan ekstrakurikuler yang tampil di website."
       table="extracurricular_types"
       orderBy={{ column: "name" }}
+      thumbKey="image_url"
       defaults={{ is_active: true }}
       columns={[
-        { key: "image_url", label: "Foto", render: (r) => r.image_url
-          ? <img src={r.image_url} alt="" className="h-10 w-10 rounded object-cover" />
-          : <div className="h-10 w-10 rounded bg-slate-100" /> },
         { key: "name", label: "Nama" },
         { key: "description", label: "Deskripsi", render: (r) => <span className="text-slate-600 line-clamp-1">{r.description}</span> },
-        { key: "is_active", label: "Aktif", render: (r) => r.is_active ? "Ya" : "Tidak" },
+        { key: "is_active", label: "Aktif", render: (r) => <YesNo value={r.is_active} /> },
       ]}
       fields={[
         { key: "name", label: "Nama Ekstrakurikuler", required: true },
