@@ -35,7 +35,7 @@ export default function ImageField({ value, onChange, folder = "umum", placehold
     <div className="space-y-2">
       {value ? (
         <div className="relative w-full max-w-xs overflow-hidden rounded-xl border bg-slate-50">
-          <img src={value} alt="" className="h-40 w-full object-cover" onError={(e) => ((e.currentTarget.style.opacity = "0.3"))} />
+          <img src={value} alt="" loading="lazy" decoding="async" className="h-40 w-full object-cover" onError={(e) => ((e.currentTarget.style.opacity = "0.3"))} />
           <button type="button" onClick={() => onChange("")} aria-label="Hapus gambar"
             className="absolute right-2 top-2 rounded-full bg-black/60 p-1.5 text-white hover:bg-black/80">
             <X className="h-4 w-4" />

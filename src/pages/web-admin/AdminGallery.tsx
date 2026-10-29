@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import AdminCrudPage from "./AdminCrudPage";
+import { YesNo, cardCls } from "@/components/web-admin/ui";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,7 +27,7 @@ function ItemsManager() {
 
   useEffect(() => {
     if (!selected) { setItems([]); return; }
-    (supabase.from("website_gallery_items" as any) as any).select("*").eq("album_id", selected).order("sort_order").then(({ data }: any) => setItems(data ?? []));
+    (supabase.from("website_gallery_items" as any) as any).select("id,media_url").eq("album_id", selected).order("sort_order").then(({ data }: any) => setItems(data ?? []));
   }, [selected]);
 
   const add = async () => {
@@ -35,7 +36,7 @@ function ItemsManager() {
     if (error) return toast.error(error.message);
     setForm({ media_url: "", caption: "" });
     setOpen(false);
-    const { data } = await (supabase.from("website_gallery_items" as any) as any).select("*").eq("album_id", selected).order("sort_order");
+    const { data } = await (supabase.from("website_gallery_items" as any) as any).select("id,media_url").eq("album_id", selected).order("sort_order");
     setItems(data ?? []);
   };
 
@@ -65,12 +66,12 @@ function ItemsManager() {
     setBusy(false);
     if (multiRef.current) multiRef.current.value = "";
     if (ok) toast.success(`${ok} foto ditambahkan`);
-    const { data } = await (supabase.from("website_gallery_items" as any) as any).select("*").eq("album_id", selected).order("sort_order");
+    const { data } = await (supabase.from("website_gallery_items" as any) as any).select("id,media_url").eq("album_id", selected).order("sort_order");
     setItems(data ?? []);
   };
 
   return (
-    <div className="mb-6 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+    <div className={`mb-6 p-4 ${cardCls}`}>
       <div className="flex items-center gap-3 mb-3">
         <Images className="h-5 w-5 text-[#1E40AF]" />
         <h3 className="font-semibold">Kelola Foto per Album</h3>
@@ -92,7 +93,7 @@ function ItemsManager() {
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
         {items.map((i) => (
           <div key={i.id} className="relative aspect-square rounded overflow-hidden bg-slate-100 group">
-            <img src={i.media_url} alt="" className="w-full h-full object-cover" />
+            <img src={i.media_url} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
             <button onClick={() => del(i.id)} aria-label="Hapus foto" className="absolute top-1 right-1 rounded bg-red-500 p-1.5 text-white sm:opacity-0 sm:group-hover:opacity-100"><Trash2 className="h-3 w-3" /></button>
           </div>
         ))}
@@ -119,12 +120,13 @@ export default function AdminGallery() {
         description="Kelola album galeri foto/video kegiatan sekolah."
         table="website_gallery_albums"
         orderBy={{ column: "created_at", ascending: false }}
+        thumbKey="cover_image_url"
         defaults={{ is_published: true }}
         columns={[
           { key: "title", label: "Judul" },
           { key: "slug", label: "Slug" },
           { key: "event_date", label: "Tanggal" },
-          { key: "is_published", label: "Publik", render: (r) => r.is_published ? "Ya" : "Tidak" },
+          { key: "is_published", label: "Publik", render: (r) => <YesNo value={r.is_published} /> },
         ]}
         fields={[
           { key: "title", label: "Judul", required: true },

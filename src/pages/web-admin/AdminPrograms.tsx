@@ -1,4 +1,5 @@
 import AdminCrudPage from "./AdminCrudPage";
+import { YesNo } from "@/components/web-admin/ui";
 export default function AdminPrograms() {
   return (
     <AdminCrudPage
@@ -6,12 +7,13 @@ export default function AdminPrograms() {
       description="Kelola program/jurusan yang tampil di halaman Akademik."
       table="website_programs"
       orderBy={{ column: "sort_order" }}
+      thumbKey="cover_image_url"
       defaults={{ is_published: true, sort_order: 0 }}
       columns={[
         { key: "name", label: "Nama Program" },
         { key: "slug", label: "Slug" },
         { key: "sort_order", label: "Urutan" },
-        { key: "is_published", label: "Publik", render: (r) => r.is_published ? "Ya" : "Tidak" },
+        { key: "is_published", label: "Publik", render: (r) => <YesNo value={r.is_published} /> },
       ]}
       fields={[
         { key: "name", label: "Nama Program", required: true },
