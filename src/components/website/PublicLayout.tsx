@@ -12,6 +12,7 @@ const ALL_NAV: { to: string; label: string; end?: boolean; key?: string }[] = [
   { to: "/website/akademik", label: "Akademik" },
   { to: "/website/ekstrakurikuler", label: "Ekstrakurikuler" },
   { to: "/website/berita", label: "Berita" },
+  { to: "/website/agenda", label: "Agenda" },
   { to: "/website/galeri", label: "Galeri" },
   { to: "/website/guru", label: "Guru & Staff", key: "show_guru_page" },
   { to: "/website/kontak", label: "Kontak" },
@@ -80,9 +81,9 @@ export default function PublicLayout() {
   }, [settings]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-white text-slate-900">
+    <div className="min-h-screen flex flex-col bg-white text-slate-900" style={{ fontFamily: "'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif" }}>
       {/* Top bar */}
-      <div className="hidden md:block bg-[#1E40AF] text-white text-xs">
+      <div className="hidden md:block bg-[#0B1F4D] text-blue-100 text-xs">
         <div className="container mx-auto flex items-center justify-between py-2 px-4">
           <div className="flex items-center gap-4">
             {settings?.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{settings.phone}</span>}
@@ -97,8 +98,8 @@ export default function PublicLayout() {
       </div>
 
       {/* Nav */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b">
-        <div className="container mx-auto flex items-center justify-between px-4 h-16">
+      <header className="sticky top-0 z-40 bg-white/85 backdrop-blur-xl border-b border-slate-200/70 supports-[backdrop-filter]:bg-white/75">
+        <div className="container mx-auto flex items-center justify-between px-4 h-[68px]">
           <Link to="/" className="flex items-center gap-3">
             {settings?.logo_url ? (
               <img src={settings.logo_url} alt="logo" className="h-10 w-10 object-contain" />
@@ -111,15 +112,15 @@ export default function PublicLayout() {
             </div>
           </Link>
 
-          <nav className="hidden lg:flex items-center gap-1">
+          <nav className="hidden lg:flex items-center gap-0.5">
             {NAV.map((n) => (
               <NavLink
                 key={n.to}
                 to={n.to}
                 end={n.end}
                 className={({ isActive }) =>
-                  `px-3 py-2 text-sm font-medium rounded-md transition ${
-                    isActive ? "text-[#1E40AF] bg-blue-50" : "text-slate-700 hover:text-[#1E40AF] hover:bg-slate-50"
+                  `px-3 py-2 text-[13px] font-semibold rounded-full transition ${
+                    isActive ? "text-white bg-[#1E40AF] shadow-sm" : "text-slate-600 hover:text-[#1E40AF] hover:bg-blue-50"
                   }`
                 }
               >
@@ -130,9 +131,9 @@ export default function PublicLayout() {
 
           <div className="hidden lg:flex items-center gap-2">
             {user ? (
-              <Button onClick={() => navigate("/dashboard")} className="bg-[#1E40AF] hover:bg-[#1E3A8A]">Dashboard</Button>
+              <Button onClick={() => navigate("/dashboard")} className="rounded-full bg-[#1E40AF] hover:bg-[#1E3A8A]">Dashboard</Button>
             ) : (
-              <Button onClick={() => navigate("/auth")} variant="outline" className="border-[#1E40AF] text-[#1E40AF] hover:bg-[#1E40AF] hover:text-white">Login</Button>
+              <Button onClick={() => navigate("/auth")} variant="outline" className="rounded-full border-[#1E40AF] text-[#1E40AF] hover:bg-[#1E40AF] hover:text-white">Login</Button>
             )}
           </div>
 
@@ -151,7 +152,7 @@ export default function PublicLayout() {
                   end={n.end}
                   onClick={() => setOpen(false)}
                   className={({ isActive }) =>
-                    `px-3 py-2 rounded-md text-sm ${isActive ? "text-[#1E40AF] bg-blue-50" : "text-slate-700"}`
+                    `px-4 py-2.5 rounded-xl text-sm font-medium ${isActive ? "text-white bg-[#1E40AF]" : "text-slate-700 hover:bg-slate-50"}`
                   }
                 >
                   {n.label}
@@ -173,7 +174,7 @@ export default function PublicLayout() {
       </main>
 
       {/* Footer */}
-      <footer className="mt-20 bg-slate-900 text-slate-200">
+      <footer className="mt-20 bg-[#0B1F4D] text-slate-200">
         <div className="container mx-auto px-4 py-12 grid gap-8 md:grid-cols-4">
           <div>
             <div className="flex items-center gap-2 mb-3">
@@ -194,6 +195,7 @@ export default function PublicLayout() {
             <h4 className="font-semibold text-white mb-3">Layanan</h4>
             <ul className="space-y-2 text-sm">
               <li><Link to="/website/berita" className="hover:text-white text-slate-400">Berita</Link></li>
+              <li><Link to="/website/agenda" className="hover:text-white text-slate-400">Agenda</Link></li>
               <li><Link to="/website/galeri" className="hover:text-white text-slate-400">Galeri</Link></li>
               <li><Link to="/daftar-siswa" className="hover:text-white text-slate-400">Pendaftaran Siswa</Link></li>
               <li><Link to="/layanan-publik" className="hover:text-white text-slate-400">Layanan Publik</Link></li>
@@ -209,7 +211,7 @@ export default function PublicLayout() {
             </ul>
           </div>
         </div>
-        <div className="border-t border-slate-800 py-4">
+        <div className="border-t border-white/10 py-4">
           <div className="container mx-auto px-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center text-[11px] text-slate-500">
             <span>© {new Date().getFullYear()} {settings?.site_name ?? "Nedelcis School"}</span>
             <span className="text-slate-700 hidden sm:inline">•</span>
