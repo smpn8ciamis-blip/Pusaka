@@ -38,6 +38,10 @@ interface Props {
   defaults?: Record<string, any>;
   /** Kolom yang diambil untuk DAFTAR (hindari kolom besar seperti isi berita). Baris lengkap diambil saat Edit. */
   listSelect?: string;
+  /** Dipakai bila query dengan listSelect gagal (mis. kolom baru belum ada di basis data). */
+  listSelectFallback?: string;
+  /** Pilihan urutan di sisi tampilan. Opsi pertama = urutan bawaan (tanpa compare). */
+  sortOptions?: { value: string; label: string; compare?: (a: any, b: any) => number }[];
   /** @deprecated pakai listSelect */
   extraSelect?: string;
   /** Kolom gambar yang ditampilkan sebagai thumbnail di daftar. */
@@ -64,7 +68,7 @@ function Thumb({ src, className = "h-12 w-12" }: { src?: string | null; classNam
   );
 }
 
-export default function AdminCrudPage({ title, description, table, columns, fields, orderBy, defaults, listSelect, extraSelect, thumbKey, renderExtra }: Props) {
+export default function AdminCrudPage({ title, description, table, columns, fields, orderBy, defaults, listSelect, listSelectFallback, sortOptions, extraSelect, thumbKey, renderExtra }: Props) {
   const qc = useQueryClient();
   const isMobile = useIsNarrow();
   const select = listSelect ?? extraSelect ?? "*";
@@ -74,9 +78,13 @@ export default function AdminCrudPage({ title, description, table, columns, fiel
   const { data: rows = [], isLoading, error } = useQuery({
     queryKey,
     queryFn: async () => {
-      let q: any = (supabase.from(table as any) as any).select(select).limit(MAX_ROWS);
-      if (orderBy) q = q.order(orderBy.column, { ascending: orderBy.ascending ?? true });
-      const { data, error } = await q;
+      const run = async (sel: string) => {
+        let q: any = (supabase.from(table as any) as any).select(sel).limit(MAX_ROWS);
+        if (orderBy) q = q.order(orderBy.column, { ascending: orderBy.ascending ?? true });
+        return await q;
+      };
+      let { data, error } = await run(select);
+      if (error && listSelectFallback) ({ data, error } = await run(listSelectFallback));
       if (error) throw error;
       return (data ?? []) as any[];
     },
@@ -92,8 +100,9 @@ export default function AdminCrudPage({ title, description, table, columns, fiel
   const [loadingFull, setLoadingFull] = useState(false);
   const [search, setSearch] = useState("");
   const [visible, setVisible] = useState(PAGE);
+  const [sortKey, setSortKey] = useState(sortOptions?.[0]?.value ?? "");
   const deferredSearch = useDeferredValue(search);
-  useEffect(() => { setVisible(PAGE); }, [deferredSearch, table]);
+  useEffect(() => { setVisible(PAGE); }, [deferredSearch, table, sortKey]);
 
   const openNew = () => { setEditing(null); setForm({ ...(defaults ?? {}) }); setOpen(true); };
   const openEdit = async (row: any) => {
@@ -139,7 +148,9 @@ export default function AdminCrudPage({ title, description, table, columns, fiel
   const matched = q
     ? rows.filter((r) => [...columns.map((c) => c.key), ...fields.map((f) => f.key)].some((k) => typeof r[k] !== "object" && String(r[k] ?? "").toLowerCase().includes(q)))
     : rows;
-  const shown = matched.slice(0, visible);
+  const cmp = sortOptions?.find((o) => o.value === sortKey)?.compare;
+  const ordered = cmp ? matched.slice().sort(cmp) : matched;
+  const shown = ordered.slice(0, visible);
 
   const isImg = (k: string) => /image/.test(k);
   const titleCol = columns.find((c) => !isImg(c.key)) ?? columns[0];
@@ -165,9 +176,21 @@ export default function AdminCrudPage({ title, description, table, columns, fiel
 
       {renderExtra?.(rows)}
 
-      <div className="relative mb-4">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-        <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari…" className="h-11 rounded-xl bg-white pl-9 sm:h-10 sm:max-w-sm" />
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row">
+        <div className="relative sm:w-full sm:max-w-sm">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari…" className="h-11 rounded-xl bg-white pl-9 sm:h-10" />
+        </div>
+        {sortOptions && sortOptions.length > 1 && (
+          <select
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value)}
+            aria-label="Urutkan"
+            className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 sm:h-10"
+          >
+            {sortOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        )}
       </div>
 
       {isLoading ? (
@@ -234,12 +257,12 @@ export default function AdminCrudPage({ title, description, table, columns, fiel
         </div>
       )}
 
-      {matched.length > shown.length && (
+      {ordered.length > shown.length && (
         <div className="mt-4 flex flex-col items-center gap-1">
           <Button variant="outline" className="h-10 rounded-xl" onClick={() => setVisible((v) => v + PAGE)}>
             Tampilkan lebih banyak
           </Button>
-          <span className="text-xs text-slate-400">{shown.length} dari {matched.length}</span>
+          <span className="text-xs text-slate-400">{shown.length} dari {ordered.length}</span>
         </div>
       )}
       {rows.length >= MAX_ROWS && <p className="mt-3 text-center text-xs text-slate-400">Menampilkan {MAX_ROWS} data teratas. Gunakan pencarian untuk menemukan data lain.</p>}
