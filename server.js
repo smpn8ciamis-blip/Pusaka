@@ -1786,6 +1786,94 @@ function absUrl(u) {
     return SITE_URL + (s.startsWith('/') ? '' : '/') + s;
 }
 function stripHtml(h) { return String(h || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim(); }
+
+// Gambar pratinjau: WhatsApp sering MENOLAK gambar OG yang besar (>~300 KB) atau berformat WebP/AVIF, sehingga kartu muncul tanpa gambar.
+// Bila paket `sharp` terpasang (npm i sharp di /srv/wa-bot), cover dikecilkan jadi JPEG 1200x630 (<~280 KB) lewat
+// GET /og/img/berita/<slug> dan GET /og/img/hero (sengaja TANPA akhiran .jpg: nginx menangkap *.jpg sebagai berkas statis, bukan /wa-api/). Tanpa sharp, tag OG tetap memakai gambar aslinya (perilaku lama).
+let sharpLib = null;
+try { sharpLib = require('sharp'); } catch (e) { console.log('[OG] paket sharp belum terpasang; gambar pratinjau dipakai apa adanya (npm i sharp agar otomatis dikecilkan)'); }
+const OG_IMG_MAX_SRC = 15 * 1024 * 1024; // batas unduh gambar asli
+const OG_IMG_TARGET = 280 * 1024;        // target ukuran hasil
+const ogImgCache = new Map();            // srcUrl -> { buf, at }
+const ogImgInflight = new Map();         // srcUrl -> Promise<Buffer>
+function ogHostAllowed(u) {
+    try {
+        const x = new URL(u);
+        if (x.protocol !== 'https:' && x.protocol !== 'http:') return false;
+        const h = x.hostname.toLowerCase();
+        return !(h === 'localhost' || /^(127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || h === '[::1]' || h.endsWith('.local') || h.endsWith('.internal'));
+    } catch (e) { return false; }
+}
+async function renderOgJpeg(src) {
+    const hit = ogImgCache.get(src);
+    if (hit && Date.now() - hit.at < 6 * 3600 * 1000) return hit.buf;
+    if (ogImgInflight.has(src)) return ogImgInflight.get(src);
+    const p = (async function() {
+        if (!ogHostAllowed(src)) throw new Error('alamat gambar tidak diizinkan');
+        const ctl = new AbortController();
+        const timer = setTimeout(function() { ctl.abort(); }, 10000);
+        try {
+            const r = await fetch(src, { signal: ctl.signal, redirect: 'follow' });
+            if (!r.ok) throw new Error('unduh gambar gagal: HTTP ' + r.status);
+            const len = Number(r.headers.get('content-length') || 0);
+            if (len > OG_IMG_MAX_SRC) throw new Error('gambar terlalu besar');
+            const raw = Buffer.from(await r.arrayBuffer());
+            if (raw.length > OG_IMG_MAX_SRC) throw new Error('gambar terlalu besar');
+            let out = null;
+            for (const q of [82, 72, 62, 52, 42]) {
+                out = await sharpLib(raw, { limitInputPixels: 80e6 }).rotate().resize(1200, 630, { fit: 'cover', position: 'attention' })
+                    .flatten({ background: '#ffffff' }).jpeg({ quality: q, progressive: true }).toBuffer();
+                if (out.length <= OG_IMG_TARGET) break;
+            }
+            return out;
+        } finally { clearTimeout(timer); }
+    })();
+    ogImgInflight.set(src, p);
+    try {
+        const buf = await p;
+        ogImgCache.set(src, { buf: buf, at: Date.now() });
+        if (ogImgCache.size > 40) ogImgCache.delete(ogImgCache.keys().next().value); // buang yang tertua
+        return buf;
+    } finally { ogImgInflight.delete(src); }
+}
+// Alamat gambar untuk tag og:image. `path` = jalur di bot (mis. '/og/img/berita/slug'); lewat /wa-api/ yang sudah diteruskan nginx.
+function ogImageFor(path, original) {
+    if (!sharpLib || !original) return { url: original, resized: false };
+    const v = crypto.createHash('md5').update(original).digest('hex').slice(0, 8); // ganti cover -> alamat baru -> cache WhatsApp ikut baru
+    return { url: SITE_URL + '/wa-api' + path + '?v=' + v, resized: true };
+}
+async function sendOgJpeg(res, original) {
+    if (!ogHostAllowed(original)) return res.status(404).type('text/plain').send('Gambar tidak tersedia');
+    if (!sharpLib) return res.redirect(302, original);
+    try {
+        const buf = await renderOgJpeg(original);
+        res.set('Cache-Control', 'public, max-age=86400');
+        res.type('image/jpeg').send(buf);
+    } catch (e) {
+        console.error('[OG gambar]', e.message);
+        res.redirect(302, original); // cadangan: biar crawler mencoba gambar aslinya
+    }
+}
+app.get('/og/img/berita/:slug', rateLimit('ogimg', 120, 60000), async function(req, res) {
+    const slug = String(req.params.slug || '').slice(0, 200).replace(/\.jpe?g$/i, '').replace(/\.html$/i, '');
+    try {
+        const r = await supabase.from('website_news').select('cover_image_url').eq('slug', slug).eq('status', 'published').maybeSingle();
+        if (r.error) throw r.error;
+        const original = absUrl(r.data && r.data.cover_image_url);
+        if (!original) return res.status(404).type('text/plain').send('Tidak ada gambar');
+        await sendOgJpeg(res, original);
+    } catch (e) { console.error('[OG gambar berita]', e.message); res.status(500).type('text/plain').send('Gagal memuat gambar'); }
+});
+app.get('/og/img/hero', rateLimit('ogimg', 120, 60000), async function(req, res) {
+    try {
+        const r = await supabase.from('website_hero_slides').select('image_url').eq('is_active', true).order('sort_order').limit(1);
+        if (r.error) throw r.error;
+        const original = absUrl(r.data && r.data[0] && r.data[0].image_url);
+        if (!original) return res.status(404).type('text/plain').send('Tidak ada gambar');
+        await sendOgJpeg(res, original);
+    } catch (e) { console.error('[OG gambar hero]', e.message); res.status(500).type('text/plain').send('Gagal memuat gambar'); }
+});
+
 async function ogBeritaHandler(req, res) {
     // Tautan bagikan berakhiran .html (https://situs/website/berita/<slug>.html); buang akhiran itu untuk mencari berita.
     const slug = String(req.params.slug || '').slice(0, 200).replace(/\.html$/i, '');
@@ -1796,7 +1884,11 @@ async function ogBeritaHandler(req, res) {
         if (!r.data) return res.status(404).type('text/plain').send('Berita tidak ditemukan');
         const n = r.data;
         let image = absUrl(n.cover_image_url);
-        if (!image) {
+        let resized = false;
+        if (image) {
+            const o = ogImageFor('/og/img/berita/' + encodeURIComponent(n.slug), image);
+            image = o.url; resized = o.resized;
+        } else {
             const st = await supabase.from('website_settings').select('logo_url').order('created_at', { ascending: false }).limit(1).maybeSingle();
             image = absUrl(st && st.data && st.data.logo_url) || SITE_URL + '/icon-512.png';
         }
@@ -1806,8 +1898,10 @@ async function ogBeritaHandler(req, res) {
         const meta = [
             ['og:type', 'article'], ['og:site_name', 'SMPN 8 Ciamis'], ['og:locale', 'id_ID'], ['og:url', url],
             ['og:title', title], ['og:description', desc], ['og:image', image], ['og:image:secure_url', image],
+            ['og:image:alt', String(n.title)],
             ['twitter:card', 'summary_large_image'], ['twitter:title', title], ['twitter:description', desc], ['twitter:image', image]
         ];
+        if (resized) meta.push(['og:image:width', '1200'], ['og:image:height', '630'], ['og:image:type', 'image/jpeg']);
         if (n.published_at) meta.push(['article:published_time', new Date(n.published_at).toISOString()]);
         const tags = meta.map(function(m) { return '<meta property="' + m[0] + '" content="' + escHtml(m[1]) + '">'; }).join('\n');
         res.set('Cache-Control', 'public, max-age=300');
@@ -1864,14 +1958,17 @@ async function ogHalamanHandler(req, res) {
             }
         }
         // Gambar: foto hero beranda (lebar) bila ada; cadangan: kartu bawaan 1200x630 berlogo sekolah.
-        const image = absUrl(hero && hero.image_url) || base + '/og-default.jpg';
+        let image = absUrl(hero && hero.image_url);
+        let resized = false;
+        if (image) { const o = ogImageFor('/og/img/hero', image); image = o.url; resized = o.resized; }
+        else image = base + '/og-default.jpg';
         const url = base + (pth === '/' ? '/' : pth);
         const meta = [
             ['og:type', 'website'], ['og:site_name', site], ['og:locale', 'id_ID'], ['og:url', url],
             ['og:title', title], ['og:description', desc], ['og:image', image], ['og:image:secure_url', image],
             ['twitter:card', 'summary_large_image'], ['twitter:title', title], ['twitter:description', desc], ['twitter:image', image]
         ];
-        if (image === base + '/og-default.jpg') { meta.push(['og:image:width', '1200'], ['og:image:height', '630'], ['og:image:type', 'image/jpeg']); }
+        if (resized || image === base + '/og-default.jpg') { meta.push(['og:image:width', '1200'], ['og:image:height', '630'], ['og:image:type', 'image/jpeg']); }
         const tags = meta.map(function(m) { return '<meta property="' + m[0] + '" content="' + escHtml(m[1]) + '">'; }).join('\n');
         res.set('Cache-Control', 'public, max-age=300');
         res.type('html').send('<!doctype html><html lang="id"><head><meta charset="utf-8"><title>' + escHtml(title) + '</title>\n' +

@@ -110,11 +110,29 @@ function Avatar({ name, size = 40 }: { name: string; size?: number }) {
   );
 }
 
+// Salin ke papan klip; cadangan untuk peramban/WebView yang tidak punya navigator.clipboard (mis. bukan HTTPS).
+async function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    try { await navigator.clipboard.writeText(text); return; } catch { /* lanjut ke cadangan */ }
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand("copy");
+  document.body.removeChild(ta);
+  if (!ok) throw new Error("copy failed");
+}
+
 function ShareRow({ news, onShareCountUpdate, label }: { news: News; onShareCountUpdate?: (n: number) => void; label?: string }) {
   const [copied, setCopied] = useState(false);
   const { trackShare } = useNewsShareTracker();
   const shareUrl = beritaShareUrl(news.slug);
-  const shareText = `${news.title}${news.excerpt ? " - " + news.excerpt : ""}`;
+  // Teks bagikan singkat (judul saja). Tautan ditaruh di baris sendiri agar WhatsApp mengenalinya dan menampilkan kartu pratinjau bergambar.
+  const shareText = news.title;
 
   const bump = async (platform: SharePlatform) => {
     const n = await trackShare(news.id, platform);
@@ -126,7 +144,7 @@ function ShareRow({ news, onShareCountUpdate, label }: { news: News; onShareCoun
   };
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(shareUrl);
+      await copyText(shareUrl);
       await bump("copy_link");
       setCopied(true);
       toast.success("Link berhasil disalin!");
@@ -135,13 +153,13 @@ function ShareRow({ news, onShareCountUpdate, label }: { news: News; onShareCoun
   };
   const native = async () => {
     try {
-      await navigator.share({ title: news.title, text: news.excerpt ?? "", url: shareUrl });
+      await navigator.share({ title: news.title, url: shareUrl });
       await bump("native");
     } catch (err) { if ((err as Error).name !== "AbortError") console.error("Share failed:", err); }
   };
 
   const items = [
-    { platform: "whatsapp" as const, icon: MessageCircle, label: "WhatsApp", cls: "bg-[#25D366]", url: `https://wa.me/?text=${encodeURIComponent(shareText + " " + shareUrl)}` },
+    { platform: "whatsapp" as const, icon: MessageCircle, label: "WhatsApp", cls: "bg-[#25D366]", url: `https://wa.me/?text=${encodeURIComponent(shareText + "\n\n" + shareUrl)}` },
     { platform: "facebook" as const, icon: Facebook, label: "Facebook", cls: "bg-[#1877F2]", url: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}` },
     { platform: "twitter" as const, icon: Twitter, label: "X", cls: "bg-black", url: `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}` },
     { platform: "telegram" as const, icon: Send, label: "Telegram", cls: "bg-[#229ED9]", url: `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(shareText)}` },
