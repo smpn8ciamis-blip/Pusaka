@@ -73,8 +73,9 @@ interface NewsItem {
 
 const SITE_NAME = "SMPN 8 Ciamis";
 
-// Tautan yang dibagikan SELALU berakhiran .html (nginx mengarahkan crawler WhatsApp dkk. ke pratinjau berita).
-const beritaShareUrl = (slug: string) => `${window.location.origin}/website/berita/${encodeURIComponent(slug)}.html`;
+// Tautan bagikan = tautan halaman berita yang asli (tanpa .html). Nginx mengenali crawler WhatsApp dkk. dari User-Agent
+// dan memberi mereka pratinjau (judul, ringkasan, gambar); pengunjung biasa langsung masuk ke halaman berita.
+const beritaShareUrl = (slug: string) => `${window.location.origin}/website/berita/${encodeURIComponent(slug)}`;
 
 const WIB = "Asia/Jakarta";
 function fmtDateTime(iso?: string | null) {
@@ -208,7 +209,7 @@ function SideSection({ title, children }: { title: string; children: ReactNode }
 
 export default function BeritaDetail() {
   const { slug: rawSlug } = useParams<{ slug: string }>();
-  // Tautan bagikan berakhiran .html; buang akhiran itu untuk mencari berita.
+  // Tautan lama yang sempat dibagikan berakhiran .html; buang akhiran itu untuk mencari berita.
   const slug = (rawSlug ?? "").replace(/\.html$/i, "");
   const [news, setNews] = useState<News | null>(null);
   const [loading, setLoading] = useState(true);
