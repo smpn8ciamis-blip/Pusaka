@@ -1,0 +1,73 @@
+-- Statistik beranda website publik: siswa aktif, guru aktif, rombel aktif
+-- sesuai tahun pelajaran yang diaktifkan di Pengaturan (academic_years.is_active = true).
+-- Hanya mengembalikan angka agregat, jadi aman dipanggil pengunjung tanpa login (anon).
+
+CREATE OR REPLACE FUNCTION public.get_website_public_stats()
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_year        text;
+  v_students    int := 0;
+  v_teachers    int := 0;
+  v_classes     int := 0;
+  v_achievements int := 0;
+BEGIN
+  SELECT year INTO v_year
+  FROM public.academic_years
+  WHERE is_active = true
+  ORDER BY year DESC
+  LIMIT 1;
+
+  IF v_year IS NOT NULL THEN
+    -- Rombel aktif = kelas pada tahun pelajaran aktif
+    SELECT count(*) INTO v_classes
+    FROM public.classes c
+    WHERE c.academic_year = v_year;
+
+    -- Siswa aktif = status 'aktif', bukan alumni, dan berada di rombel tahun pelajaran aktif
+    SELECT count(*) INTO v_students
+    FROM public.students s
+    JOIN public.classes c ON c.id = s.class_id
+    WHERE c.academic_year = v_year
+      AND s.status = 'aktif'
+      AND COALESCE((to_jsonb(s) ->> 'is_alumni')::boolean, false) = false;
+
+    -- Guru aktif = guru yang mengajar (punya jadwal) atau menjadi wali kelas pada tahun pelajaran aktif
+    SELECT count(*) INTO v_teachers
+    FROM public.teachers t
+    WHERE EXISTS (SELECT 1 FROM public.schedules sc WHERE sc.teacher_id = t.id AND sc.academic_year = v_year)
+       OR EXISTS (SELECT 1 FROM public.classes c WHERE c.homeroom_teacher_id = t.id AND c.academic_year = v_year);
+
+    -- Jadwal belum diisi untuk tahun ini: tampilkan seluruh guru terdaftar agar tidak 0
+    IF v_teachers = 0 THEN
+      SELECT count(*) INTO v_teachers FROM public.teachers;
+    END IF;
+  END IF;
+
+  SELECT count(*) INTO v_achievements FROM public.student_achievements;
+
+  RETURN jsonb_build_object(
+    'academic_year', v_year,
+    'students', v_students,
+    'teachers', v_teachers,
+    'classes', v_classes,
+    'achievements', v_achievements
+  );
+END;
+$$;
+
+-- Sengaja dibuka untuk anon: dipakai beranda publik dan hanya mengembalikan angka agregat.
+REVOKE ALL ON FUNCTION public.get_website_public_stats() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_website_public_stats() TO anon, authenticated;
+
+-- Supabase self-hosted: muat ulang cache skema PostgREST agar fungsi baru langsung bisa dipanggil lewat API.
+NOTIFY pgrst, 'reload schema';
+
+-- Uji cepat (jalankan sebagai pengunjung tanpa login). Harus mengembalikan angka, bukan error:
+--   SET ROLE anon;
+--   SELECT public.get_website_public_stats();
+--   RESET ROLE;
