@@ -6,7 +6,9 @@ import "./index.css";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { AcademicYearProvider } from "./contexts/AcademicYearContext";
 import { initPwa } from "./lib/webPush";
+import { initChunkReload } from "./lib/chunkReload";
 
+initChunkReload();
 initPwa();
 
 createRoot(document.getElementById("root")!).render(
