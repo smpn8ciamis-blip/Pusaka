@@ -15,21 +15,31 @@ export const LEGACY_LABEL: Record<LegacyKey, string> = {
 
 export const MAX_COMPONENTS = 12;
 
+export const CATEGORIES = ['pengetahuan', 'keterampilan', 'sikap'] as const;
+export type GradeCategory = (typeof CATEGORIES)[number];
+export const CATEGORY_LABEL: Record<GradeCategory, string> = {
+  pengetahuan: 'Pengetahuan',
+  keterampilan: 'Keterampilan',
+  sikap: 'Sikap',
+};
+
 export interface GradeComponent {
   /** id di database; null untuk komponen bawaan yang belum disimpan */
   id: string | null;
   name: string;
   weight: number;
   legacy_key: LegacyKey | null;
+  /** kelompok nilai: dirata-ratakan terpisah per kategori; nilai akhir tetap satu angka */
+  category: GradeCategory;
 }
 
 /** Rumus lama (dipakai bila guru belum mengatur sendiri). */
 export const DEFAULT_COMPONENTS: GradeComponent[] = [
-  { id: null, name: 'Tugas', weight: 20, legacy_key: 'tugas' },
-  { id: null, name: 'Kuis', weight: 20, legacy_key: 'kuis' },
-  { id: null, name: 'UTS', weight: 25, legacy_key: 'uts' },
-  { id: null, name: 'UAS', weight: 25, legacy_key: 'uas' },
-  { id: null, name: 'Praktik', weight: 10, legacy_key: 'praktik' },
+  { id: null, name: 'Tugas', weight: 20, legacy_key: 'tugas', category: 'pengetahuan' },
+  { id: null, name: 'Kuis', weight: 20, legacy_key: 'kuis', category: 'pengetahuan' },
+  { id: null, name: 'UTS', weight: 25, legacy_key: 'uts', category: 'pengetahuan' },
+  { id: null, name: 'UAS', weight: 25, legacy_key: 'uas', category: 'pengetahuan' },
+  { id: null, name: 'Praktik', weight: 10, legacy_key: 'praktik', category: 'pengetahuan' },
 ];
 
 /** Kunci unik kolom nilai di tabel input: komponen bawaan -> legacy_key, lainnya -> id. */
@@ -60,6 +70,30 @@ export function computeFinal(components: GradeComponent[], scores: StudentScores
   return Math.round(Math.min(100, Math.max(0, sum / total)) * 100) / 100;
 }
 
+/** Rata-rata berbobot per kategori (null bila kategori tidak dipakai atau bobotnya 0). */
+export function computeCategoryAverages(
+  components: GradeComponent[],
+  scores: StudentScores,
+): Record<GradeCategory, number | null> {
+  const out = { pengetahuan: null, keterampilan: null, sikap: null } as Record<GradeCategory, number | null>;
+  for (const cat of CATEGORIES) {
+    const list = components.filter((c) => c.category === cat);
+    const total = list.reduce((s, c) => s + c.weight, 0);
+    if (list.length === 0 || total <= 0) continue;
+    const sum = list.reduce((s, c) => {
+      const v = c.legacy_key ? scores.legacy[c.legacy_key] : c.id ? scores.custom[c.id] : 0;
+      return s + c.weight * num(v);
+    }, 0);
+    out[cat] = Math.round(Math.min(100, Math.max(0, sum / total)) * 100) / 100;
+  }
+  return out;
+}
+
+/** Kategori yang dipakai (urut tetap); dipakai untuk memutuskan perlu tidaknya kolom per kategori. */
+export function usedCategories(components: GradeComponent[]): GradeCategory[] {
+  return CATEGORIES.filter((cat) => components.some((c) => c.category === cat));
+}
+
 export function totalWeight(items: { weight: number }[]): number {
   return Math.round(items.reduce((s, c) => s + num(c.weight), 0) * 100) / 100;
 }
@@ -76,6 +110,7 @@ export function validateComponents(items: GradeComponent[]): string | null {
     if (name.length > 40) return `Nama "${name}" terlalu panjang (maks. 40 karakter)`;
     if (names.has(name.toLowerCase())) return `Nama jenis penilaian ganda: ${name}`;
     names.add(name.toLowerCase());
+    if (!CATEGORIES.includes(c.category)) return `Kategori "${name}" tidak dikenal`;
     if (!Number.isFinite(c.weight) || c.weight < 0 || c.weight > 100) return `Bobot "${name}" harus 0–100`;
     if (c.legacy_key) {
       if (keys.has(c.legacy_key)) return `Penerima nilai CBT "${LEGACY_LABEL[c.legacy_key]}" dipakai lebih dari satu jenis`;
@@ -93,6 +128,7 @@ export function toRpcItems(items: GradeComponent[]) {
     name: c.name.trim(),
     weight: c.weight,
     legacy_key: c.legacy_key,
+    category: c.category,
   }));
 }
 
@@ -113,5 +149,6 @@ export function fromRows(rows: any[] | null | undefined): GradeComponent[] {
       name: String(r.name),
       weight: Number(r.weight),
       legacy_key: (r.legacy_key ?? null) as LegacyKey | null,
+      category: (CATEGORIES.includes(r.category) ? r.category : 'pengetahuan') as GradeCategory,
     }));
 }

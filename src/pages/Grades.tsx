@@ -8,22 +8,29 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Plus, Search, Printer, Download, Award, TrendingUp, FileText, Scale } from 'lucide-react';
+import { Plus, Search, Printer, Download, Award, TrendingUp, FileText, Scale, FileSpreadsheet } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type React from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { addLetterheadToPDF, addSignatureToPDF } from '@/lib/pdfLetterhead';
 import { GradeVisibilityPanel } from '@/components/GradeVisibilityPanel';
 import { GradeComponentsDialog } from '@/components/grades/GradeComponentsDialog';
+import { GradeImportDialog } from '@/components/grades/GradeImportDialog';
+import { clearDraft, loadDraft, saveDraft } from '@/lib/gradeDraft';
+import { parseClipboardGrid, parseScore, type ImportRow } from '@/lib/gradeImport';
 import { useGradeComponents, useCustomScores } from '@/hooks/useGradeComponents';
 import {
+  CATEGORY_LABEL,
   LEGACY_KEYS,
   componentKey,
+  computeCategoryAverages,
   computeFinal,
   gradeLabel,
+  usedCategories,
   type LegacyKey,
   type StudentScores,
 } from '@/lib/gradeComponents';
@@ -33,6 +40,18 @@ import {
 interface StudentInput {
   legacy: Record<LegacyKey, number | ''>;
   custom: Record<string, number | ''>;
+}
+
+/** Nilai awal tabel input dari data server (kolom lama + nilai jenis buatan guru). */
+function buildInputs(students: any[], customScores: Record<string, Record<string, number>>) {
+  const next: Record<string, StudentInput> = {};
+  for (const st of students) {
+    const g = st.existingGrade;
+    const legacy = {} as Record<LegacyKey, number | ''>;
+    for (const k of LEGACY_KEYS) legacy[k] = g?.[k] != null ? Number(g[k]) : 0;
+    next[st.id] = { legacy, custom: { ...(customScores[st.id] || {}) } };
+  }
+  return next;
 }
 
 /** sel CSV aman: nama jenis penilaian buatan guru bisa memuat koma/tanda kutip */
@@ -61,7 +80,9 @@ function GradesPage() {
   const [inputs, setInputs] = useState<Record<string, StudentInput>>({});
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [isComponentsOpen, setIsComponentsOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const initializedFor = useRef<string | null>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
 
   const { data: classes } = useQuery({
@@ -223,17 +244,47 @@ function GradesPage() {
   useEffect(() => {
     if (!selectedSchedule) { initializedFor.current = null; return; }
     if (!scheduleStudents || customScores === undefined || initializedFor.current === selectedSchedule) return;
-    const next: Record<string, StudentInput> = {};
-    for (const st of scheduleStudents as any[]) {
-      const g = st.existingGrade;
-      const legacy = {} as Record<LegacyKey, number | ''>;
-      for (const k of LEGACY_KEYS) legacy[k] = g?.[k] != null ? Number(g[k]) : 0;
-      next[st.id] = { legacy, custom: { ...(customScores[st.id] || {}) } };
+    const students = scheduleStudents as any[];
+    const next = buildInputs(students, customScores);
+    const dirtyIds = new Set<string>();
+    const draft = user?.id ? loadDraft<StudentInput>(user.id, selectedSchedule) : null;
+    if (draft) {
+      for (const [sid, v] of Object.entries(draft.students)) {
+        if (!next[sid]) continue;
+        next[sid] = { legacy: { ...next[sid].legacy, ...v.legacy }, custom: { ...next[sid].custom, ...v.custom } };
+        dirtyIds.add(sid);
+      }
     }
     setInputs(next);
-    setDirty(new Set());
+    setDirty(dirtyIds);
     initializedFor.current = selectedSchedule;
+    if (dirtyIds.size > 0 && user?.id) {
+      const uid = user.id;
+      const sched = selectedSchedule;
+      toast.info(`Draf nilai yang belum disimpan dipulihkan (${dirtyIds.size} siswa)`, {
+        duration: 10000,
+        action: {
+          label: 'Buang draf',
+          onClick: () => {
+            clearDraft(uid, sched);
+            setInputs(buildInputs(students, customScores));
+            setDirty(new Set());
+          },
+        },
+      });
+    }
   }, [selectedSchedule, scheduleStudents, customScores]);
+
+  // Simpan draf otomatis (per perangkat) agar ketikan tidak hilang bila tab tertutup / koneksi putus
+  useEffect(() => {
+    if (!user?.id || !selectedSchedule || initializedFor.current !== selectedSchedule) return;
+    const t = setTimeout(() => {
+      const subset: Record<string, StudentInput> = {};
+      dirty.forEach((sid) => { if (inputs[sid]) subset[sid] = inputs[sid]; });
+      saveDraft(user.id, selectedSchedule, subset);
+    }, 600);
+    return () => clearTimeout(t);
+  }, [inputs, dirty, selectedSchedule, user?.id]);
 
   const toScores = (input: StudentInput | undefined): StudentScores => {
     const legacy = {} as Record<LegacyKey, number>;
@@ -293,6 +344,7 @@ function GradesPage() {
       setIsDialogOpen(false);
       // kolom input sudah memuat nilai yang baru disimpan; cukup kosongkan penanda perubahan
       setDirty(new Set());
+      if (user?.id && selectedSchedule) clearDraft(user.id, selectedSchedule);
     },
     onError: (error: any) => {
       console.error('Error saving grades:', error);
@@ -312,6 +364,73 @@ function GradesPage() {
     setDirty((prev) => new Set(prev).add(studentId));
   };
 
+  /** Terapkan banyak nilai sekaligus (tempel dari Excel / impor berkas). */
+  const applyChanges = (changes: { studentId: string; comp: (typeof components)[number]; value: number }[]) => {
+    if (changes.length === 0) return;
+    setInputs((prev) => {
+      const next = { ...prev };
+      for (const ch of changes) {
+        const cur = next[ch.studentId] ?? { legacy: { tugas: 0, kuis: 0, uts: 0, uas: 0, praktik: 0 }, custom: {} };
+        next[ch.studentId] = ch.comp.legacy_key
+          ? { ...cur, legacy: { ...cur.legacy, [ch.comp.legacy_key]: ch.value } }
+          : { ...cur, custom: { ...cur.custom, [ch.comp.id as string]: ch.value } };
+      }
+      return next;
+    });
+    setDirty((prev) => {
+      const n = new Set(prev);
+      changes.forEach((c) => n.add(c.studentId));
+      return n;
+    });
+  };
+
+  const applyImport = (rows: ImportRow[]) => {
+    const byKey = new Map(components.map((c, i) => [componentKey(c, i), c] as const));
+    const changes: Parameters<typeof applyChanges>[0] = [];
+    for (const r of rows) {
+      if (!r.studentId) continue;
+      for (const [key, v] of Object.entries(r.values)) {
+        const comp = byKey.get(key);
+        if (comp && v !== '') changes.push({ studentId: r.studentId, comp, value: v });
+      }
+    }
+    applyChanges(changes);
+  };
+
+  const focusCell = (r: number, c: number) => {
+    const el = gridRef.current?.querySelector<HTMLInputElement>(`input[data-r="${r}"][data-c="${c}"]`);
+    if (el) { el.focus(); el.select(); }
+  };
+
+  /** Enter / panah bawah = sel di bawahnya; panah atas / Shift+Enter = sel di atasnya */
+  const handleCellKey = (e: React.KeyboardEvent<HTMLInputElement>, r: number, c: number) => {
+    if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); focusCell(r + (e.shiftKey ? -1 : 1), c); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); focusCell(r - 1, c); }
+  };
+
+  /** Tempel beberapa sel dari Excel/Sheets: mulai dari sel yang sedang aktif */
+  const handleCellPaste = (e: React.ClipboardEvent<HTMLInputElement>, r: number, c: number) => {
+    const text = e.clipboardData.getData('text');
+    if (!/[\t\n]/.test(text.trim())) return; // satu nilai: perilaku biasa
+    e.preventDefault();
+    const students = (scheduleStudents as any[]) || [];
+    const changes: Parameters<typeof applyChanges>[0] = [];
+    let skipped = 0;
+    parseClipboardGrid(text).forEach((line, dr) => {
+      line.forEach((cell, dc) => {
+        const st = students[r + dr];
+        const comp = components[c + dc];
+        if (!st || !comp) return;
+        const v = parseScore(cell);
+        if (v === '') return;
+        if (v === null || v < 0 || v > 100) { skipped++; return; }
+        changes.push({ studentId: st.id, comp, value: v });
+      });
+    });
+    applyChanges(changes);
+    toast.success(`${changes.length} nilai ditempel${skipped ? `, ${skipped} sel dilewati (bukan angka 0–100)` : ''}`);
+  };
+
   const getGradeLabel = gradeLabel;
 
   const handleSaveGrades = () => {
@@ -329,6 +448,19 @@ function GradesPage() {
       const v = c.legacy_key ? g?.[c.legacy_key] : c.id ? customScores?.[student.id]?.[c.id] : 0;
       return v == null ? 0 : Number(v);
     });
+  };
+
+  const cats = usedCategories(components);
+  const showCats = cats.length > 1;
+  /** rata-rata per kategori untuk ekspor (urut `cats`) */
+  const exportCategoryValues = (student: any) => {
+    const g = student.existingGrade;
+    const legacy = {} as Record<LegacyKey, number>;
+    for (const k of LEGACY_KEYS) legacy[k] = Number(g?.[k]) || 0;
+    const custom: Record<string, number> = {};
+    for (const [id, v] of Object.entries(customScores?.[student.id] || {})) custom[id] = Number(v) || 0;
+    const avg = computeCategoryAverages(components, { legacy, custom });
+    return cats.map((k) => (avg[k] == null ? '-' : Number(avg[k]!.toFixed(2))));
   };
 
   const { data: schoolSettings } = useQuery({
@@ -390,6 +522,7 @@ function GradesPage() {
         student.nis,
         toTitleCase(student.full_name),
         ...exportValues(student),
+        ...(showCats ? exportCategoryValues(student) : []),
         Number(finalGrade).toFixed(2),
         label
       ];
@@ -397,7 +530,7 @@ function GradesPage() {
 
     autoTable(doc, {
       startY: startY + 26,
-      head: [['No', 'NIS', 'Nama', ...components.map((c) => `${c.name} (${c.weight}%)`), 'Nilai', 'Grade']],
+      head: [['No', 'NIS', 'Nama', ...components.map((c) => `${c.name} (${c.weight}%)`), ...(showCats ? cats.map((k) => `Rata² ${CATEGORY_LABEL[k]}`) : []), 'Nilai', 'Grade']],
       body: tableData,
       theme: 'grid',
       headStyles: { fillColor: [139, 92, 246] },
@@ -421,6 +554,7 @@ function GradesPage() {
           nis: s.nis,
           nama: toTitleCase(s.full_name),
           komponen: Object.fromEntries(components.map((c, i) => [`${c.name} (${c.weight}%)`, exportValues(s)[i]])),
+          ...(showCats ? { kategori: Object.fromEntries(cats.map((k, i) => [CATEGORY_LABEL[k], exportCategoryValues(s)[i]])) } : {}),
           nilaiAkhir: Number(finalGrade).toFixed(2),
           predikat: getGradeLabel(Number(finalGrade)).label
         };
@@ -466,7 +600,7 @@ function GradesPage() {
     const schedule = schedules?.find(s => s.id === selectedSchedule);
     
     const csvContent = [
-      ['NIS', 'Nama', 'Kelas', ...components.map((c) => csvCell(`${c.name} (${c.weight}%)`)), 'Nilai Akhir', 'Predikat'].join(','),
+      ['NIS', 'Nama', 'Kelas', ...components.map((c) => csvCell(`${c.name} (${c.weight}%)`)), ...(showCats ? cats.map((k) => `Rata-rata ${CATEGORY_LABEL[k]}`) : []), 'Nilai Akhir', 'Predikat'].join(','),
       ...scheduleStudents.map((s: any) => {
         const grade = s.existingGrade;
         const finalGrade = grade?.final_grade || 0;
@@ -476,6 +610,7 @@ function GradesPage() {
           csvCell(toTitleCase(s.full_name)),
           csvCell(schedule?.classes?.name || ''),
           ...exportValues(s),
+          ...(showCats ? exportCategoryValues(s) : []),
           Number(finalGrade).toFixed(2),
           label
         ].join(',');
@@ -545,6 +680,12 @@ function GradesPage() {
                           Atur Jenis & Bobot
                         </Button>
                       )}
+                      {selectedSchedule && (
+                        <Button type="button" variant="outline" className="gap-2 shrink-0" onClick={() => setIsImportOpen(true)} disabled={!scheduleStudents || scheduleStudents.length === 0}>
+                          <FileSpreadsheet className="h-4 w-4" />
+                          Impor Excel/CSV
+                        </Button>
+                      )}
                     </div>
                     {selectedSchedule && (
                       <p className="text-xs text-muted-foreground">
@@ -572,16 +713,24 @@ function GradesPage() {
 
                   {selectedSchedule && scheduleStudents && scheduleStudents.length > 0 && (
                     <div className="space-y-4">
-                      <div className="overflow-x-auto">
+                      <p className="text-xs text-muted-foreground">
+                        Tips: Enter atau panah bawah pindah ke siswa berikutnya. Anda bisa menyalin kolom nilai dari Excel lalu menempelnya di sel pertama. Ketikan tersimpan otomatis sebagai draf di perangkat ini.
+                        {dirty.size > 0 && <b className="text-foreground"> {dirty.size} siswa diubah, belum disimpan.</b>}
+                      </p>
+                      <div className="overflow-x-auto" ref={gridRef}>
                         <Table>
                           <TableHeader>
                             <TableRow>
                               <TableHead className="w-12">No</TableHead>
-                              <TableHead className="min-w-[180px]">Nama Siswa</TableHead>
+                              <TableHead className="min-w-[180px] sticky left-0 z-10 bg-background">Nama Siswa</TableHead>
                               {components.map((c, ci) => (
                                 <TableHead key={componentKey(c, ci)} className="w-[100px]">
                                   {c.name} ({c.weight}%)
+                                  {showCats && <div className="text-[10px] font-normal text-muted-foreground">{CATEGORY_LABEL[c.category]}</div>}
                                 </TableHead>
+                              ))}
+                              {showCats && cats.map((k) => (
+                                <TableHead key={k} className="w-[90px] text-xs">Rata² {CATEGORY_LABEL[k]}</TableHead>
                               ))}
                               <TableHead className="w-[100px]">Nilai Akhir</TableHead>
                               <TableHead className="w-[80px]">Predikat</TableHead>
@@ -592,11 +741,12 @@ function GradesPage() {
                               const input = inputs[student.id];
                               const finalGrade = computeFinal(components, toScores(input));
                               const { label, color } = getGradeLabel(finalGrade);
+                              const catAvg = showCats ? computeCategoryAverages(components, toScores(input)) : null;
 
                               return (
                                 <TableRow key={student.id}>
                                   <TableCell>{index + 1}</TableCell>
-                                  <TableCell className="font-medium">{toTitleCase(student.full_name)}</TableCell>
+                                  <TableCell className="font-medium sticky left-0 z-10 bg-background">{toTitleCase(student.full_name)}</TableCell>
                                   {components.map((c, ci) => {
                                     const raw = c.legacy_key ? input?.legacy[c.legacy_key] : c.id ? input?.custom[c.id] : '';
                                     return (
@@ -615,11 +765,18 @@ function GradesPage() {
                                           }
                                           placeholder="0-100"
                                           className="w-20"
+                                          data-r={index}
+                                          data-c={ci}
+                                          onKeyDown={(e) => handleCellKey(e, index, ci)}
+                                          onPaste={(e) => handleCellPaste(e, index, ci)}
                                           aria-label={`${c.name} ${toTitleCase(student.full_name)}`}
                                         />
                                       </TableCell>
                                     );
                                   })}
+                                  {catAvg && cats.map((k) => (
+                                    <TableCell key={k} className="text-sm">{catAvg[k] == null ? '-' : Number(catAvg[k]!.toFixed(2))}</TableCell>
+                                  ))}
                                   <TableCell>
                                     <span className="font-bold text-lg">{Number(finalGrade.toFixed(2))}</span>
                                   </TableCell>
@@ -651,6 +808,18 @@ function GradesPage() {
         </div>
 
         <GradeVisibilityPanel />
+
+        {selectedSchedule && (
+          <GradeImportDialog
+            open={isImportOpen}
+            onOpenChange={setIsImportOpen}
+            scheduleLabel={selectedScheduleObj ? `${selectedScheduleObj.subject} - ${selectedScheduleObj.classes?.name ?? ''}` : ''}
+            students={((scheduleStudents as any[]) || []).map((st) => ({ id: st.id, nis: st.nis ?? null, full_name: st.full_name }))}
+            components={components}
+            valueOf={(sid, c) => (c.legacy_key ? inputs[sid]?.legacy[c.legacy_key] : c.id ? inputs[sid]?.custom[c.id] : '')}
+            onApply={applyImport}
+          />
+        )}
 
         {selectedSchedule && (
           <GradeComponentsDialog
