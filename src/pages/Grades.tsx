@@ -814,7 +814,7 @@ function GradesPage() {
             open={isImportOpen}
             onOpenChange={setIsImportOpen}
             scheduleLabel={selectedScheduleObj ? `${selectedScheduleObj.subject} - ${selectedScheduleObj.classes?.name ?? ''}` : ''}
-            students={((scheduleStudents as any[]) || []).map((st) => ({ id: st.id, nis: st.nis ?? null, full_name: st.full_name }))}
+            students={((scheduleStudents as any[]) || []).map((st) => ({ id: st.id, nis: st.nis ?? null, full_name: st.full_name, active: (st.status ?? 'aktif') === 'aktif' && !st.is_alumni }))}
             components={components}
             valueOf={(sid, c) => (c.legacy_key ? inputs[sid]?.legacy[c.legacy_key] : c.id ? inputs[sid]?.custom[c.id] : '')}
             onApply={applyImport}

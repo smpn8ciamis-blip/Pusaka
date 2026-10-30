@@ -70,7 +70,13 @@ export function normalizeNis(v: unknown): string {
   return t;
 }
 
-export interface ImportStudent { id: string; nis: string | null; full_name: string }
+export interface ImportStudent {
+  id: string;
+  nis: string | null;
+  full_name: string;
+  /** false = tidak aktif (pindah/keluar/alumni): tidak masuk templat dan tidak bisa diimpor. Default aktif. */
+  active?: boolean;
+}
 
 export interface ImportRow {
   /** nomor baris pada berkas (1 = baris pertama) */
@@ -163,6 +169,7 @@ export function matchImport(
       else if (cands.length > 1) errors.push('Nama kembar di kelas ini; isi kolom NIS');
     }
     if (!student && errors.length === 0) errors.push(nis ? `NIS ${nis} tidak ada di kelas ini` : `Siswa "${name}" tidak ditemukan`);
+    if (student && student.active === false) errors.push('Siswa tidak aktif (pindah/keluar/alumni)');
     if (student) {
       if (seen.has(student.id)) errors.push('Siswa muncul lebih dari sekali');
       seen.add(student.id);
@@ -193,7 +200,7 @@ export function buildTemplateRows(
   valueOf: (studentId: string, c: GradeComponent) => number | '' | undefined,
 ): (string | number)[][] {
   const head: (string | number)[] = ['NIS', 'Nama', ...components.map((c) => c.name)];
-  const body = students.map((s) => [
+  const body = students.filter((s) => s.active !== false).map((s) => [
     normalizeNis(s.nis),
     s.full_name,
     ...components.map((c) => {

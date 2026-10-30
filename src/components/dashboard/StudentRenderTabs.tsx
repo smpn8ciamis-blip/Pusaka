@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Calendar, BookOpen, Trophy, AlertTriangle, CheckCircle, XCircle, Star, Sparkles, Clock, Bell, FileText, TrendingUp, ChevronRight, AlertCircle, BadgeCheck, Hash, Users, GraduationCap, CreditCard, IdCard, UserCircle, MapPin, CalendarDays, User, Phone } from "lucide-react";
+import { Medal, Loader2, Calendar, BookOpen, Trophy, AlertTriangle, CheckCircle, XCircle, Star, Sparkles, Clock, Bell, FileText, TrendingUp, ChevronRight, AlertCircle, BadgeCheck, Hash, Users, GraduationCap, CreditCard, IdCard, UserCircle, MapPin, CalendarDays, User, Phone } from "lucide-react";
 import { format } from "date-fns";
 import { id as localeId } from "date-fns/locale";
 import { AcademicYearSelector } from "@/components/AcademicYearSelector";
