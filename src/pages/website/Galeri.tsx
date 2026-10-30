@@ -153,7 +153,6 @@ export default function Galeri() {
   const [lightbox, setLightbox] = useState<{ photos: FlatPhoto[]; index: number } | null>(null);
   const [visible, setVisible] = useState(24);
 
-  // Album manual + "album" otomatis dari gambar berita, digabung dan diurutkan menurut tanggal.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -232,31 +231,6 @@ export default function Galeri() {
     { id: "album", label: "Album kegiatan" },
   ];
 
-  const shown = useMemo(() => (cards ?? []).filter((c) => filter === "semua" || c.kind === filter), [cards, filter]);
-  const page = shown.slice(0, visible);
-
-  // Navigasi lightbox dengan papan ketik
-  useEffect(() => {
-    if (lightbox === null || !photos) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "ArrowRight") setLightbox((i) => (i === null ? i : (i + 1) % photos.length));
-      if (e.key === "ArrowLeft") setLightbox((i) => (i === null ? i : (i - 1 + photos.length) % photos.length));
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [lightbox, photos]);
-
-  const chip = (f: Filter, label: string) => (
-    <button
-      type="button"
-      onClick={() => setFilter(f)}
-      aria-pressed={filter === f}
-      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${filter === f ? "bg-[#1E40AF] text-white shadow" : "bg-white text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-50"}`}
-    >
-      {label}
-    </button>
-  );
-
   return (
     <div>
       <PageHero title="Galeri" subtitle="Dokumentasi kegiatan, momen, dan prestasi sekolah. Foto dari berita yang terbit masuk ke sini secara otomatis." />
@@ -285,22 +259,6 @@ export default function Galeri() {
                 <PhotoTile key={p.url} photo={p} onOpen={() => openAlbumPhotos(active, i)} />
               ))}
             </div>
-
-            {photos === null ? (
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4" aria-busy="true">
-                {[0, 1, 2, 3].map((i) => <div key={i} className="aspect-square animate-pulse rounded-xl bg-slate-100" />)}
-              </div>
-            ) : photos.length === 0 ? (
-              <div className="py-16 text-center text-slate-500">Belum ada foto pada album ini.</div>
-            ) : (
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
-                {photos.map((p, i) => (
-                  <button key={p.url + i} onClick={() => setLightbox(i)} className="group aspect-square overflow-hidden rounded-xl bg-slate-100">
-                    <img src={p.url} alt={p.caption ?? active.title} loading="lazy" decoding="async" className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
         ) : (
           <>
