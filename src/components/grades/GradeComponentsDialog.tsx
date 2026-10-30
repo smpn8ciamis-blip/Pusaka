@@ -8,12 +8,15 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
+  CATEGORIES,
+  CATEGORY_LABEL,
   DEFAULT_COMPONENTS,
   LEGACY_KEYS,
   LEGACY_LABEL,
   MAX_COMPONENTS,
   totalWeight,
   validateComponents,
+  type GradeCategory,
   type GradeComponent,
   type LegacyKey,
 } from '@/lib/gradeComponents';
@@ -68,7 +71,7 @@ export function GradeComponentsDialog({
     );
 
   const addItem = () =>
-    setItems((prev) => [...prev, { id: null, name: '', weight: 0, legacy_key: null }]);
+    setItems((prev) => [...prev, { id: null, name: '', weight: 0, legacy_key: null, category: 'pengetahuan' }]);
 
   const splitEvenly = () =>
     setItems((prev) => {
@@ -112,7 +115,7 @@ export function GradeComponentsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Scale className="h-5 w-5" />Jenis Penilaian & Bobot</DialogTitle>
           <DialogDescription>
@@ -122,15 +125,16 @@ export function GradeComponentsDialog({
         </DialogHeader>
 
         <div className="space-y-3">
-          <div className="hidden sm:grid grid-cols-[1fr_96px_170px_40px] gap-2 text-xs font-medium text-muted-foreground px-1">
+          <div className="hidden sm:grid grid-cols-[1fr_96px_150px_170px_40px] gap-2 text-xs font-medium text-muted-foreground px-1">
             <span>Nama jenis penilaian</span>
             <span>Bobot (%)</span>
+            <span title="Kategori dirata-ratakan terpisah; nilai akhir tetap satu angka">Kategori</span>
             <span title="Nilai ujian CBT yang dipilih guru akan masuk ke jenis ini">Terima nilai CBT sebagai</span>
             <span />
           </div>
 
           {items.map((c, i) => (
-            <div key={c.id ?? `n${i}`} className="grid grid-cols-[1fr_96px] sm:grid-cols-[1fr_96px_170px_40px] gap-2 items-end sm:items-center rounded-lg border p-3 sm:border-0 sm:p-0">
+            <div key={c.id ?? `n${i}`} className="grid grid-cols-[1fr_96px] sm:grid-cols-[1fr_96px_150px_170px_40px] gap-2 items-end sm:items-center rounded-lg border p-3 sm:border-0 sm:p-0">
               <div className="space-y-1">
                 <span className="sm:hidden text-xs text-muted-foreground">Nama jenis penilaian</span>
                 <Input
@@ -152,6 +156,17 @@ export function GradeComponentsDialog({
                   onChange={(e) => update(i, { weight: e.target.value === '' ? NaN : Number(e.target.value) })}
                   aria-label="Bobot"
                 />
+              </div>
+              <div className="space-y-1 col-span-2 sm:col-span-1 order-3 sm:order-none">
+                <span className="sm:hidden text-xs text-muted-foreground">Kategori</span>
+                <Select value={c.category} onValueChange={(v) => update(i, { category: v as GradeCategory })}>
+                  <SelectTrigger aria-label="Kategori"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {CATEGORIES.map((k) => (
+                      <SelectItem key={k} value={k}>{CATEGORY_LABEL[k]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1 col-span-2 sm:col-span-1 order-3 sm:order-none">
                 <span className="sm:hidden text-xs text-muted-foreground">Terima nilai CBT sebagai</span>
@@ -197,6 +212,7 @@ export function GradeComponentsDialog({
           {error && items.length > 0 && <p className="text-sm text-destructive">{error}</p>}
 
           <div className="rounded-lg bg-muted/50 p-3 text-xs space-y-1 text-muted-foreground">
+            <p><b>Kategori</b>: kelompokkan jenis ke Pengetahuan, Keterampilan, atau Sikap. Setiap kategori ditampilkan dengan rata-rata berbobot sendiri; <b>nilai akhir</b> tetap satu angka dari semua jenis sesuai bobot di atas.</p>
             <p><b>Terima nilai CBT sebagai</b>: bila ujian CBT diatur masuk ke komponen (Tugas/Kuis/UTS/UAS/Praktik), pilih jenis penilaian yang menerimanya. Ujian CBT yang komponennya tidak dipilih di sini tidak ikut dihitung.</p>
             <p>Nilai siswa yang sudah ada tidak hilang. Menghapus jenis buatan sendiri akan menghapus nilai siswa pada jenis itu; nilai Tugas/Kuis/UTS/UAS/Praktik tetap tersimpan walau tidak dipakai di rumus.</p>
             {removedCustom.length > 0 && (
