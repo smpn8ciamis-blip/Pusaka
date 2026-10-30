@@ -14,10 +14,31 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
+          # Berhenti (job merah) begitu satu perintah gagal. Sebelumnya git pull / build yang gagal
+          # tetap berstatus hijau sehingga server diam-diam memakai kode lama.
+          script_stop: true
           script: |
+            set -e
             cd /srv/app/app
             git config --global --add safe.directory /srv/app/app
-            git pull origin main
+
+            # Server harus berada di branch main; kalau tidak, pull di bawah menggabungkan ke branch lain.
+            BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+            if [ "$BRANCH" != "main" ]; then
+              echo "GAGAL: server berada di branch '$BRANCH', bukan 'main'. Jalankan: git checkout main"
+              exit 1
+            fi
+
+            # Hanya fast-forward: bila commit di server bercabang dari GitHub, berhenti tanpa mengubah berkas
+            # (menggabungkan otomatis bisa meninggalkan tanda konflik yang lalu di-commit oleh autopush.sh).
+            git fetch origin main
+            git merge --ff-only origin/main
+
             npm install
             npm run build
-            echo "Deploy selesai: $(date)"
+
+            # Pastikan hasil build benar-benar baru dan bisa dimuat.
+            test -s dist/index.html
+            for f in $(grep -o 'assets/[^"]*\.js' dist/index.html); do test -s "dist/$f"; done
+
+            echo "Deploy selesai: $(git rev-parse --short HEAD) $(date)"
