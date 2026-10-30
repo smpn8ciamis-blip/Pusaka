@@ -7,6 +7,7 @@ import { ArrowRight, CalendarDays, Clock, MapPin, Newspaper, GraduationCap, User
 import { agendaStatus, relativeLabel, timeRange, type AgendaItem } from "@/lib/websiteAgenda";
 
 const asAny = (t: string) => supabase.from(t as any) as any;
+const fmtLong = (iso: string) => new Date(iso).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Jakarta" });
 
 const fmtDate = (d?: string | null) =>
   d ? new Date(d).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" }) : "";
@@ -32,6 +33,29 @@ function MiniDate({ iso, dark }: { iso: string; dark?: boolean }) {
       <span className="text-xl font-bold leading-none tabular-nums">{d.getDate()}</span>
       <span className="mt-0.5 text-[11px] text-blue-100">{d.toLocaleDateString("id-ID", { month: "short" })}</span>
     </div>
+  );
+}
+
+function NewsCard({ n, big = false }: { n: any; big?: boolean }) {
+  const cat = n.website_news_categories;
+  return (
+    <Link
+      to={`/website/berita/${n.slug}`}
+      className={`group relative flex overflow-hidden rounded-3xl bg-slate-900 ring-1 ring-slate-200/60 transition hover:shadow-2xl ${big ? "min-h-[360px] w-full lg:min-h-[480px]" : "min-h-[230px]"}`}
+    >
+      {n.cover_image_url ? (
+        <img src={n.cover_image_url} alt="" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-105" />
+      ) : (
+        <div className="absolute inset-0 bg-gradient-to-br from-[#1E40AF] to-[#3B82F6]" />
+      )}
+      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/30 to-transparent" />
+      <div className="relative mt-auto w-full p-5 text-white sm:p-6">
+        {cat && <span className="mb-3 inline-block rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold backdrop-blur">{cat.name}</span>}
+        <h3 className={`font-bold leading-snug [overflow-wrap:anywhere] ${big ? "line-clamp-3 text-2xl md:text-3xl" : "line-clamp-2 text-lg"}`}>{n.title}</h3>
+        {big && n.excerpt && <p className="mt-2 line-clamp-2 max-w-2xl text-sm text-white/80">{n.excerpt}</p>}
+        <div className="mt-3 text-xs text-white/70">{n.published_at ? fmtLong(n.published_at) : ""}</div>
+      </div>
+    </Link>
   );
 }
 
@@ -91,6 +115,7 @@ export default function Home() {
         achievements: ach.count ?? 0, year,
       });
     })();
+    fetchRecentPhotos(8).then(setPhotos).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -412,38 +437,38 @@ export default function Home() {
 
       {/* Instagram Feed */}
       {((settings as any)?.instagram_section_enabled ?? true) && (igPostsAuto.length > 0 || igManualUrls.length > 0 || igUsername) && (
-        <section className="bg-gradient-to-b from-white via-slate-50 to-white py-20 border-t border-slate-100">
+        <section className="border-t border-slate-100 bg-white py-20">
           <div className="container mx-auto px-4">
-            <div className="text-center max-w-2xl mx-auto mb-10">
-              <div className="inline-flex items-center gap-2 text-sm font-semibold text-[#1E40AF] mb-2">
-                <Instagram className="h-4 w-4" /> INSTAGRAM
+            <div className="mx-auto mb-10 max-w-2xl text-center">
+              <div className="mb-2 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[#1E40AF]">
+                <Instagram className="h-4 w-4" /> Instagram
               </div>
-              <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-3">
+              <h2 className="mb-3 text-3xl font-extrabold tracking-tight text-slate-900 md:text-4xl">
                 {(settings as any)?.instagram_section_title ?? "Ikuti Instagram Kami"}
               </h2>
               {igUsername && (
                 <a href={`https://www.instagram.com/${igUsername}`} target="_blank" rel="noreferrer"
-                   className="inline-flex items-center gap-1 text-[#1E40AF] hover:underline font-medium">
+                   className="inline-flex items-center gap-1 font-medium text-[#1E40AF] hover:underline">
                   @{igUsername}
                 </a>
               )}
             </div>
 
             {igPostsAuto.length > 0 ? (
-              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-5 max-w-6xl mx-auto">
+              <div className="mx-auto grid max-w-6xl gap-5 sm:grid-cols-2 lg:grid-cols-5">
                 {igPostsAuto.slice(0, 5).map((p: any) => {
                   const src = p.media_type === "VIDEO" ? (p.thumbnail_url || p.media_url) : p.media_url;
                   return (
                     <a key={p.id} href={p.permalink} target="_blank" rel="noreferrer"
-                       className="group relative aspect-square block rounded-xl overflow-hidden bg-slate-100 shadow-sm hover:shadow-2xl transition">
-                      {src && <img src={src} alt={p.caption?.slice(0,60) ?? ""} loading="lazy" className="w-full h-full object-cover group-hover:scale-110 transition duration-500" />}
+                       className="group relative block aspect-square overflow-hidden rounded-2xl bg-slate-100 shadow-sm transition hover:shadow-2xl">
+                      {src && <img src={src} alt={p.caption?.slice(0, 60) ?? ""} loading="lazy" decoding="async" className="h-full w-full object-cover transition duration-500 group-hover:scale-110" />}
                       {p.media_type === "VIDEO" && (
-                        <PlayCircle className="absolute top-3 right-3 h-6 w-6 text-white drop-shadow" />
+                        <PlayCircle className="absolute right-3 top-3 h-6 w-6 text-white drop-shadow" />
                       )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition flex items-end p-3">
-                        <p className="text-white text-xs line-clamp-3">{p.caption}</p>
+                      <div className="absolute inset-0 flex items-end bg-gradient-to-t from-black/80 via-black/20 to-transparent p-3 opacity-0 transition group-hover:opacity-100">
+                        <p className="line-clamp-3 text-xs text-white">{p.caption}</p>
                       </div>
-                      <div className="absolute top-3 left-3 h-8 w-8 rounded-full bg-white/90 backdrop-blur flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                      <div className="absolute left-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 opacity-0 backdrop-blur transition group-hover:opacity-100">
                         <Instagram className="h-4 w-4 text-pink-600" />
                       </div>
                     </a>
@@ -451,7 +476,7 @@ export default function Home() {
                 })}
               </div>
             ) : igManualUrls.length > 0 ? (
-              <div ref={igRef} className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 max-w-6xl mx-auto">
+              <div ref={igRef} className="mx-auto grid max-w-6xl gap-6 sm:grid-cols-2 lg:grid-cols-3">
                 {igManualUrls.map((url, i) => (
                   <blockquote key={i} className="instagram-media" data-instgrm-permalink={url} data-instgrm-version="14"
                     style={{ background: "#FFF", border: 0, borderRadius: 12, boxShadow: "0 4px 20px rgba(15,23,42,.08)", margin: 0, minWidth: 260, padding: 0, width: "100%" }} />
@@ -459,9 +484,9 @@ export default function Home() {
               </div>
             ) : (
               <div className="text-center">
-                <Button asChild className="bg-gradient-to-r from-pink-500 via-red-500 to-yellow-500 hover:opacity-90 text-white">
+                <Button asChild className="rounded-full bg-gradient-to-r from-pink-500 via-red-500 to-yellow-500 text-white hover:opacity-90">
                   <a href={`https://www.instagram.com/${igUsername}`} target="_blank" rel="noreferrer">
-                    <Instagram className="h-4 w-4 mr-2" /> Kunjungi Instagram
+                    <Instagram className="mr-2 h-4 w-4" /> Kunjungi Instagram
                   </a>
                 </Button>
               </div>

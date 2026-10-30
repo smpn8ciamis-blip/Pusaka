@@ -1924,6 +1924,7 @@ const OG_PAGES = {
     '/website/profil': { title: 'Profil Sekolah', desc: 'Mengenal lebih dekat visi, misi, sejarah, dan struktur SMP Negeri 8 Ciamis.' },
     '/website/akademik': { title: 'Akademik', desc: 'Program pembelajaran dan kurikulum di SMP Negeri 8 Ciamis.' },
     '/website/ekstrakurikuler': { title: 'Ekstrakurikuler', desc: 'Wadah pengembangan bakat, minat, dan karakter peserta didik SMP Negeri 8 Ciamis.' },
+    '/website/agenda': { title: 'Agenda', desc: 'Jadwal kegiatan dan agenda SMP Negeri 8 Ciamis.' },
     '/website/berita': { title: 'Berita & Informasi', desc: 'Berita, kegiatan, dan informasi terbaru dari SMP Negeri 8 Ciamis.' },
     '/website/agenda': { title: 'Agenda Kegiatan', desc: 'Jadwal kegiatan dan acara SMP Negeri 8 Ciamis.' },
     '/website/galeri': { title: 'Galeri', desc: 'Dokumentasi kegiatan, momen, dan prestasi SMP Negeri 8 Ciamis.' },

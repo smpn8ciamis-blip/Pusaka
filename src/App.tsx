@@ -135,6 +135,7 @@ const WebGaleri = lazy(() => import("./pages/website/Galeri"));
 const WebAgenda = lazy(() => import("./pages/website/Agenda"));
 const WebGuru = lazy(() => import("./pages/website/Guru"));
 const WebKontak = lazy(() => import("./pages/website/Kontak"));
+const WebAgenda = lazy(() => import("./pages/website/Agenda"));
 // Web admin
 const AdminLayout = lazy(() => import("./pages/web-admin/AdminLayout"));
 const AdminDashboard = lazy(() => import("./pages/web-admin/AdminDashboard"));
