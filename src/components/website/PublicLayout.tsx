@@ -12,6 +12,7 @@ const ALL_NAV: { to: string; label: string; end?: boolean; key?: string }[] = [
   { to: "/website/akademik", label: "Akademik" },
   { to: "/website/ekstrakurikuler", label: "Ekstrakurikuler" },
   { to: "/website/berita", label: "Berita" },
+  { to: "/website/agenda", label: "Agenda" },
   { to: "/website/galeri", label: "Galeri" },
   { to: "/website/guru", label: "Guru & Staff", key: "show_guru_page" },
   { to: "/website/kontak", label: "Kontak" },
@@ -194,6 +195,7 @@ export default function PublicLayout() {
             <h4 className="font-semibold text-white mb-3">Layanan</h4>
             <ul className="space-y-2 text-sm">
               <li><Link to="/website/berita" className="hover:text-white text-slate-400">Berita</Link></li>
+              <li><Link to="/website/agenda" className="hover:text-white text-slate-400">Agenda</Link></li>
               <li><Link to="/website/galeri" className="hover:text-white text-slate-400">Galeri</Link></li>
               <li><Link to="/daftar-siswa" className="hover:text-white text-slate-400">Pendaftaran Siswa</Link></li>
               <li><Link to="/layanan-publik" className="hover:text-white text-slate-400">Layanan Publik</Link></li>

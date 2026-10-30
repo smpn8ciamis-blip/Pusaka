@@ -134,6 +134,7 @@ const WebBeritaDetail = lazy(() => import("./pages/website/BeritaDetail"));
 const WebGaleri = lazy(() => import("./pages/website/Galeri"));
 const WebGuru = lazy(() => import("./pages/website/Guru"));
 const WebKontak = lazy(() => import("./pages/website/Kontak"));
+const WebAgenda = lazy(() => import("./pages/website/Agenda"));
 // Web admin
 const AdminLayout = lazy(() => import("./pages/web-admin/AdminLayout"));
 const AdminDashboard = lazy(() => import("./pages/web-admin/AdminDashboard"));
@@ -225,6 +226,7 @@ const App = () => (
                 <Route path="website/ekstrakurikuler" element={<WebEkskul />} />
                 <Route path="website/berita" element={<WebBerita />} />
                 <Route path="website/berita/:slug" element={<WebBeritaDetail />} />
+                <Route path="website/agenda" element={<WebAgenda />} />
                 <Route path="website/galeri" element={<WebGaleri />} />
                 <Route path="website/guru" element={<WebGuru />} />
                 <Route path="website/kontak" element={<WebKontak />} />
