@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -6,12 +7,20 @@ const SITE_URL = typeof window !== "undefined" ? window.location.origin : "https
 
 const asAny = (t: string) => supabase.from(t as any) as any;
 
-function PageHero({ title, subtitle }: { title: string; subtitle?: string }) {
+function PageHero({ title, subtitle, children }: { title: string; subtitle?: string; children?: ReactNode }) {
   return (
-    <section className="bg-gradient-to-r from-[#1E40AF] to-[#3B82F6] text-white py-16">
-      <div className="container mx-auto px-4 text-center">
-        <h1 className="text-4xl md:text-5xl font-bold mb-3">{title}</h1>
-        {subtitle && <p className="text-blue-100 max-w-2xl mx-auto">{subtitle}</p>}
+    <section className="relative overflow-hidden bg-[#0B1F4D] text-white">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(59,130,246,0.45),transparent_60%)]" />
+      <div className="pointer-events-none absolute -bottom-24 -left-16 h-64 w-64 rounded-full bg-amber-400/10 blur-3xl" />
+      <div className="container relative mx-auto px-4 py-14 md:py-20">
+        <nav aria-label="Breadcrumb" className="mb-4 flex items-center gap-2 text-xs text-blue-200/80">
+          <Link to="/" className="hover:text-white">Beranda</Link>
+          <span aria-hidden>/</span>
+          <span className="text-white/90">{title}</span>
+        </nav>
+        <h1 className="max-w-3xl text-4xl font-bold tracking-tight md:text-5xl">{title}</h1>
+        {subtitle && <p className="mt-4 max-w-2xl text-base leading-relaxed text-blue-100/90 md:text-lg">{subtitle}</p>}
+        {children && <div className="mt-6">{children}</div>}
       </div>
     </section>
   );

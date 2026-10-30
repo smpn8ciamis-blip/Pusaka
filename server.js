@@ -1926,6 +1926,7 @@ const OG_PAGES = {
     '/website/ekstrakurikuler': { title: 'Ekstrakurikuler', desc: 'Wadah pengembangan bakat, minat, dan karakter peserta didik SMP Negeri 8 Ciamis.' },
     '/website/agenda': { title: 'Agenda', desc: 'Jadwal kegiatan dan agenda SMP Negeri 8 Ciamis.' },
     '/website/berita': { title: 'Berita & Informasi', desc: 'Berita, kegiatan, dan informasi terbaru dari SMP Negeri 8 Ciamis.' },
+    '/website/agenda': { title: 'Agenda Kegiatan', desc: 'Jadwal kegiatan dan acara SMP Negeri 8 Ciamis.' },
     '/website/galeri': { title: 'Galeri', desc: 'Dokumentasi kegiatan, momen, dan prestasi SMP Negeri 8 Ciamis.' },
     '/website/guru': { title: 'Guru & Staff', desc: 'Tenaga pendidik dan kependidikan SMP Negeri 8 Ciamis.' },
     '/website/kontak': { title: 'Hubungi Kami', desc: 'Alamat, kontak, dan lokasi SMP Negeri 8 Ciamis.' }

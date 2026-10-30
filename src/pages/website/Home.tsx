@@ -3,57 +3,35 @@ import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useWebsiteSettings } from "@/components/website/PublicLayout";
-import AgendaCard from "@/components/website/AgendaCard";
-import { agendaDateParts, agendaState, agendaTimeText, isUpcomingOrOngoing, type AgendaItem } from "@/lib/agenda";
-import { fetchRecentPhotos } from "@/lib/websiteGallery";
-import {
-  ArrowRight, Calendar, CalendarDays, Newspaper, GraduationCap, Users, Trophy, BookOpen, Sparkles, Instagram, PlayCircle,
-  MegaphoneIcon, Building2, Images, UserPlus, Clock, MapPin,
-} from "lucide-react";
+import { ArrowRight, CalendarDays, Clock, MapPin, Newspaper, GraduationCap, Users, Trophy, BookOpen, Instagram, PlayCircle, MegaphoneIcon } from "lucide-react";
+import { agendaStatus, relativeLabel, timeRange, type AgendaItem } from "@/lib/websiteAgenda";
 
 const asAny = (t: string) => supabase.from(t as any) as any;
 const fmtLong = (iso: string) => new Date(iso).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Jakarta" });
 
-/** Angka naik perlahan saat strip statistik terlihat (sekali saja). */
-function CountUp({ to }: { to: number }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const [n, setN] = useState(0);
-  const started = useRef(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    if (reduce || typeof IntersectionObserver === "undefined") { setN(to); return; }
-    const io = new IntersectionObserver(([e]) => {
-      if (!e.isIntersecting || started.current) return;
-      started.current = true;
-      const t0 = performance.now();
-      const tick = (t: number) => {
-        const p = Math.min(1, (t - t0) / 1200);
-        setN(Math.round(to * (1 - Math.pow(1 - p, 3))));
-        if (p < 1) requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-    }, { threshold: 0.4 });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [to]);
-  return <span ref={ref} className="tabular-nums">{n.toLocaleString("id-ID")}</span>;
+const fmtDate = (d?: string | null) =>
+  d ? new Date(d).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" }) : "";
+
+function StatItem({ icon: Icon, value, label }: { icon: any; value: number; label: string }) {
+  return (
+    <div className="flex items-center gap-4 px-5 py-5 md:px-7">
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-50 text-[#1E40AF]">
+        <Icon className="h-5 w-5" />
+      </div>
+      <div>
+        <div className="text-2xl font-bold tabular-nums leading-none text-slate-900 md:text-3xl">{value.toLocaleString("id-ID")}</div>
+        <div className="mt-1 text-sm text-slate-500">{label}</div>
+      </div>
+    </div>
+  );
 }
 
-function SectionHead({ eyebrow, title, desc, to, link, center = false }: { eyebrow: string; title: string; desc?: string; to?: string; link?: string; center?: boolean }) {
+function MiniDate({ iso, dark }: { iso: string; dark?: boolean }) {
+  const d = new Date(iso);
   return (
-    <div className={`mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between ${center ? "items-center text-center sm:flex-col sm:items-center" : ""}`}>
-      <div className={center ? "mx-auto max-w-2xl" : ""}>
-        <div className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-[#1E40AF]">{eyebrow}</div>
-        <h2 className="text-3xl font-extrabold tracking-tight text-slate-900 md:text-4xl">{title}</h2>
-        {desc && <p className="mt-3 text-slate-600">{desc}</p>}
-      </div>
-      {to && link && (
-        <Button asChild variant="outline" className="shrink-0 rounded-full">
-          <Link to={to}>{link} <ArrowRight className="ml-2 h-4 w-4" /></Link>
-        </Button>
-      )}
+    <div className={`flex h-14 w-14 shrink-0 flex-col items-center justify-center rounded-xl ${dark ? "bg-white/15 text-white" : "bg-[#1E40AF] text-white"}`}>
+      <span className="text-xl font-bold leading-none tabular-nums">{d.getDate()}</span>
+      <span className="mt-0.5 text-[11px] text-blue-100">{d.toLocaleDateString("id-ID", { month: "short" })}</span>
     </div>
   );
 }
@@ -86,36 +64,56 @@ export default function Home() {
   const [slides, setSlides] = useState<any[]>([]);
   const [news, setNews] = useState<any[]>([]);
   const [programs, setPrograms] = useState<any[]>([]);
-  const [agenda, setAgenda] = useState<AgendaItem[]>([]);
-  const [photos, setPhotos] = useState<{ url: string; title: string; href: string }[]>([]);
-  const [stats, setStats] = useState({ students: 0, teachers: 0, classes: 0, achievements: 0 });
+  const [agenda, setAgenda] = useState<any[]>([]);
+  const [stats, setStats] = useState({ students: 0, teachers: 0, classes: 0, achievements: 0, year: "" as string });
   const [slideIdx, setSlideIdx] = useState(0);
   const [igPostsAuto, setIgPostsAuto] = useState<any[]>([]);
   const igRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     (async () => {
-      const dayAgo = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+      const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
       const [sl, nw, pr, ag] = await Promise.all([
-        asAny("website_hero_slides").select("id,title,subtitle,image_url,cta_label,cta_url").eq("is_active", true).order("sort_order"),
-        // tanpa kolom isi berita (besar); beranda hanya butuh ringkasan
-        asAny("website_news").select("id,title,slug,excerpt,cover_image_url,published_at,website_news_categories(name,color)").eq("status", "published").order("published_at", { ascending: false }).limit(6),
-        asAny("website_programs").select("id,name,description").eq("is_published", true).order("sort_order").limit(6),
-        // termasuk kegiatan yang sedang berlangsung (mulai kemarin atau lebih baru), disaring lagi di bawah
-        asAny("website_agenda").select("id,title,description,start_at,end_at,location").eq("is_published", true).gte("start_at", dayAgo).order("start_at").limit(12),
+        asAny("website_hero_slides").select("*").eq("is_active", true).order("sort_order"),
+        asAny("website_news").select("*, website_news_categories(name,color)").eq("status", "published").order("published_at", { ascending: false }).limit(5),
+        asAny("website_programs").select("*").eq("is_published", true).order("sort_order").limit(6),
+        asAny("website_agenda").select("*").eq("is_published", true)
+          .or(`start_at.gte.${startOfToday.toISOString()},end_at.gte.${new Date().toISOString()}`)
+          .order("start_at").limit(12),
       ]);
       setSlides(sl.data ?? []);
       setNews(nw.data ?? []);
       setPrograms(pr.data ?? []);
-      setAgenda(((ag.data ?? []) as AgendaItem[]).filter((a) => isUpcomingOrOngoing(a)).slice(0, 4));
+      setAgenda(((ag.data ?? []) as AgendaItem[]).filter((a) => agendaStatus(a) !== "past").slice(0, 5));
 
-      const [st, tc, cl, ach] = await Promise.all([
-        asAny("students").select("id", { count: "exact", head: true }),
+      // Statistik mengikuti tahun pelajaran aktif (Pengaturan > Tahun Pelajaran).
+      // Dihitung lewat fungsi database agar bisa dibaca pengunjung tanpa login.
+      const { data: pub, error: pubErr } = await supabase.rpc("get_website_public_stats" as any);
+      if (!pubErr && pub) {
+        const r = pub as any;
+        setStats({
+          students: r.students ?? 0, teachers: r.teachers ?? 0, classes: r.classes ?? 0,
+          achievements: r.achievements ?? 0, year: r.academic_year ?? "",
+        });
+        return;
+      }
+
+      // Cadangan bila migrasi belum dijalankan: hitung langsung (hanya akurat untuk pengguna yang login).
+      const { data: ay } = await asAny("academic_years").select("year").eq("is_active", true).maybeSingle();
+      const year: string = ay?.year ?? "";
+      const { data: yc } = year ? await asAny("classes").select("id").eq("academic_year", year) : { data: [] };
+      const classIds = (yc ?? []).map((c: any) => c.id);
+      const [st, tc, ach] = await Promise.all([
+        classIds.length
+          ? asAny("students").select("id", { count: "exact", head: true }).in("class_id", classIds).eq("status", "aktif").eq("is_alumni", false)
+          : Promise.resolve({ count: 0 }),
         asAny("teachers").select("id", { count: "exact", head: true }),
-        asAny("classes").select("id", { count: "exact", head: true }),
         asAny("student_achievements").select("id", { count: "exact", head: true }),
       ]);
-      setStats({ students: st.count ?? 0, teachers: tc.count ?? 0, classes: cl.count ?? 0, achievements: ach.count ?? 0 });
+      setStats({
+        students: st.count ?? 0, teachers: tc.count ?? 0, classes: classIds.length,
+        achievements: ach.count ?? 0, year,
+      });
     })();
     fetchRecentPhotos(8).then(setPhotos).catch(() => {});
   }, []);
@@ -155,237 +153,287 @@ export default function Home() {
   const currentSlide = slides[slideIdx];
   const igUsername = (settings as any)?.instagram_username;
 
-  const quick = [
-    { to: "/website/profil", label: "Profil", icon: Building2, tone: "bg-blue-50 text-blue-600" },
-    { to: "/website/akademik", label: "Akademik", icon: BookOpen, tone: "bg-emerald-50 text-emerald-600" },
-    { to: "/website/agenda", label: "Agenda", icon: CalendarDays, tone: "bg-amber-50 text-amber-600" },
-    { to: "/website/galeri", label: "Galeri", icon: Images, tone: "bg-violet-50 text-violet-600" },
-    { to: "/daftar-siswa", label: "Pendaftaran", icon: UserPlus, tone: "bg-rose-50 text-rose-600" },
-  ];
-  const statItems = [
-    { icon: Users, value: stats.students, label: "Peserta Didik" },
-    { icon: GraduationCap, value: stats.teachers, label: "Guru & Staff" },
-    { icon: BookOpen, value: stats.classes, label: "Rombel" },
-    { icon: Trophy, value: stats.achievements, label: "Prestasi" },
-  ];
+  const upcoming = agenda.slice(0, 3);
+  const featured = agenda[0];
+  const restAgenda = agenda.slice(1, 5);
+  const [mainNews, ...otherNews] = news;
 
   return (
     <div>
       {/* Hero */}
-      <section className="relative flex min-h-[600px] items-center overflow-hidden pb-20 text-white md:min-h-[700px] md:pb-28">
-        <div className="absolute inset-0 bg-gradient-to-br from-[#0B2A6B] via-[#1E40AF] to-[#3B82F6]" />
+      <section className="relative overflow-hidden bg-[#0B1F4D] text-white">
+        <div className="absolute inset-0 bg-gradient-to-br from-[#0B1F4D] via-[#12307a] to-[#1E40AF]" />
         {slides.map((s, i) => (
           s.image_url ? (
             <div
               key={s.id ?? i}
-              className="absolute inset-0 transition-opacity duration-[1800ms] ease-in-out will-change-[opacity]"
+              className="absolute inset-0 transition-opacity duration-[1800ms] ease-in-out"
               style={{ opacity: i === slideIdx ? 1 : 0 }}
               aria-hidden={i !== slideIdx}
             >
               <img
-                src={s.image_url} alt="" loading={i === 0 ? "eager" : "lazy"} decoding="async"
+                src={s.image_url} alt="" loading={i === 0 ? "eager" : "lazy"}
                 className="absolute inset-0 h-full w-full object-cover"
-                style={{ transform: i === slideIdx ? "scale(1.06)" : "scale(1)", transition: "transform 8s ease-out" }}
+                style={{ transform: i === slideIdx ? "scale(1.05)" : "scale(1)", transition: "transform 8s ease-out" }}
               />
-              <div className="absolute inset-0 bg-gradient-to-r from-[#0B2A6B]/90 via-[#1E40AF]/70 to-[#1E40AF]/30" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-r from-[#0B1F4D]/95 via-[#0B1F4D]/75 to-[#0B1F4D]/35" />
+              <div className="absolute inset-0 bg-gradient-to-t from-[#0B1F4D]/80 via-transparent to-transparent" />
             </div>
           ) : null
         ))}
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,.18),transparent_55%)]" />
+        <div className="pointer-events-none absolute -right-32 -top-32 h-96 w-96 rounded-full bg-blue-400/20 blur-3xl" />
 
-        <div className="container relative mx-auto grid items-center gap-10 px-4 py-20 md:py-28 lg:grid-cols-[1fr_380px]">
-          <div className="max-w-3xl">
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-sm backdrop-blur animate-in fade-in slide-in-from-bottom-4 duration-700">
-              <Sparkles className="h-4 w-4" /> Selamat Datang di {settings?.site_name ?? "Sekolah Kami"}
+        <div className="container relative mx-auto grid items-center gap-10 px-4 pb-28 pt-16 md:pb-36 md:pt-24 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] lg:gap-14">
+          <div>
+            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-sm backdrop-blur">
+              <span className="h-2 w-2 rounded-full bg-amber-400" />
+              {settings?.site_name ?? "Sekolah Kami"}
             </div>
-            <h1 className="mb-6 text-4xl font-extrabold leading-[1.1] tracking-tight drop-shadow-lg animate-in fade-in slide-in-from-bottom-6 duration-700 md:text-6xl">
+            <h1 className="text-4xl font-extrabold leading-[1.1] tracking-tight md:text-6xl">
               {currentSlide?.title ?? "Membangun Generasi Cerdas, Berkarakter, dan Berprestasi"}
             </h1>
-            <p className="mb-8 max-w-2xl text-lg text-blue-50/95 drop-shadow animate-in fade-in slide-in-from-bottom-8 duration-1000 md:text-xl">
+            <p className="mt-6 max-w-xl text-base leading-relaxed text-blue-100/95 md:text-lg">
               {currentSlide?.subtitle ?? settings?.tagline ?? "Pendidikan berkualitas dengan pendekatan modern, teknologi terkini, dan penguatan karakter untuk masa depan yang cemerlang."}
             </p>
-            <div className="flex flex-wrap gap-3">
-              <Button asChild size="lg" className="rounded-full bg-white text-[#1E40AF] shadow-xl hover:bg-blue-50">
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Button asChild size="lg" className="rounded-full bg-amber-400 font-semibold text-[#0B1F4D] shadow-lg shadow-amber-500/20 hover:bg-amber-300">
+                <Link to="/daftar-siswa">Daftar sekarang</Link>
+              </Button>
+              <Button asChild size="lg" variant="outline" className="rounded-full border-white/40 bg-white/5 text-white backdrop-blur hover:bg-white hover:text-[#0B1F4D]">
                 <Link to={currentSlide?.cta_url ?? "/website/profil"}>
-                  {currentSlide?.cta_label ?? "Kenali Sekolah Kami"} <ArrowRight className="ml-2 h-4 w-4" />
+                  {currentSlide?.cta_label ?? "Kenali sekolah kami"} <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
-              <Button asChild size="lg" variant="outline" className="rounded-full border-white/70 bg-transparent text-white hover:bg-white hover:text-[#1E40AF]">
-                <Link to="/daftar-siswa">Daftar Sekarang</Link>
-              </Button>
               {settings?.show_lapor_button !== false && (
-                <Button asChild size="lg" className="relative overflow-hidden rounded-full border border-white/20 bg-gradient-to-r from-amber-400 via-orange-500 to-red-500 text-white shadow-xl shadow-orange-500/40 hover:from-amber-500 hover:via-orange-600 hover:to-red-600">
+                <Button asChild size="lg" variant="ghost" className="rounded-full text-white hover:bg-white/10 hover:text-white">
                   <a href="https://sp4n.lapor.go.id/" target="_blank" rel="noreferrer">
-                    <MegaphoneIcon className="mr-2 h-4 w-4" /> Layanan Pengaduan (SP4N-LAPOR!)
+                    <MegaphoneIcon className="mr-2 h-4 w-4" /> Layanan pengaduan
                   </a>
                 </Button>
               )}
             </div>
           </div>
 
-          {/* Agenda terdekat (desktop) */}
-          <aside className="hidden rounded-3xl border border-white/20 bg-white/10 p-5 shadow-2xl backdrop-blur-md lg:block">
+          {/* Agenda terdekat di halaman utama */}
+          <aside className="rounded-3xl border border-white/15 bg-white/10 p-5 shadow-2xl backdrop-blur-xl md:p-6" aria-label="Agenda terdekat">
             <div className="mb-4 flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-bold"><CalendarDays className="h-4 w-4" /> Agenda Terdekat</div>
-              <Link to="/website/agenda" className="text-xs font-semibold text-blue-100 hover:text-white">Semua</Link>
+              <h2 className="flex items-center gap-2 text-base font-semibold">
+                <CalendarDays className="h-5 w-5 text-amber-300" /> Agenda terdekat
+              </h2>
+              <Link to="/website/agenda" className="text-sm text-blue-100 hover:text-white hover:underline">Lihat semua</Link>
             </div>
-            {agenda.length === 0 ? (
-              <p className="py-6 text-center text-sm text-blue-100/80">Belum ada agenda mendatang.</p>
+            {upcoming.length === 0 ? (
+              <p className="rounded-2xl bg-white/5 px-4 py-6 text-center text-sm text-blue-100/80">Belum ada agenda mendatang.</p>
             ) : (
-              <ul className="space-y-3">
-                {agenda.slice(0, 3).map((a) => {
-                  const d = agendaDateParts(a.start_at);
-                  const st = agendaState(a);
-                  return (
-                    <li key={a.id}>
-                      <Link to="/website/agenda" className="flex gap-3 rounded-2xl bg-white/10 p-3 transition hover:bg-white/20">
-                        <div className="flex h-14 w-14 shrink-0 flex-col items-center justify-center rounded-xl bg-white text-[#1E40AF]">
-                          <span className="text-[10px] font-bold uppercase">{d.month}</span>
-                          <span className="text-xl font-extrabold leading-none">{d.day}</span>
+              <ul className="space-y-2.5">
+                {upcoming.map((a) => (
+                  <li key={a.id}>
+                    <Link to="/website/agenda" className="flex items-center gap-4 rounded-2xl bg-white/10 p-3 transition hover:bg-white/20">
+                      <MiniDate iso={a.start_at} dark />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-semibold">{a.title}</div>
+                        <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-blue-100/85">
+                          <Clock className="h-3 w-3 shrink-0" />{timeRange(a)}
+                          {a.location ? <span className="truncate">, {a.location}</span> : null}
                         </div>
-                        <div className="min-w-0">
-                          <div className="line-clamp-2 text-sm font-semibold leading-snug">{a.title}</div>
-                          <div className="mt-1 flex items-center gap-1 text-xs text-blue-100"><Clock className="h-3 w-3" />{agendaTimeText(a)} · {st.label}</div>
-                        </div>
-                      </Link>
-                    </li>
-                  );
-                })}
+                      </div>
+                      <span className="hidden shrink-0 rounded-full bg-amber-400/90 px-2.5 py-1 text-[11px] font-semibold text-[#0B1F4D] sm:inline">{relativeLabel(a)}</span>
+                    </Link>
+                  </li>
+                ))}
               </ul>
             )}
           </aside>
         </div>
 
+        {/* Floating Pengaduan FAB */}
+        {settings?.show_lapor_button !== false && (
+          <a
+            href="https://sp4n.lapor.go.id/" target="_blank" rel="noreferrer"
+            className="group fixed bottom-20 right-5 z-40 md:bottom-24 md:right-8"
+            aria-label="Layanan Pengaduan SP4N-LAPOR"
+          >
+            <span className="absolute inset-0 animate-ping rounded-full bg-orange-500/50 motion-reduce:animate-none" />
+            <span className="relative flex items-center gap-2 rounded-full border border-white/30 bg-gradient-to-r from-amber-400 via-orange-500 to-red-500 py-3 pl-4 pr-5 text-white shadow-2xl shadow-orange-500/50 backdrop-blur transition hover:scale-105">
+              <MegaphoneIcon className="h-5 w-5" />
+              <span className="hidden whitespace-nowrap text-sm font-semibold sm:inline">Lapor Pengaduan</span>
+            </span>
+          </a>
+        )}
+
         {slides.length > 1 && (
-          <div className="absolute bottom-24 left-1/2 z-10 flex -translate-x-1/2 gap-2 md:bottom-32">
+          <div className="absolute bottom-20 left-1/2 z-10 flex -translate-x-1/2 gap-2 md:bottom-24">
             {slides.map((_, i) => (
               <button
                 key={i} onClick={() => setSlideIdx(i)}
-                className={`h-2 rounded-full transition-all ${i === slideIdx ? "w-8 bg-white" : "w-2 bg-white/50 hover:bg-white/80"}`}
-                aria-label={`slide ${i + 1}`}
+                className={`h-1.5 rounded-full transition-all ${i === slideIdx ? "w-8 bg-white" : "w-3 bg-white/40 hover:bg-white/70"}`}
+                aria-label={`Slide ${i + 1}`}
               />
             ))}
           </div>
         )}
       </section>
 
-      {/* Floating Pengaduan FAB */}
-      {settings?.show_lapor_button !== false && (
-        <a
-          href="https://sp4n.lapor.go.id/"
-          target="_blank"
-          rel="noreferrer"
-          className="group fixed bottom-20 right-5 z-40 md:bottom-24 md:right-8"
-          aria-label="Layanan Pengaduan SP4N-LAPOR"
-        >
-          <span className="absolute inset-0 animate-ping rounded-full bg-orange-500/50" />
-          <span className="relative flex items-center gap-2 rounded-full border border-white/30 bg-gradient-to-r from-amber-400 via-orange-500 to-red-500 py-3 pl-4 pr-5 text-white shadow-2xl shadow-orange-500/50 backdrop-blur transition hover:scale-105">
-            <MegaphoneIcon className="h-5 w-5" />
-            <span className="hidden whitespace-nowrap text-sm font-semibold sm:inline">Lapor Pengaduan</span>
-          </span>
-        </a>
-      )}
-
-      {/* Akses cepat + statistik, menumpuk di atas hero */}
-      <section className="container relative z-10 mx-auto -mt-16 px-4 md:-mt-20">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5 md:gap-4">
-          {quick.map((q, qi) => (
-            <Link key={q.to} to={q.to} className={`${qi === quick.length - 1 ? "col-span-2 sm:col-span-1" : ""} group flex flex-col items-center gap-2 rounded-2xl border border-slate-200/70 bg-white p-4 text-center shadow-lg shadow-slate-900/5 transition hover:-translate-y-1 hover:shadow-xl`}>
-              <span className={`flex h-12 w-12 items-center justify-center rounded-xl transition group-hover:scale-110 ${q.tone}`}><q.icon className="h-6 w-6" /></span>
-              <span className="text-sm font-semibold text-slate-800">{q.label}</span>
-            </Link>
-          ))}
+      {/* Statistik */}
+      <section className="container relative z-10 mx-auto -mt-12 px-4 md:-mt-14">
+        <div className="grid grid-cols-2 divide-slate-100 overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-xl shadow-slate-900/5 md:grid-cols-4 md:divide-x [&>*:nth-child(-n+2)]:border-b [&>*:nth-child(-n+2)]:border-slate-100 md:[&>*:nth-child(-n+2)]:border-b-0">
+          <StatItem icon={Users} value={stats.students} label="Siswa aktif" />
+          <StatItem icon={GraduationCap} value={stats.teachers} label="Guru aktif" />
+          <StatItem icon={BookOpen} value={stats.classes} label="Rombel aktif" />
+          <StatItem icon={Trophy} value={stats.achievements} label="Prestasi" />
         </div>
-
-        <div className="mt-4 grid grid-cols-2 overflow-hidden rounded-3xl border border-slate-200/70 bg-white shadow-lg shadow-slate-900/5 md:mt-6 md:grid-cols-4">
-          {statItems.map((s, i) => (
-            <div key={s.label} className={`flex items-center gap-4 p-5 md:p-6 ${i % 2 === 1 ? "border-l border-slate-100" : ""} ${i > 1 ? "border-t border-slate-100 md:border-t-0" : ""} ${i > 0 ? "md:border-l md:border-slate-100" : ""}`}>
-              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#1E40AF] to-[#3B82F6] text-white"><s.icon className="h-6 w-6" /></span>
-              <div>
-                <div className="text-2xl font-extrabold text-slate-900 md:text-3xl"><CountUp to={s.value} /></div>
-                <div className="text-xs text-slate-500 md:text-sm">{s.label}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Programs */}
-      <section className="container mx-auto px-4 py-20">
-        <SectionHead eyebrow="Program Unggulan" title="Kurikulum Modern & Terpadu" desc="Program pembelajaran yang dirancang untuk mengembangkan potensi akademik, spiritual, dan keterampilan hidup." center />
-        <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-          {programs.map((p, i) => (
-            <div key={p.id} className="group relative overflow-hidden rounded-3xl border border-slate-200/70 bg-white p-7 transition hover:-translate-y-1 hover:border-blue-200 hover:shadow-2xl">
-              <span className="absolute right-5 top-3 text-6xl font-black text-slate-100 transition group-hover:text-blue-100">{String(i + 1).padStart(2, "0")}</span>
-              <div className="relative mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-[#1E40AF] transition group-hover:bg-[#1E40AF] group-hover:text-white">
-                <BookOpen className="h-6 w-6" />
-              </div>
-              <h3 className="relative mb-2 text-xl font-bold text-slate-900">{p.name}</h3>
-              <p className="relative text-sm leading-relaxed text-slate-600">{p.description}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* News: satu berita utama besar + sisanya */}
-      <section className="bg-slate-50 py-20">
-        <div className="container mx-auto px-4">
-          <SectionHead eyebrow="Berita & Informasi" title="Kabar Terkini" to="/website/berita" link="Semua Berita" />
-          {news.length === 0 ? (
-            <div className="py-16 text-center text-slate-500">
-              <Newspaper className="mx-auto mb-3 h-12 w-12 opacity-40" />
-              Belum ada berita dipublikasikan.
-            </div>
-          ) : (
-            <>
-              <div className="grid gap-5 lg:grid-cols-3">
-                <div className="flex lg:col-span-2"><NewsCard n={news[0]} big /></div>
-                <div className="grid gap-5">{news.slice(1, 3).map((n) => <NewsCard key={n.id} n={n} />)}</div>
-              </div>
-              {news.length > 3 && (
-                <div className="mt-5 grid gap-5 md:grid-cols-3">{news.slice(3, 6).map((n) => <NewsCard key={n.id} n={n} />)}</div>
-              )}
-            </>
-          )}
-        </div>
+        {stats.year && <p className="mt-3 text-center text-xs text-slate-500">Data tahun pelajaran {stats.year}</p>}
       </section>
 
       {/* Agenda */}
-      <section className="container mx-auto px-4 py-20">
-        <SectionHead eyebrow="Agenda" title="Kegiatan Mendatang" desc="Jadwal kegiatan dan acara terdekat di sekolah." to="/website/agenda" link="Semua Agenda" />
-        {agenda.length === 0 ? (
-          <div className="flex flex-col items-center rounded-3xl border border-dashed border-slate-200 py-14 text-center text-slate-500">
-            <Calendar className="mb-3 h-10 w-10 text-slate-300" />
+      <section className="container mx-auto px-4 pt-20">
+        <div className="mb-8 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-3xl font-bold tracking-tight text-slate-900 md:text-4xl">Agenda sekolah</h2>
+            <p className="mt-2 text-slate-600">Kegiatan dan acara yang akan berlangsung dalam waktu dekat.</p>
+          </div>
+          <Button asChild variant="outline" className="rounded-full">
+            <Link to="/website/agenda">Lihat semua agenda <ArrowRight className="ml-2 h-4 w-4" /></Link>
+          </Button>
+        </div>
+
+        {!featured ? (
+          <div className="rounded-3xl border border-dashed border-slate-300 py-14 text-center text-slate-500">
+            <CalendarDays className="mx-auto mb-3 h-10 w-10 text-slate-300" />
             Belum ada agenda mendatang.
           </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2">{agenda.map((a) => <AgendaCard key={a.id} a={a} compact />)}</div>
-        )}
-      </section>
+          <div className="grid gap-5 lg:grid-cols-5">
+            <Link
+              to="/website/agenda"
+              className="group relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#0B1F4D] via-[#12307a] to-[#1E40AF] p-7 text-white lg:col-span-2 md:p-8"
+            >
+              <div className="pointer-events-none absolute -bottom-16 -right-10 h-56 w-56 rounded-full bg-amber-400/15 blur-2xl" />
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-400 px-3 py-1 text-xs font-semibold text-[#0B1F4D]">
+                {agendaStatus(featured) === "ongoing" && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-600 motion-reduce:animate-none" />}
+                {relativeLabel(featured)}
+              </span>
+              <div className="mt-6 flex items-end gap-4">
+                <div className="text-7xl font-extrabold leading-none tabular-nums md:text-8xl">{new Date(featured.start_at).getDate()}</div>
+                <div className="pb-2 text-blue-100">
+                  <div className="text-lg font-semibold">{new Date(featured.start_at).toLocaleDateString("id-ID", { month: "long" })}</div>
+                  <div className="text-sm">{new Date(featured.start_at).toLocaleDateString("id-ID", { weekday: "long", year: "numeric" })}</div>
+                </div>
+              </div>
+              <h3 className="mt-6 text-2xl font-bold leading-snug group-hover:underline">{featured.title}</h3>
+              <div className="mt-4 space-y-1.5 text-sm text-blue-100">
+                <div className="flex items-center gap-2"><Clock className="h-4 w-4" />{timeRange(featured)}</div>
+                {featured.location && <div className="flex items-center gap-2"><MapPin className="h-4 w-4" />{featured.location}</div>}
+              </div>
+              {featured.description && <p className="mt-4 line-clamp-3 text-sm leading-relaxed text-blue-100/90">{featured.description}</p>}
+            </Link>
 
-      {/* Galeri: foto terbaru (album galeri + gambar berita) */}
-      {photos.length >= 3 && (
-        <section className="bg-slate-50 py-20">
-          <div className="container mx-auto px-4">
-            <SectionHead eyebrow="Galeri" title="Momen Terbaru" desc="Dokumentasi kegiatan dan prestasi sekolah." to="/website/galeri" link="Lihat Galeri" />
-            <div className="grid auto-rows-[140px] grid-cols-2 gap-3 md:auto-rows-[180px] md:grid-cols-4">
-              {photos.map((p, i) => (
-                <Link
-                  key={p.url}
-                  to={p.href}
-                  title={p.title}
-                  className={`group relative overflow-hidden rounded-2xl bg-slate-200 ${i === 0 ? "col-span-2 row-span-2" : ""} ${i === 3 ? "md:col-span-2" : ""}`}
-                >
-                  <img src={p.url} alt={p.title} loading="lazy" decoding="async" className="h-full w-full object-cover transition duration-700 group-hover:scale-110" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-transparent opacity-0 transition group-hover:opacity-100" />
-                  <div className="absolute inset-x-0 bottom-0 line-clamp-2 p-3 text-xs font-medium text-white opacity-0 transition group-hover:opacity-100">{p.title}</div>
+            <div className="flex flex-col gap-3 lg:col-span-3">
+              {restAgenda.length === 0 && (
+                <div className="flex flex-1 items-center justify-center rounded-3xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">
+                  Belum ada agenda lain. Kegiatan berikutnya akan tampil di sini.
+                </div>
+              )}
+              {restAgenda.map((a) => (
+                <Link key={a.id} to="/website/agenda" className="group flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-[#1E40AF]/40 hover:shadow-md">
+                  <MiniDate iso={a.start_at} />
+                  <div className="min-w-0 flex-1">
+                    <h3 className="truncate font-semibold text-slate-900 group-hover:text-[#1E40AF]">{a.title}</h3>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs text-slate-500">
+                      <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{timeRange(a)}</span>
+                      {a.location && <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" />{a.location}</span>}
+                    </div>
+                  </div>
+                  <span className="hidden shrink-0 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-[#1E40AF] sm:inline">{relativeLabel(a)}</span>
                 </Link>
               ))}
             </div>
           </div>
+        )}
+      </section>
+
+      {/* Program */}
+      {programs.length > 0 && (
+        <section className="container mx-auto px-4 pt-24">
+          <div className="mb-10 max-w-2xl">
+            <h2 className="text-3xl font-bold tracking-tight text-slate-900 md:text-4xl">Kurikulum modern dan terpadu</h2>
+            <p className="mt-3 text-slate-600">Program pembelajaran yang dirancang untuk mengembangkan potensi akademik, spiritual, dan keterampilan hidup.</p>
+          </div>
+          <div className="grid overflow-hidden rounded-3xl border border-slate-200 bg-slate-200 gap-px md:grid-cols-2 lg:grid-cols-3">
+            {programs.map((p) => (
+              <div key={p.id} className="group bg-white p-7 transition hover:bg-blue-50/60">
+                <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-full bg-blue-50 text-[#1E40AF] transition group-hover:bg-[#1E40AF] group-hover:text-white">
+                  <BookOpen className="h-5 w-5" />
+                </div>
+                <h3 className="mb-2 text-lg font-semibold text-slate-900">{p.name}</h3>
+                <p className="text-sm leading-relaxed text-slate-600">{p.description}</p>
+              </div>
+            ))}
+          </div>
         </section>
       )}
+
+      {/* Berita */}
+      <section className="container mx-auto px-4 pt-24">
+        <div className="mb-8 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-3xl font-bold tracking-tight text-slate-900 md:text-4xl">Kabar terkini</h2>
+            <p className="mt-2 text-slate-600">Berita dan informasi terbaru dari sekolah.</p>
+          </div>
+          <Button asChild variant="outline" className="rounded-full">
+            <Link to="/website/berita">Semua berita <ArrowRight className="ml-2 h-4 w-4" /></Link>
+          </Button>
+        </div>
+        {!mainNews ? (
+          <div className="rounded-3xl border border-dashed border-slate-300 py-14 text-center text-slate-500">
+            <Newspaper className="mx-auto mb-3 h-10 w-10 text-slate-300" />
+            Belum ada berita dipublikasikan.
+          </div>
+        ) : (
+          <div className="grid gap-5 lg:grid-cols-5">
+            <Link to={`/website/berita/${mainNews.slug}`} className="group relative block min-h-[360px] overflow-hidden rounded-3xl bg-slate-900 lg:col-span-3 lg:min-h-[460px]">
+              {mainNews.cover_image_url ? (
+                <img src={mainNews.cover_image_url} alt={mainNews.title} className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-105" />
+              ) : (
+                <div className="absolute inset-0 bg-gradient-to-br from-[#12307a] to-[#1E40AF]" />
+              )}
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/30 to-transparent" />
+              <div className="absolute inset-x-0 bottom-0 p-6 md:p-8">
+                {mainNews.website_news_categories && (
+                  <span className="inline-block rounded-full bg-white/90 px-3 py-1 text-xs font-semibold" style={{ color: mainNews.website_news_categories.color }}>
+                    {mainNews.website_news_categories.name}
+                  </span>
+                )}
+                <h3 className="mt-3 line-clamp-3 text-2xl font-bold leading-snug text-white md:text-3xl">{mainNews.title}</h3>
+                {mainNews.excerpt && <p className="mt-2 line-clamp-2 max-w-2xl text-sm text-white/80">{mainNews.excerpt}</p>}
+                <div className="mt-3 text-xs text-white/60">{fmtDate(mainNews.published_at)}</div>
+              </div>
+            </Link>
+            <div className="flex flex-col gap-3 lg:col-span-2">
+              {otherNews.map((n) => (
+                <Link key={n.id} to={`/website/berita/${n.slug}`} className="group flex flex-1 gap-4 rounded-2xl border border-slate-200 bg-white p-3 transition hover:border-[#1E40AF]/40 hover:shadow-md">
+                  <div className="h-24 w-28 shrink-0 overflow-hidden rounded-xl bg-slate-100 sm:w-32">
+                    {n.cover_image_url ? (
+                      <img src={n.cover_image_url} alt="" loading="lazy" className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-blue-50 text-blue-300"><Newspaper className="h-8 w-8" /></div>
+                    )}
+                  </div>
+                  <div className="flex min-w-0 flex-1 flex-col justify-center">
+                    {n.website_news_categories && (
+                      <span className="mb-1 text-xs font-semibold" style={{ color: n.website_news_categories.color }}>{n.website_news_categories.name}</span>
+                    )}
+                    <h3 className="line-clamp-2 font-semibold leading-snug text-slate-900 group-hover:text-[#1E40AF]">{n.title}</h3>
+                    <div className="mt-1.5 text-xs text-slate-400">{fmtDate(n.published_at)}</div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <div className="h-24" />
 
       {/* Instagram Feed */}
       {((settings as any)?.instagram_section_enabled ?? true) && (igPostsAuto.length > 0 || igManualUrls.length > 0 || igUsername) && (
@@ -448,21 +496,14 @@ export default function Home() {
       )}
 
       {/* CTA */}
-      <section className="container mx-auto px-4 pb-4 pt-4">
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#0B2A6B] via-[#1E40AF] to-[#3B82F6] text-white">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_bottom_left,rgba(255,255,255,.2),transparent_60%)]" />
-          <div className="relative px-6 py-14 text-center md:py-16">
-            <h2 className="mb-3 text-3xl font-extrabold tracking-tight md:text-4xl">Bergabunglah Bersama Kami</h2>
-            <p className="mx-auto mb-6 max-w-2xl text-blue-100">Wujudkan cita-cita ananda bersama kami. Pendaftaran peserta didik baru telah dibuka.</p>
-            <div className="flex flex-wrap justify-center gap-3">
-              <Button asChild size="lg" className="rounded-full bg-white text-[#1E40AF] shadow-xl hover:bg-blue-50">
-                <Link to="/daftar-siswa">Daftar Sekarang <ArrowRight className="ml-2 h-4 w-4" /></Link>
-              </Button>
-              <Button asChild size="lg" variant="outline" className="rounded-full border-white/70 bg-transparent text-white hover:bg-white hover:text-[#1E40AF]">
-                <Link to="/website/kontak"><MapPin className="mr-2 h-4 w-4" /> Hubungi Kami</Link>
-              </Button>
-            </div>
-          </div>
+      <section className="relative overflow-hidden bg-[#0B1F4D] text-white">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,rgba(59,130,246,0.45),transparent_60%)]" />
+        <div className="container relative mx-auto px-4 py-16 text-center md:py-20">
+          <h2 className="mb-3 text-3xl font-bold tracking-tight md:text-4xl">Bergabunglah bersama kami</h2>
+          <p className="mx-auto mb-7 max-w-2xl text-blue-100">Wujudkan cita-cita ananda bersama kami. Pendaftaran peserta didik baru telah dibuka.</p>
+          <Button asChild size="lg" className="rounded-full bg-amber-400 font-semibold text-[#0B1F4D] shadow-xl hover:bg-amber-300">
+            <Link to="/daftar-siswa">Daftar sekarang <ArrowRight className="ml-2 h-4 w-4" /></Link>
+          </Button>
         </div>
       </section>
     </div>

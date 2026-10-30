@@ -132,6 +132,7 @@ const WebEkskul = lazy(() => import("./pages/website/Ekstrakurikuler"));
 const WebBerita = lazy(() => import("./pages/website/Berita"));
 const WebBeritaDetail = lazy(() => import("./pages/website/BeritaDetail"));
 const WebGaleri = lazy(() => import("./pages/website/Galeri"));
+const WebAgenda = lazy(() => import("./pages/website/Agenda"));
 const WebGuru = lazy(() => import("./pages/website/Guru"));
 const WebKontak = lazy(() => import("./pages/website/Kontak"));
 const WebAgenda = lazy(() => import("./pages/website/Agenda"));
