@@ -12,10 +12,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Fingerprint, Pencil, Plus, RefreshCw, Settings2, Trash2, FileDown, FileSpreadsheet, CalendarPlus } from "lucide-react";
+import { Fingerprint, Pencil, Plus, RefreshCw, Settings2, Trash2, FileDown, FileSpreadsheet, CalendarPlus, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { PdfPreviewDialog } from "@/components/piket/PdfPreviewDialog";
 import { PiketPeriodicDialog } from "@/components/piket/PiketPeriodicDialog";
+import { PiketImportDialog } from "@/components/piket/PiketImportDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -46,6 +47,7 @@ function PiketPage({ shift }: { shift: PiketShift }) {
 
   const [bulkOpen, setBulkOpen] = useState(false);
   const [periodicOpen, setPeriodicOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [showIgnored, setShowIgnored] = useState(false);
   const [bulkKeys, setBulkKeys] = useState<string[]>([]);
@@ -382,6 +384,7 @@ function PiketPage({ shift }: { shift: PiketShift }) {
                 )}
                 <Button variant="outline" size="sm" onClick={() => setPeriodicOpen(true)}><CalendarPlus className="mr-1 h-4 w-4" />Jadwal Periodik / 1 Tahun</Button>
                 <Button size="sm" onClick={() => { setFromDate(from); setToDate(from); setAddOpen(true); }}><Plus className="mr-1 h-4 w-4" />Tambah</Button>
+                <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}><Upload className="mr-1 h-4 w-4" />Impor</Button>
                 <Button variant="outline" size="sm" onClick={() => setPreviewOpen(true)} disabled={!recordedRows(rows).length}><FileDown className="mr-1 h-4 w-4" />Pratinjau PDF</Button>
                 <Button variant="outline" size="sm" onClick={() => exportPiketExcel(rows, shift, ym, punches, piketCfg)} disabled={!recordedRows(rows).length}><FileSpreadsheet className="mr-1 h-4 w-4" />Excel</Button>
               </div>
@@ -486,6 +489,16 @@ function PiketPage({ shift }: { shift: PiketShift }) {
         people={people}
         userId={user?.id ?? null}
         onDone={() => sync({ silent: true })}
+      />
+
+      <PiketImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        shift={shift}
+        ym={ym}
+        people={people}
+        userId={user?.id ?? null}
+        onDone={async () => { await sync({ silent: true }); }}
       />
 
       {/* Massal Sabtu–Minggu */}
