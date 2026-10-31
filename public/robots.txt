@@ -1,14 +1,7 @@
-User-agent: Googlebot
-Allow: /
-
-User-agent: Bingbot
-Allow: /
-
-User-agent: Twitterbot
-Allow: /
-
-User-agent: facebookexternalhit
-Allow: /
-
+# SMP Negeri 8 Ciamis
 User-agent: *
 Allow: /
+Disallow: /wa-api/
+Disallow: /og/
+
+Sitemap: https://smpn8ciamis.sch.id/sitemap.xml

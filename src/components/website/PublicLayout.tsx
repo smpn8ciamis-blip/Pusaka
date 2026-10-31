@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SiteSeo } from "@/components/website/SiteSeo";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -51,7 +52,7 @@ export function useWebsiteSettings() {
         .order("created_at", { ascending: false }).limit(1).maybeSingle();
       const merged: any = {
         ...(ws ?? {}),
-        site_name: ws?.site_name || sc?.school_name || "Nedelcis School",
+        site_name: ws?.site_name || sc?.school_name || "SMP Negeri 8 Ciamis",
         logo_url: ws?.logo_url || sc?.logo_url || null,
         address: ws?.address || sc?.school_address || null,
         phone: ws?.phone || sc?.school_phone || null,
@@ -71,17 +72,9 @@ export default function PublicLayout() {
   // Halaman Guru & Staff disembunyikan secara default; admin web mengaktifkannya di Pengaturan Website
   const NAV = ALL_NAV.filter((n) => !n.key || (settings as any)?.[n.key] === true);
 
-  useEffect(() => {
-    if (settings?.meta_title) document.title = settings.meta_title;
-    if (settings?.meta_description) {
-      let m = document.querySelector('meta[name="description"]');
-      if (!m) { m = document.createElement("meta"); m.setAttribute("name", "description"); document.head.appendChild(m); }
-      m.setAttribute("content", settings.meta_description);
-    }
-  }, [settings]);
-
   return (
     <div className="min-h-screen flex flex-col bg-white text-slate-900" style={{ fontFamily: "'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif" }}>
+      <SiteSeo settings={settings} />
       {/* Top bar */}
       <div className="hidden md:block bg-[#0B1F4D] text-blue-100 text-xs">
         <div className="container mx-auto flex items-center justify-between py-2 px-4">
@@ -107,7 +100,7 @@ export default function PublicLayout() {
               <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-[#1E40AF] to-[#3B82F6] text-white flex items-center justify-center font-bold">N</div>
             )}
             <div>
-              <div className="font-bold text-slate-900 leading-tight">{settings?.site_name ?? "Nedelcis School"}</div>
+              <div className="font-bold text-slate-900 leading-tight">{settings?.site_name ?? "SMP Negeri 8 Ciamis"}</div>
               {settings?.tagline && <div className="text-[11px] text-slate-500 leading-tight">{settings.tagline}</div>}
             </div>
           </Link>
@@ -179,7 +172,7 @@ export default function PublicLayout() {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-[#1E40AF] to-[#3B82F6] text-white flex items-center justify-center font-bold">N</div>
-              <div className="font-bold text-white">{settings?.site_name ?? "Nedelcis School"}</div>
+              <div className="font-bold text-white">{settings?.site_name ?? "SMP Negeri 8 Ciamis"}</div>
             </div>
             <p className="text-sm text-slate-400">{settings?.about_short ?? "Sekolah modern, berkarakter, dan berprestasi."}</p>
           </div>
@@ -213,7 +206,7 @@ export default function PublicLayout() {
         </div>
         <div className="border-t border-white/10 py-4">
           <div className="container mx-auto px-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center text-[11px] text-slate-500">
-            <span>© {new Date().getFullYear()} {settings?.site_name ?? "Nedelcis School"}</span>
+            <span>© {new Date().getFullYear()} {settings?.site_name ?? "SMP Negeri 8 Ciamis"}</span>
             <span className="text-slate-700 hidden sm:inline">•</span>
             <span>Dikembangkan oleh: <span className="font-medium text-slate-300">Yusup Jati Gumilar</span></span>
           </div>

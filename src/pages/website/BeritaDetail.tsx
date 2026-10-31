@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo, type ReactNode } from "react";
 import { useParams, Link } from "react-router-dom";
+import { Helmet } from "react-helmet-async";
+import { SCHOOL_SHORT, articleJsonLd, canonicalUrl, clip, jsonLdString } from "@/lib/seo";
 import { supabase } from "@/integrations/supabase/client";
 import { PageHero } from "./Profil";
 import { ArrowLeft, Newspaper, Loader2, Eye, Share2, MessageCircle, Facebook, Twitter, Send, Linkedin, Link as LinkIcon, Check, ChevronRight, ZoomIn, X, Clock } from "lucide-react";
@@ -265,45 +267,6 @@ export default function BeritaDetail() {
     return () => window.removeEventListener("keydown", onKey);
   }, [zoom]);
 
-  useEffect(() => {
-    if (!news) return;
-    const shareUrl = beritaShareUrl(news.slug);
-    const shareTitle = news.title;
-    const shareDescription = news.excerpt || news.title;
-    const shareImage = news.cover_image_url || `${window.location.origin}/icon-512.png`;
-    document.title = `${shareTitle} - ${SITE_NAME}`;
-    const setMetaTag = (property: string, content: string) => {
-      let element = document.querySelector(`meta[property="${property}"]`);
-      if (!element) { element = document.createElement('meta'); element.setAttribute('property', property); document.head.appendChild(element); }
-      element.setAttribute('content', content);
-    };
-    const setNameMeta = (name: string, content: string) => {
-      let element = document.querySelector(`meta[name="${name}"]`);
-      if (!element) { element = document.createElement('meta'); element.setAttribute('name', name); document.head.appendChild(element); }
-      element.setAttribute('content', content);
-    };
-    setMetaTag('og:title', shareTitle);
-    setMetaTag('og:description', shareDescription);
-    setMetaTag('og:image', shareImage);
-    setMetaTag('og:url', shareUrl);
-    setMetaTag('og:type', 'article');
-    setMetaTag('og:site_name', SITE_NAME);
-    setMetaTag('twitter:card', 'summary_large_image');
-    setMetaTag('twitter:title', shareTitle);
-    setMetaTag('twitter:description', shareDescription);
-    setMetaTag('twitter:image', shareImage);
-    setNameMeta('description', shareDescription);
-    return () => {
-      document.title = SITE_NAME;
-      ['og:title','og:description','og:image','og:url','og:type','og:site_name','twitter:card','twitter:title','twitter:description','twitter:image'].forEach(p => {
-        const el = document.querySelector(`meta[property="${p}"]`);
-        if (el) el.remove();
-      });
-      const el = document.querySelector('meta[name="description"]');
-      if (el) el.remove();
-    };
-  }, [news]);
-
   const handleShareCountUpdate = (newCount: number) => {
     if (news) setNews({ ...news, share_count: newCount });
   };
@@ -323,6 +286,7 @@ export default function BeritaDetail() {
   if (error || !news) {
     return (
       <div>
+        <Helmet><title>Berita Tidak Ditemukan - {SCHOOL_SHORT}</title><meta name="robots" content="noindex, follow" /></Helmet>
         <PageHero title="Berita Tidak Ditemukan" subtitle="Berita yang Anda cari tidak tersedia." />
         <div className="container mx-auto px-4 py-12 text-center">
           <Newspaper className="h-16 w-16 mx-auto mb-4 text-slate-300" />
@@ -337,9 +301,35 @@ export default function BeritaDetail() {
 
   const cat = news.website_news_categories;
   const author = news.author_name?.trim() || `Tim Redaksi ${SITE_NAME}`;
+  const seoTitle = `${news.title} - ${SCHOOL_SHORT}`;
+  const seoDesc = clip(news.excerpt || news.content || news.title);
+  const seoUrl = canonicalUrl(`/website/berita/${encodeURIComponent(news.slug)}`);
+  const seoImage = news.cover_image_url || `${window.location.origin}/icon-512.png`;
 
   return (
     <div className="bg-white">
+      <Helmet>
+        <html lang="id" />
+        <title>{seoTitle}</title>
+        <meta name="description" content={seoDesc} />
+        <meta name="robots" content="index, follow, max-image-preview:large" />
+        <link rel="canonical" href={seoUrl} />
+        <meta property="og:type" content="article" />
+        <meta property="og:locale" content="id_ID" />
+        <meta property="og:site_name" content={SCHOOL_SHORT} />
+        <meta property="og:title" content={seoTitle} />
+        <meta property="og:description" content={seoDesc} />
+        <meta property="og:url" content={seoUrl} />
+        <meta property="og:image" content={seoImage} />
+        {news.published_at && <meta property="article:published_time" content={new Date(news.published_at).toISOString()} />}
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={seoTitle} />
+        <meta name="twitter:description" content={seoDesc} />
+        <meta name="twitter:image" content={seoImage} />
+        <script type="application/ld+json">
+          {jsonLdString(articleJsonLd({ title: news.title, slug: news.slug, description: seoDesc, image: news.cover_image_url, publishedAt: news.published_at, author: news.author_name?.trim() || null }))}
+        </script>
+      </Helmet>
       <div className="container mx-auto max-w-6xl px-4 py-6 sm:py-8">
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-10">
           <article className="min-w-0">
