@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
+import { seoPagesPlugin } from "./vite.seo-pages";
 
 export default defineConfig(({ mode }) => ({
   base: "/",
@@ -8,7 +9,7 @@ export default defineConfig(({ mode }) => ({
     host: "::",
     port: 8080,
   },
-  plugins: [react()],
+  plugins: [react(), seoPagesPlugin()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
