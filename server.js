@@ -1984,6 +1984,39 @@ async function ogHalamanHandler(req, res) {
 }
 app.get('/og/halaman', rateLimit('oghalaman', 120, 60000), ogHalamanHandler);
 
+// Peta situs untuk Google (https://situs/sitemap.xml, lihat deploy/nginx-sekolah-app.conf): halaman tetap + semua berita terbit.
+// Tanpa konfigurasi nginx ini, situs tetap memakai public/sitemap.xml (hanya halaman tetap).
+const SEO_URL = (process.env.SEO_URL || 'https://smpn8ciamis.sch.id').replace(/\/+$/, '');
+app.get('/sitemap.xml', rateLimit('sitemap', 60, 60000), async function(req, res) {
+    try {
+        const base = SEO_URL; // selalu alamat utama (kanonik), apa pun host yang diminta
+        const prom = await Promise.all([
+            supabase.from('website_news').select('slug, published_at').eq('status', 'published').order('published_at', { ascending: false }).limit(5000),
+            supabase.from('website_settings').select('show_guru_page').order('created_at', { ascending: false }).limit(1).maybeSingle()
+        ]);
+        if (prom[0].error) throw prom[0].error;
+        const showGuru = !!(prom[1] && prom[1].data && prom[1].data.show_guru_page === true);
+        const pages = [['/', 'weekly', '1.0'], ['/website/profil', 'monthly', '0.8'], ['/website/akademik', 'monthly', '0.7'],
+            ['/website/ekstrakurikuler', 'monthly', '0.7'], ['/website/berita', 'daily', '0.9'], ['/website/agenda', 'weekly', '0.7'],
+            ['/website/galeri', 'weekly', '0.6'], ['/website/kontak', 'monthly', '0.7']];
+        if (showGuru) pages.splice(7, 0, ['/website/guru', 'monthly', '0.5']);
+        const urls = pages.map(function(p) {
+            return '  <url><loc>' + escHtml(base + p[0]) + '</loc><changefreq>' + p[1] + '</changefreq><priority>' + p[2] + '</priority></url>';
+        });
+        (prom[0].data || []).forEach(function(n) {
+            if (!n.slug) return;
+            const d = n.published_at ? new Date(n.published_at) : null;
+            urls.push('  <url><loc>' + escHtml(base + '/website/berita/' + encodeURIComponent(n.slug)) + '</loc>' +
+                (d && !isNaN(d) ? '<lastmod>' + d.toISOString() + '</lastmod>' : '') + '<changefreq>monthly</changefreq><priority>0.6</priority></url>');
+        });
+        res.set('Cache-Control', 'public, max-age=3600');
+        res.type('application/xml').send('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + urls.join('\n') + '\n</urlset>\n');
+    } catch (e) {
+        console.error('[sitemap]', e.message);
+        res.status(500).type('text/plain').send('Gagal membuat sitemap');
+    }
+});
+
 
 app.get('/', (req, res) => res.json({
     service: 'Presensi Nedelcis Server',

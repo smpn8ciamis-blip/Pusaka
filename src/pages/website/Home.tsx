@@ -147,7 +147,7 @@ export default function Home() {
               aria-hidden={i !== slideIdx}
             >
               <img
-                src={s.image_url} alt="" loading={i === 0 ? "eager" : "lazy"}
+                src={s.image_url} alt={s.title || "SMP Negeri 8 Ciamis"} loading={i === 0 ? "eager" : "lazy"}
                 className="absolute inset-0 h-full w-full object-cover"
                 style={{ transform: i === slideIdx ? "scale(1.05)" : "scale(1)", transition: "transform 8s ease-out" }}
               />
@@ -160,13 +160,13 @@ export default function Home() {
 
         <div className="container relative mx-auto grid items-center gap-10 px-4 pb-28 pt-16 md:pb-36 md:pt-24 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] lg:gap-14">
           <div>
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-sm backdrop-blur">
+            <h1 className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-sm font-normal backdrop-blur">
               <span className="h-2 w-2 rounded-full bg-amber-400" />
-              {settings?.site_name ?? "Sekolah Kami"}
-            </div>
-            <h1 className="text-4xl font-extrabold leading-[1.1] tracking-tight md:text-6xl">
-              {currentSlide?.title ?? "Membangun Generasi Cerdas, Berkarakter, dan Berprestasi"}
+              {/ciamis/i.test(settings?.site_name ?? "") ? settings?.site_name : "SMP Negeri 8 Ciamis"}
             </h1>
+            <h2 className="text-4xl font-extrabold leading-[1.1] tracking-tight md:text-6xl">
+              {currentSlide?.title ?? "Membangun Generasi Cerdas, Berkarakter, dan Berprestasi"}
+            </h2>
             <p className="mt-6 max-w-xl text-base leading-relaxed text-blue-100/95 md:text-lg">
               {currentSlide?.subtitle ?? settings?.tagline ?? "Pendidikan berkualitas dengan pendekatan modern, teknologi terkini, dan penguatan karakter untuk masa depan yang cemerlang."}
             </p>

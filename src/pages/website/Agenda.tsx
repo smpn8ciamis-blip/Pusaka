@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { Helmet } from "react-helmet-async";
 import { supabase } from "@/integrations/supabase/client";
 import { PageHero } from "./Profil";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -201,10 +200,6 @@ export default function Agenda() {
 
   return (
     <div>
-      <Helmet>
-        <title>Agenda Kegiatan Sekolah</title>
-        <meta name="description" content="Jadwal kegiatan, acara, dan agenda sekolah yang akan datang." />
-      </Helmet>
       <PageHero title="Agenda" subtitle="Jadwal kegiatan dan acara sekolah. Simpan ke kalender Anda agar tidak terlewat.">
         {next && (
           <button onClick={() => setDetail(next)} className="inline-flex max-w-full items-center gap-3 rounded-full bg-white/10 py-2 pl-2 pr-5 text-left backdrop-blur transition hover:bg-white/20">

@@ -1,9 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Helmet } from "react-helmet-async";
 import { supabase } from "@/integrations/supabase/client";
-
-const SITE_URL = typeof window !== "undefined" ? window.location.origin : "https://pusaka.smpn8ciamis.sch.id";
 
 const asAny = (t: string) => supabase.from(t as any) as any;
 
@@ -35,18 +32,6 @@ export default function Profil() {
 
   return (
     <div>
-      <Helmet>
-        <title>Profil Sekolah — SMPN 83</title>
-        <meta name="description" content="Mengenal lebih dekat visi, misi, sejarah, dan struktur SMPN 83 Jakarta." />
-        <link rel="canonical" href={`${SITE_URL}/website/profil`} />
-        <meta property="og:type" content="website" />
-        <meta property="og:title" content="Profil Sekolah — SMPN 83" />
-        <meta property="og:description" content="Mengenal lebih dekat visi, misi, sejarah, dan struktur SMPN 83 Jakarta." />
-        <meta property="og:url" content={`${SITE_URL}/website/profil`} />
-        <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="Profil Sekolah — SMPN 83" />
-        <meta name="twitter:description" content="Mengenal lebih dekat visi, misi, sejarah, dan struktur SMPN 83 Jakarta." />
-      </Helmet>
       <PageHero title="Profil Sekolah" subtitle="Mengenal lebih dekat visi, misi, sejarah, dan struktur sekolah kami." />
       <div className="container mx-auto px-4 py-16 max-w-4xl space-y-12">
         {pages.map((p) => (
