@@ -147,7 +147,7 @@ export default function Home() {
               aria-hidden={i !== slideIdx}
             >
               <img
-                src={s.image_url} alt={s.title || "SMP Negeri 8 Ciamis"} loading={i === 0 ? "eager" : "lazy"}
+                src={s.image_url} alt={s.title || "SMP Negeri 8 Ciamis"} loading={i === 0 ? "eager" : "lazy"} {...({ fetchpriority: i === 0 ? "high" : "auto" } as Record<string, string>)} decoding="async"
                 className="absolute inset-0 h-full w-full object-cover"
                 style={{ transform: i === slideIdx ? "scale(1.05)" : "scale(1)", transition: "transform 8s ease-out" }}
               />
@@ -368,7 +368,7 @@ export default function Home() {
           <div className="grid gap-5 lg:grid-cols-5">
             <Link to={`/website/berita/${mainNews.slug}`} className="group relative block min-h-[360px] overflow-hidden rounded-3xl bg-slate-900 lg:col-span-3 lg:min-h-[460px]">
               {mainNews.cover_image_url ? (
-                <img src={mainNews.cover_image_url} alt={mainNews.title} className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-105" />
+                <img src={mainNews.cover_image_url} alt={mainNews.title} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-105" />
               ) : (
                 <div className="absolute inset-0 bg-gradient-to-br from-[#12307a] to-[#1E40AF]" />
               )}
@@ -389,7 +389,7 @@ export default function Home() {
                 <Link key={n.id} to={`/website/berita/${n.slug}`} className="group flex flex-1 gap-4 rounded-2xl border border-slate-200 bg-white p-3 transition hover:border-[#1E40AF]/40 hover:shadow-md">
                   <div className="h-24 w-28 shrink-0 overflow-hidden rounded-xl bg-slate-100 sm:w-32">
                     {n.cover_image_url ? (
-                      <img src={n.cover_image_url} alt="" loading="lazy" className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
+                      <img src={n.cover_image_url} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center bg-blue-50 text-blue-300"><Newspaper className="h-8 w-8" /></div>
                     )}

@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { SiteSeo } from "@/components/website/SiteSeo";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Menu, X, Facebook, Instagram, Youtube, Phone, Mail, MapPin } from "lucide-react";
-import ChatbotWidget from "./ChatbotWidget";
+// Widget chat memuat pustaka AI + markdown yang besar: dimuat belakangan agar tidak menunda tampilan halaman.
+const ChatbotWidget = lazy(() => import("./ChatbotWidget"));
 
 const ALL_NAV: { to: string; label: string; end?: boolean; key?: string }[] = [
   { to: "/", label: "Beranda", end: true },
@@ -69,6 +70,13 @@ export default function PublicLayout() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const [chatReady, setChatReady] = useState(false);
+  useEffect(() => {
+    const w = window as any;
+    const go = () => setChatReady(true);
+    const id = w.requestIdleCallback ? w.requestIdleCallback(go, { timeout: 4000 }) : setTimeout(go, 3000);
+    return () => (w.cancelIdleCallback && w.requestIdleCallback ? w.cancelIdleCallback(id) : clearTimeout(id));
+  }, []);
   // Halaman Guru & Staff disembunyikan secara default; admin web mengaktifkannya di Pengaturan Website
   const NAV = ALL_NAV.filter((n) => !n.key || (settings as any)?.[n.key] === true);
 
@@ -83,9 +91,9 @@ export default function PublicLayout() {
             {settings?.email && <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{settings.email}</span>}
           </div>
           <div className="flex items-center gap-3">
-            {settings?.facebook_url && <a href={settings.facebook_url} target="_blank" rel="noreferrer"><Facebook className="h-3.5 w-3.5" /></a>}
-            {settings?.instagram_url && <a href={settings.instagram_url} target="_blank" rel="noreferrer"><Instagram className="h-3.5 w-3.5" /></a>}
-            {settings?.youtube_url && <a href={settings.youtube_url} target="_blank" rel="noreferrer"><Youtube className="h-3.5 w-3.5" /></a>}
+            {settings?.facebook_url && <a href={settings.facebook_url} target="_blank" rel="noreferrer" aria-label="Facebook sekolah"><Facebook className="h-3.5 w-3.5" /></a>}
+            {settings?.instagram_url && <a href={settings.instagram_url} target="_blank" rel="noreferrer" aria-label="Instagram sekolah"><Instagram className="h-3.5 w-3.5" /></a>}
+            {settings?.youtube_url && <a href={settings.youtube_url} target="_blank" rel="noreferrer" aria-label="YouTube sekolah"><Youtube className="h-3.5 w-3.5" /></a>}
           </div>
         </div>
       </div>
@@ -95,7 +103,7 @@ export default function PublicLayout() {
         <div className="container mx-auto flex items-center justify-between px-4 h-[68px]">
           <Link to="/" className="flex items-center gap-3">
             {settings?.logo_url ? (
-              <img src={settings.logo_url} alt="logo" className="h-10 w-10 object-contain" />
+              <img src={settings.logo_url} alt="Logo SMP Negeri 8 Ciamis" width={40} height={40} decoding="async" className="h-10 w-10 object-contain" />
             ) : (
               <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-[#1E40AF] to-[#3B82F6] text-white flex items-center justify-center font-bold">N</div>
             )}
@@ -130,7 +138,7 @@ export default function PublicLayout() {
             )}
           </div>
 
-          <button className="lg:hidden p-2" onClick={() => setOpen((s) => !s)} aria-label="menu">
+          <button className="lg:hidden p-2" onClick={() => setOpen((s) => !s)} aria-label={open ? "Tutup menu" : "Buka menu"} aria-expanded={open}>
             {open ? <X /> : <Menu />}
           </button>
         </div>
@@ -213,11 +221,11 @@ export default function PublicLayout() {
         </div>
       </footer>
 
-      {settings && settings.chatbot_enabled !== false && (
-        <ChatbotWidget
+      {settings && chatReady && settings.chatbot_enabled !== false && (
+        <Suspense fallback={null}><ChatbotWidget
           botName={settings.chatbot_name || "Asisten Sekolah"}
           welcome={settings.chatbot_welcome || `Halo! Saya asisten virtual ${settings.site_name ?? "sekolah"}. Ada yang bisa saya bantu tentang profil, program, pendaftaran, atau berita?`}
-        />
+        /></Suspense>
       )}
     </div>
   );
