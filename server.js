@@ -1921,15 +1921,15 @@ app.get('/og/berita/:slug', rateLimit('ogberita', 120, 60000), ogBeritaHandler);
 // GET /og/halaman?path=<jalur> (lihat deploy/nginx-sekolah-app.conf). Hanya jalur pada daftar ini yang dilayani.
 const OG_PAGES = {
     '/': { title: null, desc: null },
-    '/website/profil': { title: 'Profil Sekolah', desc: 'Mengenal lebih dekat visi, misi, sejarah, dan struktur SMP Negeri 8 Ciamis.' },
-    '/website/akademik': { title: 'Akademik', desc: 'Program pembelajaran dan kurikulum di SMP Negeri 8 Ciamis.' },
-    '/website/ekstrakurikuler': { title: 'Ekstrakurikuler', desc: 'Wadah pengembangan bakat, minat, dan karakter peserta didik SMP Negeri 8 Ciamis.' },
-    '/website/agenda': { title: 'Agenda', desc: 'Jadwal kegiatan dan agenda SMP Negeri 8 Ciamis.' },
-    '/website/berita': { title: 'Berita & Informasi', desc: 'Berita, kegiatan, dan informasi terbaru dari SMP Negeri 8 Ciamis.' },
-    '/website/agenda': { title: 'Agenda Kegiatan', desc: 'Jadwal kegiatan dan acara SMP Negeri 8 Ciamis.' },
-    '/website/galeri': { title: 'Galeri', desc: 'Dokumentasi kegiatan, momen, dan prestasi SMP Negeri 8 Ciamis.' },
-    '/website/guru': { title: 'Guru & Staff', desc: 'Tenaga pendidik dan kependidikan SMP Negeri 8 Ciamis.' },
-    '/website/kontak': { title: 'Hubungi Kami', desc: 'Alamat, kontak, dan lokasi SMP Negeri 8 Ciamis.' }
+    // Judul diawali nama bagian (selaras dengan src/lib/seoPages.ts) agar jelas apa yang dibagikan.
+    '/website/profil': { title: 'Profil Sekolah - SMP Negeri 8 Ciamis', desc: 'Profil sekolah: visi, misi, sejarah, dan struktur organisasi SMP Negeri 8 Ciamis (SMPN 8 Ciamis), Ciamis, Jawa Barat.' },
+    '/website/akademik': { title: 'Akademik - SMP Negeri 8 Ciamis', desc: 'Akademik: program pembelajaran, kurikulum, dan kegiatan belajar di SMP Negeri 8 Ciamis (SMPN 8 Ciamis).' },
+    '/website/ekstrakurikuler': { title: 'Ekstrakurikuler - SMP Negeri 8 Ciamis', desc: 'Ekstrakurikuler: kegiatan pengembangan bakat, minat, dan karakter peserta didik SMP Negeri 8 Ciamis.' },
+    '/website/berita': { title: 'Berita & Informasi - SMP Negeri 8 Ciamis', desc: 'Berita dan informasi: kegiatan, prestasi, dan pengumuman terbaru dari SMP Negeri 8 Ciamis (SMPN 8 Ciamis).' },
+    '/website/agenda': { title: 'Agenda Kegiatan - SMP Negeri 8 Ciamis', desc: 'Agenda kegiatan: jadwal acara dan kegiatan SMP Negeri 8 Ciamis (SMPN 8 Ciamis) yang akan datang.' },
+    '/website/galeri': { title: 'Galeri Foto - SMP Negeri 8 Ciamis', desc: 'Galeri foto: dokumentasi kegiatan, momen, dan prestasi SMP Negeri 8 Ciamis (SMPN 8 Ciamis).' },
+    '/website/guru': { title: 'Guru & Tenaga Kependidikan - SMP Negeri 8 Ciamis', desc: 'Guru dan tenaga kependidikan SMP Negeri 8 Ciamis (SMPN 8 Ciamis).' },
+    '/website/kontak': { title: 'Kontak & Alamat - SMP Negeri 8 Ciamis', desc: 'Kontak dan alamat: telepon, email, dan lokasi SMP Negeri 8 Ciamis (SMPN 8 Ciamis), Ciamis, Jawa Barat.' }
 };
 const OG_ALLOWED_HOSTS = new Set(['pusaka.smpn8ciamis.sch.id', 'www.pusaka.smpn8ciamis.sch.id', 'smpn8ciamis.sch.id', 'www.smpn8ciamis.sch.id']);
 async function ogHalamanHandler(req, res) {
@@ -1952,7 +1952,7 @@ async function ogHalamanHandler(req, res) {
             title = stripHtml(st.meta_title) || ((stripHtml(st.site_name) || 'SMP Negeri 8 Ciamis') + (st.tagline ? ' - ' + stripHtml(st.tagline) : ''));
             desc = stripHtml(st.meta_description) || stripHtml(st.about_short) || 'Website resmi SMP Negeri 8 Ciamis: berita, profil, akademik, ekstrakurikuler, dan informasi sekolah.';
         } else {
-            title = page.title + ' - ' + site;
+            title = page.title;
             desc = page.desc;
             if (pth === '/website/kontak') {
                 const extra = [stripHtml(st.address), st.phone ? 'Telp. ' + stripHtml(st.phone) : ''].filter(Boolean).join(' · ');
