@@ -61,6 +61,18 @@ const getNotificationIcon = (type: string) => {
     default: return Info;
   }
 };
+/**
+ * Nama aplikasi di pengaturan bisa panjang: "PUSAKA NEDELCIS (Pusat Sistem … Non-akademik) SMP NEGERI 8 CIAMIS".
+ * Dipecah: judul (besar), keterangan dalam kurung (kecil), dan nama sekolah (satu kali saja).
+ */
+function splitBrand(appName: string, schoolName?: string | null) {
+  const m = appName.match(/^(.*?)\s*\(([^)]*)\)\s*(.*)$/);
+  const title = ((m ? m[1] : appName) || appName).trim();
+  const note = m ? m[2].trim() : '';
+  const tail = m ? m[3].trim() : '';
+  const school = (schoolName || tail || '').trim();
+  return { title, note, school };
+}
 const logDev = (...args: unknown[]) => { if (import.meta.env.DEV) console.log(...args); };
 
 // ═════════════════════════════════════════════════════════════
@@ -168,6 +180,26 @@ function BrandLogos({ left, right, size = 'md' }: { left?: string | null; right?
         <img key={src as string} src={src as string} alt="" width={80} height={80} decoding="async"
           className={cn(dim, 'rounded-xl bg-white/95 object-contain p-1.5 shadow-sm')} />
       ))}
+    </div>
+  );
+}
+
+/** Judul merek: judul besar, keterangan kecil dalam kurung, lalu nama sekolah satu kali. */
+function BrandTitle({ title, note, school, tone = 'default' }: { title: string; note: string; school: string; tone?: 'default' | 'light' }) {
+  const light = tone === 'light';
+  return (
+    <div className="space-y-1.5">
+      <h1 className={cn('font-bold tracking-tight', light ? 'text-4xl leading-tight xl:text-5xl' : 'text-2xl')}>{title}</h1>
+      {note && (
+        <p className={cn('max-w-[34ch] text-[13px] font-light italic leading-snug tracking-wide', light ? 'text-primary-foreground/80' : 'mx-auto text-muted-foreground')}>
+          ({note})
+        </p>
+      )}
+      {school && (
+        <p className={cn('pt-1 text-[11px] font-medium uppercase tracking-[0.2em]', light ? 'text-primary-foreground/90' : 'text-muted-foreground')}>
+          {school}
+        </p>
+      )}
     </div>
   );
 }
@@ -355,7 +387,7 @@ export default function Auth() {
     ? getNotificationIcon(activeNotification.notification_type)
     : Info;
 
-  const schoolName = settings?.school_name || '';
+  const brand = splitBrand(appName, settings?.school_name);
   const hasServices = isLoadingSettings || isSettingsError ||
     settings?.enable_student_status_check || settings?.enable_activity_permission ||
     settings?.enable_graduation_check || settings?.enable_complaint_channel ||
@@ -365,7 +397,7 @@ export default function Auth() {
   return (
     <AuthShell>
       <Helmet>
-        <title>Masuk - {appName}</title>
+        <title>Masuk - {brand.title}</title>
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>
 
@@ -415,8 +447,7 @@ export default function Auth() {
           <div className="pointer-events-none absolute -bottom-32 -left-20 h-96 w-96 rounded-full bg-white/[0.05]" />
           <div className="relative"><BrandLogos left={settings?.logo_url} right={settings?.right_logo_url} size="lg" /></div>
           <div className="relative max-w-lg space-y-4">
-            <h1 className="text-4xl font-bold leading-tight tracking-tight xl:text-5xl">{appName}</h1>
-            {schoolName && <p className="text-lg font-medium text-primary-foreground/90">{schoolName}</p>}
+            <BrandTitle title={brand.title} note={brand.note} school={brand.school} tone="light" />
             <p className="text-sm leading-relaxed text-primary-foreground/80">
               Satu pintu untuk administrasi akademik, kehadiran, nilai, dan layanan sekolah.
             </p>
@@ -438,10 +469,7 @@ export default function Auth() {
                   ))}
                 </div>
               )}
-              <div>
-                <h1 className="text-2xl font-bold tracking-tight">{appName}</h1>
-                {schoolName && <p className="mt-0.5 text-sm text-muted-foreground">{schoolName}</p>}
-              </div>
+              <BrandTitle title={brand.title} note={brand.note} school={brand.school} />
             </div>
 
             <Card className="rounded-2xl border bg-card shadow-sm">
