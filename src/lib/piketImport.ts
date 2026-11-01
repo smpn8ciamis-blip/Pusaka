@@ -1,5 +1,6 @@
-// Impor kehadiran piket dari Excel/CSV. Semua pembacaan, pencocokan nama, dan penentuan
-// tambah/perbarui ada di sini (murni, tanpa browser) agar bisa diuji.
+// Impor kehadiran piket dari Excel/CSV. Petugas dikenali dari PIN absen (kolom "PIN Absen"); nama dan jabatan
+// diambil dari data staf/guru. Kolom Nama/Jabatan masih boleh ada (berkas lama) sebagai cadangan.
+// Semua pembacaan, pencocokan, dan penentuan tambah/perbarui ada di sini (murni, tanpa browser) agar bisa diuji.
 import { PiketShift, isWeekendDate, parseISODate, toISODate } from "@/lib/piket";
 
 export type ImportStatus = "dijadwalkan" | "hadir" | "tidak_hadir" | "izin";
@@ -19,6 +20,8 @@ export interface PlannedDuty {
   date: string; // yyyy-MM-dd
   person: ImportPerson | null; // null = petugas manual (tidak ada di data staf/guru)
   name: string;
+  /** PIN seperti tertulis di berkas (untuk ditampilkan pada baris bermasalah) */
+  pin: string;
   position: string | null;
   status: ImportStatus;
   checkIn: string | null; // ISO (UTC)
@@ -50,7 +53,7 @@ const stripTitles = (s: string) => norm(s).split(" ").filter((t) => t && !TITLES
 const HEADERS: Record<string, string[]> = {
   date: ["tanggal", "tgl", "date"],
   name: ["nama", "nama petugas", "nama lengkap"],
-  pin: ["pin", "pin fingerprint"],
+  pin: ["pin absen", "pin", "pin fingerprint", "pin mesin", "id absen"],
   position: ["jabatan", "posisi"],
   in: ["jam datang", "jam masuk", "datang", "masuk"],
   out: ["jam pulang", "jam keluar", "pulang", "keluar"],
@@ -133,9 +136,9 @@ export function planImport(table: Cell[][], opts: { shift: PiketShift; people: I
 
   const hIdx = table.findIndex((r) => {
     const names = r.map(norm);
-    return names.some((n) => HEADERS.date.includes(n)) && names.some((n) => HEADERS.name.includes(n));
+    return names.some((n) => HEADERS.date.includes(n)) && names.some((n) => HEADERS.pin.includes(n) || HEADERS.name.includes(n));
   });
-  if (hIdx < 0) return fail("Baris judul tidak ditemukan. Berkas harus memiliki kolom Tanggal dan Nama (unduh templat).");
+  if (hIdx < 0) return fail("Baris judul tidak ditemukan. Berkas harus memiliki kolom Tanggal dan PIN Absen (unduh templat).");
   const header = table[hIdx].map(norm);
   const col = (k: keyof typeof HEADERS) => header.findIndex((h) => HEADERS[k].includes(h));
   const c = { date: col("date"), name: col("name"), pin: col("pin"), position: col("position"), in: col("in"), out: col("out"), status: col("status"), notes: col("notes") };
@@ -147,10 +150,21 @@ export function planImport(table: Cell[][], opts: { shift: PiketShift; people: I
   const byStripped = new Map<string, ImportPerson[]>();
   const push = (m: Map<string, ImportPerson[]>, k: string, p: ImportPerson) => { if (k) m.set(k, [...(m.get(k) ?? []), p]); };
   for (const p of opts.people) {
-    if (p.pin) push(byPin, String(p.pin).trim(), p);
+    if (p.pin) { const k = String(p.pin).trim(); push(byPin, k, p); }
     push(byName, norm(p.name), p);
     push(byStripped, stripTitles(p.name), p);
   }
+
+  // PIN dari Excel kadang kehilangan nol di depan ("005" -> 5): cocokkan persis dulu, lalu tanpa nol di depan.
+  const noZero = (v: string) => v.replace(/^0+(?=\d)/, "");
+  const pinCands = (v: string): ImportPerson[] => {
+    const exact = byPin.get(v);
+    if (exact?.length) return exact;
+    const z = noZero(v);
+    const out: ImportPerson[] = [];
+    for (const [k, list] of byPin) if (noZero(k) === z) out.push(...list);
+    return out;
+  };
 
   const seen = new Set<string>();
   const rows: PlannedDuty[] = [];
@@ -159,7 +173,8 @@ export function planImport(table: Cell[][], opts: { shift: PiketShift; people: I
     const get = (i: number): Cell => (i >= 0 ? line[i] : undefined);
     const rawName = String(get(c.name) ?? "").trim();
     const rawDate = get(c.date);
-    if (!rawName && (rawDate === "" || rawDate == null)) continue; // baris kosong
+    const pinVal = String(get(c.pin) ?? "").trim();
+    if (!rawName && !pinVal && (rawDate === "" || rawDate == null)) continue; // baris kosong
 
     const errors: string[] = [];
     const warnings: string[] = [];
@@ -168,17 +183,27 @@ export function planImport(table: Cell[][], opts: { shift: PiketShift; people: I
     if (!date) errors.push(`Tanggal "${String(rawDate ?? "").trim()}" tidak valid (pakai dd/mm/yyyy atau yyyy-mm-dd)`);
     else if (opts.shift === "sabtu_minggu" && !isWeekendDate(date)) errors.push("Piket Sabtu & Minggu hanya untuk hari Sabtu atau Minggu");
 
-    // pencocokan petugas: PIN, lalu nama persis, lalu nama tanpa gelar
+    // pencocokan petugas: PIN absen (utama), lalu nama persis, lalu nama tanpa gelar (cadangan untuk berkas lama)
     let person: ImportPerson | null = null;
-    const pinVal = String(get(c.pin) ?? "").trim();
     let cands: ImportPerson[] = [];
-    if (pinVal) cands = byPin.get(pinVal) ?? [];
-    if (cands.length === 0 && rawName) cands = byName.get(norm(rawName)) ?? [];
-    if (cands.length === 0 && rawName) cands = byStripped.get(stripTitles(rawName)) ?? [];
-    if (!rawName && cands.length === 0) errors.push("Nama petugas kosong");
-    else if (cands.length > 1) errors.push(`Nama "${rawName}" cocok dengan ${cands.length} orang; isi kolom PIN`);
-    else if (cands.length === 1) person = cands[0];
-    else warnings.push("Tidak ada di data staf/guru: dicatat sebagai petugas manual");
+    if (pinVal) cands = pinCands(pinVal);
+    if (pinVal && cands.length > 1) errors.push(`PIN "${pinVal}" dipakai ${cands.length} orang pada data staf/guru; perbaiki PIN di data staf/guru`);
+    else if (pinVal && cands.length === 1) {
+      person = cands[0];
+      if (rawName && norm(rawName) !== norm(person.name) && stripTitles(rawName) !== stripTitles(person.name))
+        warnings.push(`Nama di berkas "${rawName}" berbeda dengan data PIN ini ("${person.name}"); dipakai data PIN`);
+    } else {
+      // PIN kosong / tidak terdaftar
+      if (rawName) {
+        cands = byName.get(norm(rawName)) ?? [];
+        if (cands.length === 0) cands = byStripped.get(stripTitles(rawName)) ?? [];
+      }
+      if (!pinVal && !rawName) errors.push("PIN absen kosong");
+      else if (cands.length > 1) errors.push(`Nama "${rawName}" cocok dengan ${cands.length} orang; isi kolom PIN Absen`);
+      else if (cands.length === 1) { person = cands[0]; if (pinVal) warnings.push(`PIN "${pinVal}" tidak terdaftar; petugas dicocokkan lewat nama`); }
+      else if (pinVal && !rawName) errors.push(`PIN "${pinVal}" tidak terdaftar pada data staf/guru`);
+      else warnings.push(`${pinVal ? `PIN "${pinVal}" tidak terdaftar dan ` : ""}nama tidak ada di data staf/guru: dicatat sebagai petugas manual`);
+    }
 
     const name = person?.name ?? rawName;
     const position = String(get(c.position) ?? "").trim() || person?.position || null;
@@ -211,7 +236,7 @@ export function planImport(table: Cell[][], opts: { shift: PiketShift; people: I
     }
 
     rows.push({
-      line: r + 1, date: date ?? "", person, name, position, status, checkIn, checkOut,
+      line: r + 1, date: date ?? "", person, name, pin: pinVal, position, status, checkIn, checkOut,
       notes: String(get(c.notes) ?? "").trim() || null, errors, warnings,
     });
   }
@@ -278,13 +303,21 @@ export function toUpdatePatch(r: PlannedDuty) {
   return patch;
 }
 
-/** Baris contoh + petunjuk untuk templat. */
+/** Baris templat: judul + contoh (petugas yang punya PIN). Nama/jabatan tidak perlu, diambil dari PIN. */
 export function buildTemplate(shift: PiketShift, people: ImportPerson[], sampleDate: string): (string | number)[][] {
-  const head = ["Tanggal", "Nama", "Jabatan", "Jam Datang", "Jam Pulang", "Status", "Keterangan"];
-  const sample = people.slice(0, 2);
+  const head = ["Tanggal", "PIN Absen", "Jam Datang", "Jam Pulang", "Status", "Keterangan"];
+  const sample = people.filter((p) => p.pin).slice(0, 2);
   const outJam = shift === "malam" ? "05:30" : "14:00";
   const inJam = shift === "malam" ? "19:00" : "07:30";
-  const rows: (string | number)[][] = sample.map((p, i) => [sampleDate, p.name, p.position, i === 0 ? inJam : "", i === 0 ? outJam : "", i === 0 ? "Hadir" : "Izin", i === 0 ? "" : "Sakit"]);
-  if (rows.length === 0) rows.push([sampleDate, "Nama Petugas", "Jabatan", inJam, outJam, "Hadir", ""]);
+  const rows: (string | number)[][] = sample.map((p, i) => [sampleDate, String(p.pin), i === 0 ? inJam : "", i === 0 ? outJam : "", i === 0 ? "Hadir" : "Izin", i === 0 ? "" : "Sakit"]);
+  if (rows.length === 0) rows.push([sampleDate, "101", inJam, outJam, "Hadir", ""]);
   return [head, ...rows];
+}
+
+/** Daftar rujukan PIN (lembar kedua templat Excel): PIN, nama, jabatan. Hanya yang punya PIN. */
+export function buildPinList(people: ImportPerson[]): (string | number)[][] {
+  return [
+    ["PIN Absen", "Nama", "Jabatan"],
+    ...people.filter((p) => p.pin).map((p) => [String(p.pin), p.name, p.position]).sort((a, b) => String(a[1]).localeCompare(String(b[1]))),
+  ];
 }

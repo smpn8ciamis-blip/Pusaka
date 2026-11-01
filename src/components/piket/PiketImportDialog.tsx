@@ -9,7 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { parseDelimited } from "@/lib/gradeImport";
 import { PiketShift, SHIFT_LABEL, weekendDates } from "@/lib/piket";
 import {
-  buildTemplate, classify, planImport, toInsertRow, toUpdatePatch,
+  buildPinList, buildTemplate, classify, planImport, toInsertRow, toUpdatePatch,
   type ExistingDuty, type ImportPerson, type PlanResult,
 } from "@/lib/piketImport";
 
@@ -55,9 +55,13 @@ export function PiketImportDialog({ open, onClose, shift, ym, people, userId, on
       return;
     }
     const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws["!cols"] = [{ wch: 12 }, { wch: 32 }, { wch: 22 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 28 }];
+    ws["!cols"] = [{ wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 28 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Piket");
+    // Lembar rujukan: PIN, nama, jabatan (tidak ikut diimpor; hanya lembar pertama yang dibaca)
+    const pins = XLSX.utils.aoa_to_sheet(buildPinList(people));
+    pins["!cols"] = [{ wch: 12 }, { wch: 34 }, { wch: 24 }];
+    XLSX.utils.book_append_sheet(wb, pins, "Daftar PIN");
     XLSX.writeFile(wb, name);
   };
 
@@ -158,7 +162,7 @@ export function PiketImportDialog({ open, onClose, shift, ym, people, userId, on
           <div className="rounded-lg border p-3 space-y-2">
             <p className="font-medium">1. Unduh templat</p>
             <p className="text-xs text-muted-foreground">
-              Kolom: Tanggal, Nama, Jabatan, Jam Datang, Jam Pulang, Status (Hadir / Tidak Hadir / Izin / Dijadwalkan), Keterangan. Kolom PIN boleh ditambahkan bila ada nama kembar.
+              Kolom: Tanggal, PIN Absen, Jam Datang, Jam Pulang, Status (Hadir / Tidak Hadir / Izin / Dijadwalkan), Keterangan. Nama dan jabatan diambil otomatis dari PIN; templat Excel memuat lembar "Daftar PIN" sebagai rujukan.
               {shift === "malam" && " Piket malam: jam sebelum 12:00 dianggap hari berikutnya (mis. 05:30)."}
               {shift === "sabtu_minggu" && " Tanggal harus hari Sabtu atau Minggu."}
               {" "}Status Hadir/Tidak Hadir/Izin disimpan sebagai input manual (tidak ditimpa fingerprint); status Dijadwalkan atau kosong tanpa jam hanya membuat jadwal, lalu diisi dari fingerprint.
@@ -211,11 +215,11 @@ export function PiketImportDialog({ open, onClose, shift, ym, people, userId, on
               {errorRows.length > 0 && (
                 <div className="max-h-40 overflow-y-auto rounded-lg border">
                   <table className="w-full text-xs">
-                    <thead className="bg-muted/50 text-left"><tr><th className="p-2 w-14">Baris</th><th className="p-2">Petugas</th><th className="p-2">Masalah</th></tr></thead>
+                    <thead className="bg-muted/50 text-left"><tr><th className="p-2 w-14">Baris</th><th className="p-2">Petugas / PIN</th><th className="p-2">Masalah</th></tr></thead>
                     <tbody>
                       {errorRows.map((r) => (
                         <tr key={r.line} className="border-t align-top">
-                          <td className="p-2">{r.line}</td><td className="p-2">{r.name || "-"}</td>
+                          <td className="p-2">{r.line}</td><td className="p-2">{r.name || (r.pin ? `PIN ${r.pin}` : "-")}</td>
                           <td className="p-2 text-red-700">{r.errors.join("; ")}</td>
                         </tr>
                       ))}
@@ -231,7 +235,7 @@ export function PiketImportDialog({ open, onClose, shift, ym, people, userId, on
                     <tbody>
                       {warnRows.map((r) => (
                         <tr key={r.line} className="border-t border-amber-100 align-top">
-                          <td className="p-2 w-14">{r.line}</td><td className="p-2">{r.name}</td>
+                          <td className="p-2 w-14">{r.line}</td><td className="p-2">{r.name || (r.pin ? `PIN ${r.pin}` : "-")}</td>
                           <td className="p-2 text-amber-800">{r.warnings.join("; ")}</td>
                         </tr>
                       ))}
