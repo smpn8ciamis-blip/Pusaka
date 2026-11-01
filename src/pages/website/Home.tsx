@@ -241,9 +241,12 @@ export default function Home() {
             {slides.map((_, i) => (
               <button
                 key={i} onClick={() => setSlideIdx(i)}
-                className={`h-1.5 rounded-full transition-all ${i === slideIdx ? "w-8 bg-white" : "w-3 bg-white/40 hover:bg-white/70"}`}
+                className="group flex h-6 items-center px-0.5"
                 aria-label={`Slide ${i + 1}`}
-              />
+                aria-current={i === slideIdx ? "true" : undefined}
+              >
+                <span className={`block h-1.5 rounded-full transition-all ${i === slideIdx ? "w-8 bg-white" : "w-3 bg-white/40 group-hover:bg-white/70"}`} />
+              </button>
             ))}
           </div>
         )}
@@ -381,7 +384,7 @@ export default function Home() {
                 )}
                 <h3 className="mt-3 line-clamp-3 text-2xl font-bold leading-snug text-white md:text-3xl">{mainNews.title}</h3>
                 {mainNews.excerpt && <p className="mt-2 line-clamp-2 max-w-2xl text-sm text-white/80">{mainNews.excerpt}</p>}
-                <div className="mt-3 text-xs text-white/60">{fmtDate(mainNews.published_at)}</div>
+                <div className="mt-3 text-xs text-white/85">{fmtDate(mainNews.published_at)}</div>
               </div>
             </Link>
             <div className="flex flex-col gap-3 lg:col-span-2">
@@ -399,7 +402,7 @@ export default function Home() {
                       <span className="mb-1 text-xs font-semibold" style={{ color: n.website_news_categories.color }}>{n.website_news_categories.name}</span>
                     )}
                     <h3 className="line-clamp-2 font-semibold leading-snug text-slate-900 group-hover:text-[#1E40AF]">{n.title}</h3>
-                    <div className="mt-1.5 text-xs text-slate-400">{fmtDate(n.published_at)}</div>
+                    <div className="mt-1.5 text-xs text-slate-600">{fmtDate(n.published_at)}</div>
                   </div>
                 </Link>
               ))}

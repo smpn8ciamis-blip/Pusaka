@@ -179,13 +179,17 @@ export default function PublicLayout() {
         <div className="container mx-auto px-4 py-12 grid gap-8 md:grid-cols-4">
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-[#1E40AF] to-[#3B82F6] text-white flex items-center justify-center font-bold">N</div>
+              {settings?.logo_url ? (
+                <img src={settings.logo_url} alt="" width={40} height={40} loading="lazy" decoding="async" className="h-10 w-10 object-contain" />
+              ) : (
+                <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-[#1E40AF] to-[#3B82F6] text-white flex items-center justify-center font-bold" aria-hidden="true">S</div>
+              )}
               <div className="font-bold text-white">{settings?.site_name ?? "SMP Negeri 8 Ciamis"}</div>
             </div>
             <p className="text-sm text-slate-400">{settings?.about_short ?? "Sekolah modern, berkarakter, dan berprestasi."}</p>
           </div>
           <div>
-            <h4 className="font-semibold text-white mb-3">Navigasi</h4>
+            <h2 className="font-semibold text-white mb-3">Navigasi</h2>
             <ul className="space-y-2 text-sm">
               {NAV.slice(0, 5).map((n) => (
                 <li key={n.to}><Link to={n.to} className="hover:text-white text-slate-400">{n.label}</Link></li>
@@ -193,7 +197,7 @@ export default function PublicLayout() {
             </ul>
           </div>
           <div>
-            <h4 className="font-semibold text-white mb-3">Layanan</h4>
+            <h2 className="font-semibold text-white mb-3">Layanan</h2>
             <ul className="space-y-2 text-sm">
               <li><Link to="/website/berita" className="hover:text-white text-slate-400">Berita</Link></li>
               <li><Link to="/website/agenda" className="hover:text-white text-slate-400">Agenda</Link></li>
@@ -204,7 +208,7 @@ export default function PublicLayout() {
             </ul>
           </div>
           <div>
-            <h4 className="font-semibold text-white mb-3">Kontak</h4>
+            <h2 className="font-semibold text-white mb-3">Kontak</h2>
             <ul className="space-y-2 text-sm text-slate-400">
               {settings?.address && <li className="flex gap-2"><MapPin className="h-4 w-4 mt-0.5 shrink-0" />{settings.address}</li>}
               {settings?.phone && <li className="flex gap-2"><Phone className="h-4 w-4 mt-0.5 shrink-0" />{settings.phone}</li>}

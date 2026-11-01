@@ -28,7 +28,9 @@ export default defineConfig(({ mode }) => ({
         manualChunks: {
           "react-vendor": ["react", "react-dom", "react-router-dom"],
           "chart-vendor": ["recharts"],
-          "ui-vendor": ["framer-motion", "lucide-react"],
+          // Dipisah agar halaman yang hanya butuh ikon (mis. beranda website) tidak ikut mengunduh framer-motion.
+          "framer-vendor": ["framer-motion"],
+          "icons-vendor": ["lucide-react"],
         },
         entryFileNames: "assets/[name]-[hash].js",
         chunkFileNames: "assets/[name]-[hash].js",
