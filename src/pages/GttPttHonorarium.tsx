@@ -15,7 +15,7 @@ import { Plus, Eye, Trash2, FileText, Users, Wallet, Receipt, TrendingUp, Pencil
 import { format } from 'date-fns';
 import { id as idLocale } from 'date-fns/locale';
 import { GttPttHonorariumPreview } from '@/components/honorarium/GttPttHonorariumPreview';
-import { GttPttCopyDialog } from '@/components/honorarium/GttPttCopyDialog';
+import { HonorariumCopyDialog } from '@/components/honorarium/HonorariumCopyDialog';
 import { nextPeriod } from '@/lib/honorariumCopy';
 
 interface Teacher {
@@ -828,7 +828,9 @@ export default function GttPttHonorarium() {
         </Card>
       </div>
 
-      <GttPttCopyDialog
+      <HonorariumCopyDialog
+        table="gtt_ptt_honorariums"
+        queryKey={['gtt-ptt-honorariums']}
         open={copyDialogOpen}
         onOpenChange={setCopyDialogOpen}
         userId={user?.id}

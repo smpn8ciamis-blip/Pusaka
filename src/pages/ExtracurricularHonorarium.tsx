@@ -12,10 +12,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
-import { Plus, Eye, Trash2, Users, Wallet, Receipt, TrendingUp, Pencil, Search, ArrowUpDown, Settings, Award } from 'lucide-react';
+import { Plus, Eye, Trash2, Users, Wallet, Receipt, TrendingUp, Pencil, Search, ArrowUpDown, Settings, Award, Copy, CopyPlus } from 'lucide-react';
 import { format } from 'date-fns';
 import { id as idLocale } from 'date-fns/locale';
 import { ExtracurricularHonorariumPreview } from '@/components/honorarium/ExtracurricularHonorariumPreview';
+import { HonorariumCopyDialog } from '@/components/honorarium/HonorariumCopyDialog';
+import { nextPeriod } from '@/lib/honorariumCopy';
 
 interface ExtracurricularType {
   id: string;
@@ -67,6 +69,8 @@ export default function ExtracurricularHonorarium() {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState('honorarium');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isCopying, setIsCopying] = useState(false);     // form tambah terisi dari kwitansi yang disalin
+  const [copyDialogOpen, setCopyDialogOpen] = useState(false); // salin banyak kwitansi dari bulan lain
   const [isTypeDialogOpen, setIsTypeDialogOpen] = useState(false);
   const [isInstructorDialogOpen, setIsInstructorDialogOpen] = useState(false);
   const [previewHonorarium, setPreviewHonorarium] = useState<Honorarium | null>(null);
@@ -325,6 +329,7 @@ export default function ExtracurricularHonorarium() {
       queryClient.invalidateQueries({ queryKey: ['extracurricular-honorariums'] });
       toast({ title: 'Berhasil', description: 'Data honorarium berhasil disimpan' });
       resetHonorariumForm();
+      setIsCopying(false);
       setIsDialogOpen(false);
     },
     onError: (error: any) => {
@@ -438,6 +443,21 @@ export default function ExtracurricularHonorarium() {
     setPaymentMonth(honorarium.payment_month);
     setPaymentYear(honorarium.payment_year);
     setReceiptDate(honorarium.receipt_date);
+    setDescription(honorarium.description || '');
+    setIsDialogOpen(true);
+  };
+
+  // Salin satu kwitansi: form tambah terisi data yang sama untuk bulan berikutnya (nomor kwitansi baru dibuat saat simpan).
+  const handleCopyHonorarium = (honorarium: Honorarium) => {
+    const next = nextPeriod(honorarium.payment_month, honorarium.payment_year);
+    setEditingHonorarium(null);
+    setIsCopying(true);
+    setSelectedInstructorId(honorarium.instructor_id);
+    setHonorariumAmount(honorarium.honorarium_amount.toString());
+    setTaxPercentage(honorarium.tax_percentage.toString());
+    setPaymentMonth(next.month);
+    setPaymentYear(next.year);
+    setReceiptDate(format(new Date(), 'yyyy-MM-dd'));
     setDescription(honorarium.description || '');
     setIsDialogOpen(true);
   };
@@ -650,10 +670,16 @@ export default function ExtracurricularHonorarium() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" onClick={() => setCopyDialogOpen(true)} disabled={honorariums.length === 0}>
+                <CopyPlus className="h-4 w-4 mr-2" />
+                Salin dari Bulan Lain
+              </Button>
               <Dialog open={isDialogOpen} onOpenChange={(open) => {
                 if (!open) {
                   resetHonorariumForm();
                   setEditingHonorarium(null);
+                  setIsCopying(false);
                 }
                 setIsDialogOpen(open);
               }}>
@@ -665,7 +691,7 @@ export default function ExtracurricularHonorarium() {
                 </DialogTrigger>
                 <DialogContent className="max-w-lg">
                   <DialogHeader>
-                    <DialogTitle>{editingHonorarium ? 'Edit Honorarium' : 'Tambah Honorarium'}</DialogTitle>
+                    <DialogTitle>{editingHonorarium ? 'Edit Honorarium' : isCopying ? 'Salin Kwitansi Honorarium' : 'Tambah Honorarium'}</DialogTitle>
                   </DialogHeader>
                   <div className="space-y-4">
                     <div className="space-y-2">
@@ -759,6 +785,7 @@ export default function ExtracurricularHonorarium() {
                   </div>
                 </DialogContent>
               </Dialog>
+              </div>
             </div>
 
             <Card>
@@ -799,6 +826,9 @@ export default function ExtracurricularHonorarium() {
                             <div className="flex justify-end gap-2">
                               <Button size="sm" variant="ghost" onClick={() => setPreviewHonorarium(honorarium)}>
                                 <Eye className="h-4 w-4" />
+                              </Button>
+                              <Button size="sm" variant="ghost" title="Salin kwitansi (bulan berikutnya)" onClick={() => handleCopyHonorarium(honorarium)}>
+                                <Copy className="h-4 w-4" />
                               </Button>
                               <Button size="sm" variant="ghost" onClick={() => handleEditHonorarium(honorarium)}>
                                 <Pencil className="h-4 w-4" />
@@ -1028,6 +1058,24 @@ export default function ExtracurricularHonorarium() {
             </Card>
           </TabsContent>
         </Tabs>
+
+        <HonorariumCopyDialog
+          table="extracurricular_honorariums"
+          queryKey={['extracurricular-honorariums']}
+          numberPrefix="EKS"
+          recipientFields={(s) => ({ instructor_id: s.instructor_id })}
+          open={copyDialogOpen}
+          onOpenChange={setCopyDialogOpen}
+          userId={user?.id}
+          today={format(new Date(), 'yyyy-MM-dd')}
+          honorariums={honorariums.map((h) => ({
+            id: h.id, instructor_id: h.instructor_id,
+            honorarium_amount: h.honorarium_amount, tax_percentage: h.tax_percentage,
+            payment_month: h.payment_month, payment_year: h.payment_year, description: h.description,
+            receipt_number: h.receipt_number, net_amount: h.net_amount,
+            name: h.instructors?.name || 'N/A', sub: h.instructors?.extracurricular_types?.name,
+          }))}
+        />
 
         {/* Preview Dialog */}
         {previewHonorarium && schoolSettings && (

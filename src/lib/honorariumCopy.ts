@@ -2,8 +2,9 @@
 
 export interface CopySource {
   id: string;
-  teacher_id: string | null;
-  staff_id: string | null;
+  teacher_id?: string | null;
+  staff_id?: string | null;
+  instructor_id?: string | null; // honorarium ekskul
   honorarium_amount: number;
   tax_percentage: number;
   payment_month: number;
@@ -11,8 +12,8 @@ export interface CopySource {
   description: string | null;
 }
 
-export const recipientKey = (h: Pick<CopySource, 'teacher_id' | 'staff_id'>) =>
-  h.staff_id ? `staff:${h.staff_id}` : `teacher:${h.teacher_id}`;
+export const recipientKey = (h: Pick<CopySource, 'teacher_id' | 'staff_id' | 'instructor_id'>) =>
+  h.instructor_id ? `instructor:${h.instructor_id}` : h.staff_id ? `staff:${h.staff_id}` : `teacher:${h.teacher_id}`;
 
 /** Periode berikutnya (Desember → Januari tahun depan). */
 export const nextPeriod = (month: number, year: number) =>
@@ -24,14 +25,14 @@ export const prevPeriod = (month: number, year: number) =>
 
 const pad = (n: number, w: number) => String(n).padStart(w, '0');
 
-/** Nomor kwitansi `HON/<tahun>/<bulan>/<4 digit>` yang tidak bentrok dengan `used` (ditambah otomatis). */
-export function uniqueReceiptNumber(year: number, month: number, used: Set<string>, rand: () => number = Math.random) {
+/** Nomor kwitansi `<prefix>/<tahun>/<bulan>/<4 digit>` (prefix HON = GTT/PTT, EKS = ekskul) yang tidak bentrok dengan `used` (ditambah otomatis). */
+export function uniqueReceiptNumber(year: number, month: number, used: Set<string>, rand: () => number = Math.random, prefix = 'HON') {
   for (let i = 0; i < 200; i++) {
-    const n = `HON/${year}/${pad(month, 2)}/${pad(Math.floor(rand() * 10000), 4)}`;
+    const n = `${prefix}/${year}/${pad(month, 2)}/${pad(Math.floor(rand() * 10000), 4)}`;
     if (!used.has(n)) { used.add(n); return n; }
   }
   // sangat jarang: ruang 10.000 nomor/bulan penuh → beri akhiran urut
-  const base = `HON/${year}/${pad(month, 2)}/${pad(Math.floor(rand() * 10000), 4)}`;
+  const base = `${prefix}/${year}/${pad(month, 2)}/${pad(Math.floor(rand() * 10000), 4)}`;
   for (let k = 2; ; k++) {
     const n = `${base}-${k}`;
     if (!used.has(n)) { used.add(n); return n; }
@@ -39,8 +40,7 @@ export function uniqueReceiptNumber(year: number, month: number, used: Set<strin
 }
 
 export interface CopyRow {
-  teacher_id: string | null;
-  staff_id: string | null;
+  [recipientField: string]: unknown; // kolom penerima (teacher_id/staff_id atau instructor_id)
   honorarium_amount: number;
   tax_percentage: number;
   tax_amount: number;
@@ -62,12 +62,17 @@ export function buildCopyRows(opts: {
   targetMonth: number;
   targetYear: number;
   receiptDate: string;
-  existing: Pick<CopySource, 'teacher_id' | 'staff_id' | 'payment_month' | 'payment_year'>[];
+  existing: Pick<CopySource, 'teacher_id' | 'staff_id' | 'instructor_id' | 'payment_month' | 'payment_year'>[];
   usedReceiptNumbers: Iterable<string>;
   userId: string | undefined;
   rand?: () => number;
+  /** Awalan nomor kwitansi; bawaan HON (GTT/PTT). */
+  numberPrefix?: string;
+  /** Kolom penerima pada baris baru; bawaan teacher_id/staff_id (GTT/PTT). */
+  recipientFields?: (s: CopySource) => Record<string, unknown>;
 }) {
-  const { sources, targetMonth, targetYear, receiptDate, userId, rand } = opts;
+  const { sources, targetMonth, targetYear, receiptDate, userId, rand, numberPrefix = 'HON' } = opts;
+  const recipientFields = opts.recipientFields ?? ((s: CopySource) => ({ teacher_id: s.staff_id ? null : s.teacher_id ?? null, staff_id: s.staff_id ?? null }));
   const have = new Set(
     opts.existing.filter((e) => e.payment_month === targetMonth && e.payment_year === targetYear).map(recipientKey),
   );
@@ -82,15 +87,14 @@ export function buildCopyRows(opts: {
     const pct = Number(s.tax_percentage) || 0;
     const tax = amount * (pct / 100);
     rows.push({
-      teacher_id: s.staff_id ? null : s.teacher_id,
-      staff_id: s.staff_id ?? null,
+      ...recipientFields(s),
       honorarium_amount: amount,
       tax_percentage: pct,
       tax_amount: tax,
       net_amount: amount - tax,
       payment_month: targetMonth,
       payment_year: targetYear,
-      receipt_number: uniqueReceiptNumber(targetYear, targetMonth, used, rand),
+      receipt_number: uniqueReceiptNumber(targetYear, targetMonth, used, rand, numberPrefix),
       receipt_date: receiptDate,
       description: s.description,
       created_by: userId,

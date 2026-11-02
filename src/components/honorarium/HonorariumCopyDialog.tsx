@@ -14,6 +14,8 @@ import { buildCopyRows, nextPeriod, prevPeriod, recipientKey, type CopySource } 
 const MONTHS = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
 export interface CopyableHonorarium extends CopySource {
+  /** Keterangan tambahan di daftar (mis. nama ekskul). */
+  sub?: string;
   receipt_number: string;
   net_amount: number;
   name: string;
@@ -25,12 +27,18 @@ interface Props {
   honorariums: CopyableHonorarium[];
   userId: string | undefined;
   today: string; // yyyy-MM-dd
+  /** Tabel Supabase & kunci cache yang dimuat ulang setelah menyalin. */
+  table: string;
+  queryKey: string[];
+  /** Awalan nomor kwitansi (HON/EKS) dan kolom penerima baris baru (bawaan teacher_id/staff_id). */
+  numberPrefix?: string;
+  recipientFields?: (s: CopySource) => Record<string, unknown>;
 }
 
 const rupiah = (v: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(v);
 
 /** Salin banyak kwitansi dari satu bulan ke bulan lain sekaligus (mis. kwitansi bulanan rutin). */
-export function GttPttCopyDialog({ open, onOpenChange, honorariums, userId, today }: Props) {
+export function HonorariumCopyDialog({ open, onOpenChange, honorariums, userId, today, table, queryKey, numberPrefix, recipientFields }: Props) {
   const queryClient = useQueryClient();
   const now = new Date();
   const [tgtMonth, setTgtMonth] = useState(now.getMonth() + 1);
@@ -79,17 +87,17 @@ export function GttPttCopyDialog({ open, onOpenChange, honorariums, userId, toda
     mutationFn: async () => {
       const { rows, skipped } = buildCopyRows({
         sources: chosen, targetMonth: tgtMonth, targetYear: tgtYear, receiptDate,
-        existing: honorariums, usedReceiptNumbers: honorariums.map((h) => h.receipt_number), userId,
+        existing: honorariums, usedReceiptNumbers: honorariums.map((h) => h.receipt_number), userId, numberPrefix, recipientFields,
       });
       if (!rows.length) throw new Error('Tidak ada kwitansi baru yang bisa dibuat (semua penerima sudah punya kwitansi di bulan tujuan).');
       for (let i = 0; i < rows.length; i += 100) {
-        const { error } = await supabase.from('gtt_ptt_honorariums').insert(rows.slice(i, i + 100) as never);
+        const { error } = await supabase.from(table as never).insert(rows.slice(i, i + 100) as never);
         if (error) throw error;
       }
       return { made: rows.length, skipped: skipped.length };
     },
     onSuccess: ({ made, skipped }) => {
-      queryClient.invalidateQueries({ queryKey: ['gtt-ptt-honorariums'] });
+      queryClient.invalidateQueries({ queryKey });
       toast({ title: 'Berhasil', description: `${made} kwitansi disalin ke ${MONTHS[tgtMonth - 1]} ${tgtYear}${skipped ? `, ${skipped} dilewati (sudah ada)` : ''}` });
       onOpenChange(false);
     },
@@ -170,7 +178,7 @@ export function GttPttCopyDialog({ open, onOpenChange, honorariums, userId, toda
               return (
                 <label key={s.id} className={`flex items-center gap-3 px-3 py-2 text-sm ${exists ? 'opacity-60' : 'cursor-pointer hover:bg-muted/30'}`}>
                   <Checkbox checked={picked.has(s.id)} disabled={exists} onCheckedChange={() => toggle(s.id)} />
-                  <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                  <span className="min-w-0 flex-1 truncate">{s.name}{s.sub && <span className="text-muted-foreground"> · {s.sub}</span>}</span>
                   {exists && <Badge variant="secondary">Sudah ada di bulan tujuan</Badge>}
                   <span className="shrink-0 tabular-nums">{rupiah(Number(s.net_amount) || 0)}</span>
                 </label>
