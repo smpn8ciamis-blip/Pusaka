@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import {
-  Mail, Lock, User, BookOpen, FileText, GraduationCap, Search, Eye, EyeOff, ChevronRight, ArrowLeft,
+  Mail, Lock, User, BookOpen, FileText, GraduationCap, Search, Eye, EyeOff, ChevronRight, ArrowLeft, ClipboardCheck,
   Shield, AlertCircle, Info, AlertTriangle, CheckCircle, ShieldAlert, School,
 } from 'lucide-react';
 import { z } from 'zod';
@@ -188,7 +188,7 @@ function BrandLogos({ left, right, size = 'md' }: { left?: string | null; right?
 function BrandTitle({ title, note, school, tone = 'default' }: { title: string; note: string; school: string; tone?: 'default' | 'light' }) {
   const light = tone === 'light';
   return (
-    <div className="space-y-1.5">
+    <div className={cn(light ? 'space-y-2' : 'space-y-1.5')}>
       <h1 className={cn('font-bold tracking-tight', light ? 'text-4xl leading-tight xl:text-5xl' : 'text-2xl')}>{title}</h1>
       {note && (
         <p className={cn('max-w-[34ch] text-[13px] font-light italic leading-snug tracking-wide', light ? 'text-primary-foreground/80' : 'mx-auto text-muted-foreground')}>
@@ -196,7 +196,10 @@ function BrandTitle({ title, note, school, tone = 'default' }: { title: string; 
         </p>
       )}
       {school && (
-        <p className={cn('pt-1 text-[11px] font-medium uppercase tracking-[0.2em]', light ? 'text-primary-foreground/90' : 'text-muted-foreground')}>
+        <p className={cn(
+          'text-[11px] font-medium uppercase tracking-[0.2em]',
+          light ? 'mt-3 inline-flex rounded-full border border-white/25 bg-white/15 px-3.5 py-1.5 text-primary-foreground' : 'pt-1 text-muted-foreground',
+        )}>
           {school}
         </p>
       )}
@@ -441,24 +444,36 @@ export default function Auth() {
       )}
 
       <div className="grid w-full lg:grid-cols-2 xl:grid-cols-[1.1fr_1fr]">
-        {/* Panel merek (layar lebar) */}
-        <aside className="relative hidden flex-col justify-between overflow-hidden bg-gradient-to-br from-primary to-primary/75 p-10 text-primary-foreground lg:flex xl:p-14">
-          <div className="pointer-events-none absolute -right-24 -top-24 h-80 w-80 rounded-full bg-white/[0.07]" />
-          <div className="pointer-events-none absolute -bottom-32 -left-20 h-96 w-96 rounded-full bg-white/[0.05]" />
-          <div className="relative"><BrandLogos left={settings?.logo_url} right={settings?.right_logo_url} size="lg" /></div>
-          <div className="relative max-w-lg space-y-4">
+        {/* Panel merek (layar lebar): logo, judul, dan keunggulan dikelompokkan rapat di tengah */}
+        <aside className="relative hidden overflow-hidden bg-gradient-to-br from-primary via-primary to-primary/70 p-10 text-primary-foreground lg:flex lg:flex-col xl:p-14">
+          <div className="pointer-events-none absolute inset-0 opacity-[0.09] [background-image:radial-gradient(circle,#fff_1px,transparent_1px)] [background-size:22px_22px]" />
+          <div className="pointer-events-none absolute -right-28 -top-28 h-96 w-96 rounded-full bg-white/[0.07]" />
+          <div className="pointer-events-none absolute -bottom-36 -left-24 h-[28rem] w-[28rem] rounded-full bg-black/[0.06]" />
+
+          <div className="relative my-auto max-w-lg space-y-6">
+            <BrandLogos left={settings?.logo_url} right={settings?.right_logo_url} size="lg" />
             <BrandTitle title={brand.title} note={brand.note} school={brand.school} tone="light" />
-            <p className="text-sm leading-relaxed text-primary-foreground/80">
-              Satu pintu untuk administrasi akademik, kehadiran, nilai, dan layanan sekolah.
-            </p>
+            <ul className="grid gap-2.5 pt-3">
+              {[
+                { icon: GraduationCap, text: 'Akademik, nilai, dan rapor' },
+                { icon: ClipboardCheck, text: 'Kehadiran dan jadwal' },
+                { icon: FileText, text: 'Layanan dan surat online' },
+              ].map(({ icon: Icon, text }) => (
+                <li key={text} className="flex items-center gap-3 rounded-xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-medium">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/15"><Icon className="h-4 w-4" aria-hidden="true" /></span>
+                  {text}
+                </li>
+              ))}
+            </ul>
           </div>
+
           <Link to="/" className="relative inline-flex w-fit items-center gap-2 text-sm text-primary-foreground/85 transition-colors hover:text-primary-foreground">
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />Kembali ke website sekolah
           </Link>
         </aside>
 
         {/* Formulir */}
-        <section className="flex items-start justify-center px-4 py-8 sm:px-8 lg:items-center lg:py-12">
+        <section className="flex items-start justify-center bg-muted/40 px-4 py-8 sm:px-8 lg:items-center lg:py-10">
           <div className="w-full max-w-[420px] animate-fade-in space-y-6">
             {/* Kepala merek (ponsel/tablet) */}
             <div className="flex flex-col items-center gap-3 text-center lg:hidden">
@@ -472,7 +487,7 @@ export default function Auth() {
               <BrandTitle title={brand.title} note={brand.note} school={brand.school} />
             </div>
 
-            <Card className="rounded-2xl border bg-card shadow-sm">
+            <Card className="rounded-2xl border bg-card shadow-xl shadow-black/5">
               <Tabs defaultValue="login" className="w-full">
                 <CardHeader className="space-y-1 px-6 pb-2 pt-6 sm:px-8">
                   <TabsList className="grid h-11 w-full grid-cols-2 rounded-lg p-1">
