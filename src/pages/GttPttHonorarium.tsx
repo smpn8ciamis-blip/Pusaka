@@ -11,10 +11,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
-import { Plus, Eye, Trash2, FileText, Users, Wallet, Receipt, TrendingUp, Pencil, Search, ArrowUpDown } from 'lucide-react';
+import { Plus, Eye, Trash2, FileText, Users, Wallet, Receipt, TrendingUp, Pencil, Search, ArrowUpDown, Copy, CopyPlus } from 'lucide-react';
 import { format } from 'date-fns';
 import { id as idLocale } from 'date-fns/locale';
 import { GttPttHonorariumPreview } from '@/components/honorarium/GttPttHonorariumPreview';
+import { GttPttCopyDialog } from '@/components/honorarium/GttPttCopyDialog';
+import { nextPeriod } from '@/lib/honorariumCopy';
 
 interface Teacher {
   id: string;
@@ -67,6 +69,8 @@ export default function GttPttHonorarium() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [previewHonorarium, setPreviewHonorarium] = useState<Honorarium | null>(null);
   const [editingHonorarium, setEditingHonorarium] = useState<Honorarium | null>(null);
+  const [isCopying, setIsCopying] = useState(false);     // form tambah terisi dari kwitansi yang disalin
+  const [copyDialogOpen, setCopyDialogOpen] = useState(false); // salin banyak kwitansi dari bulan lain
   
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -228,6 +232,7 @@ export default function GttPttHonorarium() {
       queryClient.invalidateQueries({ queryKey: ['gtt-ptt-honorariums'] });
       toast({ title: 'Berhasil', description: 'Data honorarium berhasil disimpan' });
       resetForm();
+      setIsCopying(false);
       setIsDialogOpen(false);
     },
     onError: (error: any) => {
@@ -316,10 +321,28 @@ export default function GttPttHonorarium() {
     setIsDialogOpen(true);
   };
 
+  // Salin satu kwitansi: form tambah terisi data yang sama untuk bulan berikutnya (nomor kwitansi baru dibuat saat simpan).
+  const handleCopy = (honorarium: Honorarium) => {
+    const next = nextPeriod(honorarium.payment_month, honorarium.payment_year);
+    setEditingHonorarium(null);
+    setIsCopying(true);
+    setSelectedTeacherId(
+      honorarium.staff_id ? `staff:${honorarium.staff_id}` : `teacher:${honorarium.teacher_id}`
+    );
+    setHonorariumAmount(honorarium.honorarium_amount.toString());
+    setTaxPercentage(honorarium.tax_percentage.toString());
+    setPaymentMonth(next.month);
+    setPaymentYear(next.year);
+    setReceiptDate(format(new Date(), 'yyyy-MM-dd'));
+    setDescription(honorarium.description || '');
+    setIsDialogOpen(true);
+  };
+
   const handleDialogClose = (open: boolean) => {
     if (!open) {
       resetForm();
       setEditingHonorarium(null);
+      setIsCopying(false);
     }
     setIsDialogOpen(open);
   };
@@ -442,6 +465,11 @@ export default function GttPttHonorarium() {
             <h1 className="text-2xl font-bold tracking-tight">Honorarium GTT/PTT</h1>
             <p className="text-muted-foreground">Kelola pembayaran honorarium guru tidak tetap dan pegawai tidak tetap</p>
           </div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button variant="outline" onClick={() => setCopyDialogOpen(true)} disabled={honorariums.length === 0}>
+            <CopyPlus className="h-4 w-4 mr-2" />
+            Salin dari Bulan Lain
+          </Button>
           <Dialog open={isDialogOpen} onOpenChange={handleDialogClose}>
             <DialogTrigger asChild>
               <Button>
@@ -452,7 +480,7 @@ export default function GttPttHonorarium() {
             <DialogContent className="max-w-lg">
               <DialogHeader>
                 <DialogTitle>
-                  {editingHonorarium ? 'Edit Honorarium GTT/PTT' : 'Tambah Honorarium GTT/PTT'}
+                  {editingHonorarium ? 'Edit Honorarium GTT/PTT' : isCopying ? 'Salin Kwitansi Honorarium GTT/PTT' : 'Tambah Honorarium GTT/PTT'}
                 </DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
@@ -586,6 +614,7 @@ export default function GttPttHonorarium() {
               </div>
             </DialogContent>
           </Dialog>
+          </div>
         </div>
 
         {/* Statistics Cards */}
@@ -762,6 +791,14 @@ export default function GttPttHonorarium() {
                           <Button
                             size="icon"
                             variant="ghost"
+                            onClick={() => handleCopy(honorarium)}
+                            title="Salin kwitansi (bulan berikutnya)"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
                             onClick={() => handleEdit(honorarium)}
                             title="Edit"
                           >
@@ -790,6 +827,19 @@ export default function GttPttHonorarium() {
           </CardContent>
         </Card>
       </div>
+
+      <GttPttCopyDialog
+        open={copyDialogOpen}
+        onOpenChange={setCopyDialogOpen}
+        userId={user?.id}
+        today={format(new Date(), 'yyyy-MM-dd')}
+        honorariums={honorariums.map((h) => ({
+          id: h.id, teacher_id: h.teacher_id, staff_id: h.staff_id,
+          honorarium_amount: h.honorarium_amount, tax_percentage: h.tax_percentage,
+          payment_month: h.payment_month, payment_year: h.payment_year, description: h.description,
+          receipt_number: h.receipt_number, net_amount: h.net_amount, name: recipientName(h),
+        }))}
+      />
 
       {/* Preview Dialog */}
       {previewHonorarium && schoolSettings && (
