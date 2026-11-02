@@ -49,6 +49,8 @@ function PiketPage({ shift }: { shift: PiketShift }) {
   const [periodicOpen, setPeriodicOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [signDate, setSignDate] = useState(""); // titimangsa manual; kosong = akhir bulan periode
+  const [signCity, setSignCity] = useState("");  // kosong = kota sekolah
   const [showIgnored, setShowIgnored] = useState(false);
   const [bulkKeys, setBulkKeys] = useState<string[]>([]);
 
@@ -298,7 +300,9 @@ function PiketPage({ shift }: { shift: PiketShift }) {
     await sync({ silent: true });
   };
 
-  const buildPdf = () => buildPiketPdf({ rows, shift, ym, school, punches, cfg: piketCfg });
+  useEffect(() => { setSignDate(""); }, [ym]); // ganti bulan → kembali ke default akhir bulan
+  const defaultSignDate = monthRange(ym).to;
+  const buildPdf = () => buildPiketPdf({ rows, shift, ym, school, punches, cfg: piketCfg, signDate: signDate || defaultSignDate, signCity });
 
   const mainRows = rows;
 
@@ -480,6 +484,20 @@ function PiketPage({ shift }: { shift: PiketShift }) {
         title={`Pratinjau Daftar Hadir ${SHIFT_LABEL[shift]} — ${bulanLabel(ym)}`}
         filename={`daftar-hadir-${shift}-${ym}.pdf`}
         build={buildPdf}
+        rebuildKey={`${signDate}|${signCity}|${ym}`}
+        toolbar={(
+          <div className="flex flex-wrap items-end gap-3 rounded-md border bg-muted/30 p-3">
+            <div>
+              <Label className="text-xs">Tempat titimangsa</Label>
+              <Input value={signCity} onChange={(e) => setSignCity(e.target.value)} placeholder={school?.city || "Ciamis"} className="w-44" />
+            </div>
+            <div>
+              <Label className="text-xs">Tanggal titimangsa</Label>
+              <Input type="date" value={signDate || defaultSignDate} onChange={(e) => setSignDate(e.target.value)} className="w-44" />
+            </div>
+            <p className="max-w-xs text-xs text-muted-foreground">Tanggal tanda tangan diatur manual, tidak mengikuti tanggal cetak. Awalnya terisi akhir bulan periode.</p>
+          </div>
+        )}
       />
 
       <PiketPeriodicDialog
