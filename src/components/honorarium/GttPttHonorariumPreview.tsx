@@ -19,9 +19,18 @@ interface Teacher {
   } | null;
 }
 
+interface StaffRecipient {
+  id: string;
+  full_name: string;
+  nip: string | null;
+  position: string | null;
+  staff_type: string;
+}
+
 interface Honorarium {
   id: string;
-  teacher_id: string;
+  teacher_id: string | null;
+  staff_id?: string | null;
   honorarium_amount: number;
   tax_percentage: number;
   tax_amount: number;
@@ -31,7 +40,8 @@ interface Honorarium {
   receipt_number: string;
   receipt_date: string;
   description: string | null;
-  teachers: Teacher;
+  teachers: Teacher | null;
+  staff?: StaffRecipient | null;
 }
 
 interface SchoolSettings {
@@ -114,6 +124,13 @@ export function GttPttHonorariumPreview({ honorarium, schoolSettings, open, onOp
     }).format(value);
   };
 
+  const recipientName = honorarium.staff?.full_name || honorarium.teachers?.profiles?.full_name || '';
+  const recipientNip = honorarium.staff?.nip || honorarium.teachers?.nip || null;
+  const recipientNuptk = honorarium.staff ? null : honorarium.teachers?.nuptk || null;
+  const recipientJabatan = honorarium.staff
+    ? honorarium.staff.position || (honorarium.staff.staff_type === 'tata_usaha' ? 'Tata Usaha' : 'Karyawan')
+    : recipientJabatan;
+
   const receiptDateFormatted = format(new Date(honorarium.receipt_date), 'd MMMM yyyy', { locale: idLocale });
   const periodText = `${MONTHS[honorarium.payment_month - 1]} ${honorarium.payment_year}`;
 
@@ -183,26 +200,26 @@ export function GttPttHonorariumPreview({ honorarium, schoolSettings, open, onOp
 
     // Nama penerima
     doc.text('Nama penerima', 20, y);
-    doc.text(`: ${honorarium.teachers?.profiles?.full_name || 'N/A'}`, 70, y);
+    doc.text(`: ${recipientName || 'N/A'}`, 70, y);
     y += 7;
 
     // NIP if available
-    if (honorarium.teachers?.nip) {
+    if (recipientNip) {
       doc.text('NIP', 20, y);
-      doc.text(`: ${honorarium.teachers.nip}`, 70, y);
+      doc.text(`: ${recipientNip}`, 70, y);
       y += 7;
     }
 
     // NUPTK if available
-    if (honorarium.teachers?.nuptk) {
+    if (recipientNuptk) {
       doc.text('NUPTK', 20, y);
-      doc.text(`: ${honorarium.teachers.nuptk}`, 70, y);
+      doc.text(`: ${recipientNuptk}`, 70, y);
       y += 7;
     }
 
     // Jabatan
     doc.text('Jabatan', 20, y);
-    doc.text(`: ${honorarium.teachers?.jabatan || honorarium.teachers?.subject || '-'}`, 70, y);
+    doc.text(`: ${recipientJabatan}`, 70, y);
     y += 15;
 
     // Amount table
@@ -282,14 +299,14 @@ export function GttPttHonorariumPreview({ honorarium, schoolSettings, open, onOp
     doc.text(`Ciamis, ${receiptDateFormatted}`, rightX, signatureY, { align: 'center' });
     doc.text('Penerima', rightX, signatureY + 5, { align: 'center' });
     doc.setFont('helvetica', 'bold');
-    doc.text(honorarium.teachers?.profiles?.full_name || '(___________________)', rightX, signatureY + 30, { align: 'center' });
+    doc.text(recipientName || '(___________________)', rightX, signatureY + 30, { align: 'center' });
     doc.setFont('helvetica', 'normal');
     // NUPTK di bawah nama penerima
-    if (honorarium.teachers?.nuptk) {
-      doc.text(`NUPTK. ${honorarium.teachers.nuptk}`, rightX, signatureY + 35, { align: 'center' });
+    if (recipientNuptk) {
+      doc.text(`NUPTK. ${recipientNuptk}`, rightX, signatureY + 35, { align: 'center' });
     }
 
-    doc.save(`Kwitansi_Honorarium_${honorarium.teachers?.profiles?.full_name || 'GTT'}_${periodText}.pdf`);
+    doc.save(`Kwitansi_Honorarium_${recipientName || 'GTT'}_${periodText}.pdf`);
   };
 
   return (
@@ -358,23 +375,23 @@ export function GttPttHonorariumPreview({ honorarium, schoolSettings, open, onOp
             </div>
             <div className="grid grid-cols-[150px_1fr]">
               <span>Nama penerima</span>
-              <span>: {honorarium.teachers?.profiles?.full_name || 'N/A'}</span>
+              <span>: {recipientName || 'N/A'}</span>
             </div>
-            {honorarium.teachers?.nip && (
+            {recipientNip && (
               <div className="grid grid-cols-[150px_1fr]">
                 <span>NIP</span>
-                <span>: {honorarium.teachers.nip}</span>
+                <span>: {recipientNip}</span>
               </div>
             )}
-            {honorarium.teachers?.nuptk && (
+            {recipientNuptk && (
               <div className="grid grid-cols-[150px_1fr]">
                 <span>NUPTK</span>
-                <span>: {honorarium.teachers.nuptk}</span>
+                <span>: {recipientNuptk}</span>
               </div>
             )}
             <div className="grid grid-cols-[150px_1fr]">
               <span>Jabatan</span>
-              <span>: {honorarium.teachers?.jabatan || honorarium.teachers?.subject || '-'}</span>
+              <span>: {recipientJabatan}</span>
             </div>
           </div>
 
@@ -431,9 +448,9 @@ export function GttPttHonorariumPreview({ honorarium, schoolSettings, open, onOp
               <p>Ciamis, {receiptDateFormatted}</p>
               <p>Penerima</p>
               <div className="h-16"></div>
-              <p className="font-bold">{honorarium.teachers?.profiles?.full_name || '(___________________)'}</p>
-              {honorarium.teachers?.nuptk && (
-                <p>NUPTK. {honorarium.teachers.nuptk}</p>
+              <p className="font-bold">{recipientName || '(___________________)'}</p>
+              {recipientNuptk && (
+                <p>NUPTK. {recipientNuptk}</p>
               )}
             </div>
           </div>
