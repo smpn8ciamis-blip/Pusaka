@@ -845,7 +845,7 @@ const Attendance = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['attendance-records'] });
-      toast.success('✓ Absensi berhasil disimpan');
+      toast.success('✓ Absensi berhasil disimpan dan otomatis tercatat pada guru lain di kelas & hari yang sama');
       notifyBotIfAttendanceComplete();
       setIsDialogOpen(false);
       setAttendanceData({});

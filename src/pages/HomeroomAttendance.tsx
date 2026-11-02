@@ -627,7 +627,7 @@ const HomeroomAttendance = () => {
           .map((schedule) => ({
             teacher_id: schedule.teacher_id,
             student_id: null,
-            message: `Absensi jam pertama kelas ${homeroomClass?.name} telah diisi. Data tersedia sebagai default untuk ${schedule.subject}.`,
+            message: `Absensi kelas ${homeroomClass?.name} telah diisi wali kelas dan otomatis tercatat pada jadwal ${schedule.subject}. Anda dapat mengubahnya bila ada siswa yang berbeda.`,
             type: 'attendance_ready',
             is_read: false,
           }));
