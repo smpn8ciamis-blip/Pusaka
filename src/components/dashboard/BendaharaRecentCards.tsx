@@ -188,7 +188,7 @@ export function BendaharaRecentCards({
   }));
 
   const gttPttItems: ActivityItem[] = recentGttPtt.map((g) => {
-    const teacherName = g.teachers?.profiles?.full_name || "Unknown";
+    const teacherName = g.staff?.full_name || g.teachers?.profiles?.full_name || "Unknown";
     return {
       id: g.id,
       title: teacherName,
