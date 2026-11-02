@@ -542,6 +542,7 @@ function ReminderTab() {
   const [assignFu, setAssignFu] = useState(true);
   const [parentQuery, setParentQuery] = useState(true);
   const [violationWa, setViolationWa] = useState(true);
+  const [ekskulWa, setEkskulWa] = useState(true);
   const [assignFuTime, setAssignFuTime] = useState('09:00');
   const [wkOn, setWkOn] = useState(false);
   const [wkDay, setWkDay] = useState('6');
@@ -578,6 +579,7 @@ function ReminderTab() {
       setAssignFu(data.assignment_followup_enabled !== false);
       setParentQuery(data.parent_query_enabled !== false);
       setViolationWa(data.violation_wa_enabled !== false);
+      setEkskulWa(data.ekskul_journal_wa_enabled !== false);
       setAssignFuTime(String(data.assignment_followup_time || '09:00').slice(0, 5));
       setWkOn(!!data.weekly_absence_enabled);
       setWkDay(String(data.weekly_absence_day || 6));
@@ -608,6 +610,7 @@ function ReminderTab() {
         assignment_followup_enabled: assignFu,
         parent_query_enabled: parentQuery,
         violation_wa_enabled: violationWa,
+        ekskul_journal_wa_enabled: ekskulWa,
         assignment_followup_time: /^\d{2}:\d{2}$/.test(assignFuTime) ? assignFuTime : '09:00',
         weekly_absence_enabled: wkOn,
         weekly_absence_day: Math.min(7, Math.max(1, parseInt(wkDay, 10) || 6)),
@@ -820,6 +823,15 @@ function ReminderTab() {
           </div>
           <p className="text-xs text-muted-foreground">
             Orang tua yang nomornya sudah tertaut ke siswa (kirim <b>DAFTAR</b> ke bot, lalu isi NISN dan tanggal lahir) dapat mengetik <b>cek poin</b> untuk melihat total poin dan rincian pelanggaran, atau <b>absen</b> untuk rekap kehadiran 30 hari terakhir. Nomor yang belum tertaut dibalas petunjuk menautkan. Bot hanya menjawab saat dichat (tidak memeriksa berkala). Isi balasan bisa diubah di tab Template.
+          </p>
+        </div>
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="ek-en">Pembina ekskul mengisi jurnal &amp; mengirim foto kegiatan lewat WA</Label>
+            <Switch id="ek-en" checked={ekskulWa} onCheckedChange={setEkskulWa} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Pembina mengetik <b>JURNAL</b> ke bot, menjawab pertanyaan satu per satu (tanggal, judul, uraian, jumlah hadir, lokasi, evaluasi), mengetik <b>OK</b>, lalu mengirim foto kegiatan (maks. 10) dan mengetik <b>SELESAI</b>. Ketik <b>FOTO</b> untuk menambah foto ke jurnal yang sudah ada. Bot mengenali pembina dari <b>nomor HP di profil akun</b> (atau data staf) yang sama dengan nomor WhatsApp pengirim dan sudah ditugaskan sebagai pembina ekskul oleh kesiswaan/admin. Jurnal dan foto langsung muncul di menu Jurnal Ekskul.
           </p>
         </div>
         <Button onClick={() => save.mutate()} disabled={save.isPending}>

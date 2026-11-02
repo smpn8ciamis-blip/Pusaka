@@ -325,7 +325,8 @@ const DEFAULT_BOT_SETTINGS = {
     weekly_absence_time: '13:00',     // jam kirim (WIB)
     weekly_absence_threshold: 3,      // "sering": total hari tidak hadir >= nilai ini, atau alfa >= 2
     weekly_absence_to_group: false,   // kirim juga ringkasan siswa yang sering tidak hadir ke grup rekap
-    violation_wa_enabled: true        // WA ke orang tua (nomor tertaut) saat siswa mendapat catatan pelanggaran baru
+    violation_wa_enabled: true,       // WA ke orang tua (nomor tertaut) saat siswa mendapat catatan pelanggaran baru
+    ekskul_journal_wa_enabled: true   // pembina ekskul (nomor HP profil cocok) bisa isi jurnal & kirim foto kegiatan lewat chat bot
 };
 const CONFIG_TTL_MS = 30 * 1000;
 let templateCache = { at: 0, rows: new Map() };
@@ -486,6 +487,11 @@ async function startBot() {
             // Foto yang membalas (reply) notifikasi surat tugas = unggah bukti kunjungan.
             const imgMsg = messageContent.imageMessage;
             if (imgMsg) {
+                // Pembina ekskul yang sedang dalam sesi jurnal/foto: foto masuk ke jurnal ekskul.
+                if (ekskulSessions.has(from)) {
+                    const took = await handleEkskulPhoto(msg, imgMsg, from).catch(function(e) { console.error('[EKSKUL WA]', e.message); return true; });
+                    if (took) continue;
+                }
                 const stanzaId = imgMsg.contextInfo && imgMsg.contextInfo.stanzaId;
                 if (stanzaId) await handleNoticePhotoReply(msg, imgMsg, stanzaId, from);
                 continue;
@@ -495,6 +501,11 @@ async function startBot() {
             const cleanText = text.toLowerCase();
             const senderPhone = getSenderPhoneNumber(msg);
             await sock.readMessages([msg.key]).catch(() => {});
+            // Pembina ekskul: JURNAL / FOTO dan seluruh jawaban selama sesi. Dicek paling awal agar jawaban bebas (mis. "cek ...") tidak tertukar perintah lain.
+            if (ekskulSessions.has(from) || ekskulCommand(cleanText)) {
+                const handled = await handleEkskulMessage(msg, from, text, cleanText, senderPhone).catch(function(e) { console.error('[EKSKUL WA]', e.message); try { ekskulReplyFn(from, msg)('⚠️ Terjadi gangguan. Coba lagi nanti.'); } catch (x) {} return true; });
+                if (handled) continue;
+            }
             // Orang tua (nomor sudah tertaut): "cek poin" / "absen". Dicek lebih dulu karena "cek ..." juga dipakai perintah admin.
             const parentCmd = parentCommand(cleanText);
             if (parentCmd) { await handleParentQuery(parentCmd, msg, from).catch(function(e) { console.error('[ORTU WA]', e.message); }); continue; }
@@ -1367,6 +1378,315 @@ async function doNoticePhotoReply(msg, img, stanzaId, from) {
     const now = have + 1;
     reply('✅ Foto bukti kunjungan diterima (' + now + '/' + NOTICE_MAX_PHOTOS + ') untuk surat tugas No. ' + lt.data.letter_number + '. Foto sudah masuk ke akun Pusaka Anda.' + (now >= NOTICE_MAX_PHOTOS ? '\nBatas foto tercapai.' : ' Kirim foto lain dengan membalas pesan notifikasi yang sama.'));
 }
+
+// ===================== PEMBINA EKSKUL: ISI JURNAL & KIRIM FOTO KEGIATAN LEWAT WA =====================
+// Pembina mengetik JURNAL -> bot menanyakan satu per satu -> OK menyimpan -> kirim foto (maks. 10) -> SELESAI.
+// Ketik FOTO untuk menambah foto ke jurnal yang sudah ada. Identitas = nomor WA pengirim yang cocok dengan nomor HP
+// di profil/staf akun yang DITUGASKAN sebagai pembina (tabel extracurricular_coaches). Sesi disimpan di memori.
+// BEGIN-EKSKUL-WA
+const EKSKUL_SESSION_TTL = 30 * 60 * 1000;   // mengisi jurnal: 30 menit tanpa balasan = sesi batal
+const EKSKUL_PHOTO_TTL = 60 * 60 * 1000;     // menunggu foto setelah jurnal tersimpan
+const EKSKUL_MAX_PHOTOS = 10;                // per jurnal
+const EKSKUL_MAX_BACKDAYS = 60;              // tanggal jurnal paling lama 60 hari ke belakang
+const EKSKUL_CMD_GAP_MS = 3000;
+const EKSKUL_BUCKET = 'ekskul-journal-photos';
+const ekskulSessions = new Map();            // chat JID -> sesi
+const ekskulCmdLast = new Map();
+const ekskulPhotoChains = new Map();         // id jurnal -> antrean simpan foto (batas 10 tidak terlewati saat album masuk bersamaan)
+
+function ekskulCommand(cleanText) {
+    const t = String(cleanText).replace(/\s+/g, ' ').trim();
+    if (['jurnal', 'jurnal ekskul', 'jurnal eskul', 'isi jurnal'].indexOf(t) !== -1) return 'jurnal';
+    if (['foto', 'foto ekskul', 'foto eskul', 'kirim foto'].indexOf(t) !== -1) return 'foto';
+    return null;
+}
+function ekskulClean(t, max) { return String(t == null ? '' : t).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').trim().slice(0, max); }
+function ekskulOptional(t, max) {
+    const c = ekskulClean(t, max);
+    return (!c || ['-', '--', 'skip', 'lewati', 'tidak ada', 'kosong'].indexOf(c.toLowerCase()) !== -1) ? null : c;
+}
+function ekskulParseDate(text, today) {
+    const t = String(text).trim().toLowerCase();
+    if (t === '1' || t === 'hari ini') return { date: today };
+    if (t === '2' || t === 'kemarin') return { date: addDaysIso(today, -1) };
+    const iso = parseInputDate(t);
+    if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return { error: 'format' };
+    const d = new Date(iso + 'T00:00:00Z');
+    if (isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== iso) return { error: 'format' };
+    if (iso > today) return { error: 'future' };
+    if (iso < addDaysIso(today, -EKSKUL_MAX_BACKDAYS)) return { error: 'old' };
+    return { date: iso };
+}
+function ekskulParseCounts(text) {
+    const nums = String(text).match(/\d+/g) || [];
+    if (!nums.length || nums.length > 2) return null;
+    const present = parseInt(nums[0], 10), absent = nums.length > 1 ? parseInt(nums[1], 10) : 0;
+    if (present > 500 || absent > 500) return null;
+    return { present: present, absent: absent };
+}
+const EKSKUL_PROMPTS = {
+    DATE: '📅 *Tanggal kegiatan?*\nKetik *1* = hari ini, *2* = kemarin, atau tanggal *DDMMYYYY* (contoh 28102026).',
+    TITLE: '📝 *Judul / nama kegiatan?*\n(contoh: Latihan baris-berbaris)',
+    DESC: '🗒️ *Uraian kegiatan:* apa saja yang dilakukan pada pertemuan ini?',
+    COUNT: '👥 *Jumlah siswa hadir dan tidak hadir?*\nContoh: *18 2* (18 hadir, 2 tidak hadir). Ketik *18* saja bila semua hadir.',
+    LOC: '📍 *Lokasi kegiatan?* (ketik *-* untuk lewati)',
+    EVAL: '✅ *Evaluasi / catatan pembina?* (ketik *-* untuk lewati)'
+};
+function ekskulSummary(s) {
+    const d = s.data;
+    return '📋 *RINGKASAN JURNAL*\n\nEkskul: ' + s.type.name + '\nTanggal: ' + ddmmyyyy(d.date) + '\nKegiatan: ' + d.title + '\nUraian: ' + d.desc +
+        '\nHadir: ' + d.present + ' | Tidak hadir: ' + d.absent + '\nLokasi: ' + (d.loc || '-') + '\nEvaluasi: ' + (d.evalText || '-') +
+        (s.photos.length ? '\nFoto menunggu: ' + s.photos.length : '') + '\n\nKetik *OK* untuk menyimpan, atau *BATAL*.';
+}
+// Pembina = akun yang nomor HP-nya (profil atau staf) sama dengan nomor pengirim DAN punya penugasan ekskul.
+async function ekskulFindCoach(senderPhone) {
+    const variants = phoneVariants(senderPhone);
+    const ids = [];
+    const pRes = await supabase.from('profiles').select('id').in('phone', variants);
+    if (pRes.error) throw pRes.error;
+    (pRes.data || []).forEach(function(x) { if (ids.indexOf(x.id) === -1) ids.push(x.id); });
+    const sRes = await supabase.from('staff').select('user_id').in('phone', variants).not('user_id', 'is', null);
+    if (!sRes.error) (sRes.data || []).forEach(function(x) { if (ids.indexOf(x.user_id) === -1) ids.push(x.user_id); });
+    if (!ids.length) return null;
+    const cRes = await supabase.from('extracurricular_coaches')
+        .select('user_id, school_id, extracurricular_types(id, name, school_id, is_active)').in('user_id', ids);
+    if (cRes.error) throw cRes.error;
+    const rows = (cRes.data || []).filter(function(r) { return r.extracurricular_types && r.extracurricular_types.is_active !== false; });
+    if (!rows.length) return null;
+    const userId = rows[0].user_id;                         // beberapa akun satu nomor: pakai akun pertama yang punya penugasan
+    const types = rows.filter(function(r) { return r.user_id === userId; }).map(function(r) {
+        return { id: r.extracurricular_types.id, name: r.extracurricular_types.name, school_id: r.school_id || r.extracurricular_types.school_id || null };
+    }).sort(function(a, b) { return a.name.localeCompare(b.name); });
+    const pf = await supabase.from('profiles').select('full_name').eq('id', userId).maybeSingle();
+    return { userId: userId, name: (pf.data && pf.data.full_name) || null, types: types };
+}
+function ekskulNewSession(coach) { return { coach: coach, at: Date.now(), step: 'DATE', type: null, data: {}, photos: [], journal: null, ackTimer: null, ackOk: 0, ackFail: [] }; }
+function ekskulTouch(s) { s.at = Date.now(); }
+function ekskulEnd(from) { const s = ekskulSessions.get(from); if (s && s.ackTimer) clearTimeout(s.ackTimer); ekskulSessions.delete(from); }
+
+function ekskulReplyFn(from, msg) {
+    return function(t) { enqueueTask(function() { return sendSafeMessage(from, { text: t }, { quoted: msg }); }, { to: from, kind: 'balasan' }); };
+}
+
+// Pesan teks. Mengembalikan true bila pesan sudah ditangani (tidak diteruskan ke perintah lain).
+async function handleEkskulMessage(msg, from, text, cleanText, senderPhone) {
+    const cmd = ekskulCommand(cleanText);
+    let s = ekskulSessions.get(from);
+    if (s && Date.now() - s.at > (s.step === 'PHOTOS' ? EKSKUL_PHOTO_TTL : EKSKUL_SESSION_TTL)) { ekskulEnd(from); s = null; }
+    if (!s && !cmd) return false;
+    const cfg = await getBotSettings();
+    if (!cfg.ekskul_journal_wa_enabled) { ekskulEnd(from); return false; }
+    const reply = ekskulReplyFn(from, msg);
+    const t = String(cleanText).trim();
+
+    if (s && (t === 'batal' || t === 'batalkan')) { ekskulEnd(from); reply('Pengisian jurnal ekskul dibatalkan.'); return true; }
+
+    // ---- perintah baru (belum ada sesi, atau sedang menunggu foto) ----
+    if (cmd && (!s || s.step === 'PHOTOS')) {
+        if (Date.now() - (ekskulCmdLast.get(from) || 0) < EKSKUL_CMD_GAP_MS) return true;
+        ekskulCmdLast.set(from, Date.now());
+        if (ekskulCmdLast.size > 2000) ekskulCmdLast.clear();
+        if (!senderPhone) { if (cmd === 'jurnal') reply('Nomor WhatsApp Anda tidak terbaca. Coba lagi lewat chat langsung.'); return cmd === 'jurnal'; }
+        const coach = await ekskulFindCoach(senderPhone);
+        if (!coach) {
+            if (cmd === 'jurnal') reply('Nomor WhatsApp ini belum dikenali sebagai pembina ekskul.\n\nPastikan: (1) nomor HP di profil akun Pusaka Anda sama dengan nomor WhatsApp ini, dan (2) kesiswaan sudah menugaskan Anda sebagai pembina ekskul.');
+            return cmd === 'jurnal';                         // "foto" dari non-pembina: abaikan tanpa membalas
+        }
+        if (s) ekskulEnd(from);
+        s = ekskulNewSession(coach);
+        ekskulSessions.set(from, s);
+        if (cmd === 'jurnal') {
+            if (coach.types.length === 1) {
+                s.type = coach.types[0];
+                reply('📝 *JURNAL EKSKUL* - ' + s.type.name + '\nKetik *BATAL* kapan saja untuk membatalkan.\n\n' + EKSKUL_PROMPTS.DATE);
+            } else {
+                s.step = 'PICK_TYPE';
+                reply('📝 *JURNAL EKSKUL*\nKetik *BATAL* kapan saja untuk membatalkan.\n\nPilih ekskul (balas nomor):\n' + coach.types.map(function(x, i) { return (i + 1) + '. ' + x.name; }).join('\n'));
+            }
+            return true;
+        }
+        // cmd === 'foto': pilih jurnal yang sudah ada
+        const ids = coach.types.map(function(x) { return x.id; });
+        const jr = await supabase.from('extracurricular_journals').select('id, title, meeting_date, school_id, extracurricular_type_id')
+            .in('extracurricular_type_id', ids).order('meeting_date', { ascending: false }).order('created_at', { ascending: false }).limit(5);
+        if (jr.error) throw jr.error;
+        if (!(jr.data || []).length) { ekskulEnd(from); reply('Belum ada jurnal ekskul. Ketik *JURNAL* untuk membuat jurnal baru.'); return true; }
+        s.step = 'PICK_JOURNAL'; s.choices = jr.data;
+        const nameOf = function(id) { const x = coach.types.find(function(y) { return y.id === id; }); return x ? x.name : ''; };
+        reply('📷 *TAMBAH FOTO KEGIATAN*\nPilih jurnal (balas nomor):\n' + jr.data.map(function(j, i) { return (i + 1) + '. ' + ddmmyyyy(j.meeting_date) + ' - ' + j.title + ' (' + nameOf(j.extracurricular_type_id) + ')'; }).join('\n'));
+        return true;
+    }
+    if (!s) return false;
+    ekskulTouch(s);
+
+    // ---- langkah-langkah ----
+    if (s.step === 'PICK_TYPE') {
+        const n = parseInt(t, 10);
+        if (!(n >= 1 && n <= s.coach.types.length)) { reply('Balas dengan nomor ekskul (1-' + s.coach.types.length + ') atau *BATAL*.'); return true; }
+        s.type = s.coach.types[n - 1]; s.step = 'DATE';
+        reply('Ekskul: *' + s.type.name + '*\n\n' + EKSKUL_PROMPTS.DATE);
+        return true;
+    }
+    if (s.step === 'PICK_JOURNAL') {
+        const n = parseInt(t, 10);
+        if (!(n >= 1 && n <= (s.choices || []).length)) { reply('Balas dengan nomor jurnal (1-' + (s.choices || []).length + ') atau *BATAL*.'); return true; }
+        const j = s.choices[n - 1];
+        s.journal = { id: j.id, title: j.title, school_id: j.school_id, type_id: j.extracurricular_type_id };
+        s.step = 'PHOTOS';
+        reply('📷 Kirim foto kegiatan untuk jurnal *' + j.title + '* (' + ddmmyyyy(j.meeting_date) + '), maksimal ' + EKSKUL_MAX_PHOTOS + ' foto. Ketik *SELESAI* bila sudah.');
+        return true;
+    }
+    if (s.step === 'DATE') {
+        const r = ekskulParseDate(t, wibNow().date);
+        if (r.error === 'future') { reply('Tanggal tidak boleh di masa depan. ' + EKSKUL_PROMPTS.DATE); return true; }
+        if (r.error === 'old') { reply('Tanggal terlalu lama (maksimal ' + EKSKUL_MAX_BACKDAYS + ' hari ke belakang). ' + EKSKUL_PROMPTS.DATE); return true; }
+        if (r.error) { reply('Format tanggal belum sesuai.\n' + EKSKUL_PROMPTS.DATE); return true; }
+        s.data.date = r.date; s.step = 'TITLE'; reply(EKSKUL_PROMPTS.TITLE); return true;
+    }
+    if (s.step === 'TITLE') {
+        const v = ekskulClean(text, 150);
+        if (v.length < 3) { reply('Judul kegiatan terlalu pendek.\n' + EKSKUL_PROMPTS.TITLE); return true; }
+        s.data.title = v; s.step = 'DESC'; reply(EKSKUL_PROMPTS.DESC); return true;
+    }
+    if (s.step === 'DESC') {
+        const v = ekskulClean(text, 2000);
+        if (v.length < 5) { reply('Uraian kegiatan terlalu pendek.\n' + EKSKUL_PROMPTS.DESC); return true; }
+        s.data.desc = v; s.step = 'COUNT'; reply(EKSKUL_PROMPTS.COUNT); return true;
+    }
+    if (s.step === 'COUNT') {
+        const c = ekskulParseCounts(t);
+        if (!c) { reply('Isi dengan angka, contoh *18 2* (hadir, tidak hadir).\n' + EKSKUL_PROMPTS.COUNT); return true; }
+        s.data.present = c.present; s.data.absent = c.absent; s.step = 'LOC'; reply(EKSKUL_PROMPTS.LOC); return true;
+    }
+    if (s.step === 'LOC') { s.data.loc = ekskulOptional(text, 200); s.step = 'EVAL'; reply(EKSKUL_PROMPTS.EVAL); return true; }
+    if (s.step === 'EVAL') { s.data.evalText = ekskulOptional(text, 1500); s.step = 'CONFIRM'; reply(ekskulSummary(s)); return true; }
+    if (s.step === 'CONFIRM') {
+        if (['ok', 'ya', 'simpan', 'y'].indexOf(t) === -1) { reply('Ketik *OK* untuk menyimpan, atau *BATAL* untuk membatalkan.'); return true; }
+        await ekskulSaveJournal(from, msg, s, reply);
+        return true;
+    }
+    if (s.step === 'PHOTOS') {
+        if (['selesai', 'sudah', 'done', 'ok'].indexOf(t) !== -1) {
+            const n = await ekskulPhotoCount(s.journal.id);
+            ekskulEnd(from);
+            reply('✅ Selesai. Jurnal *' + s.journal.title + '* dengan ' + n + ' foto sudah tersimpan di Pusaka (menu Jurnal Ekskul).');
+            return true;
+        }
+        reply('Kirim foto kegiatan, atau ketik *SELESAI* bila sudah.');
+        return true;
+    }
+    return false;
+}
+
+async function ekskulPhotoCount(journalId) {
+    const c = await supabase.from('extracurricular_journal_photos').select('id', { count: 'exact', head: true }).eq('journal_id', journalId);
+    return c.count || 0;
+}
+
+async function ekskulSaveJournal(from, msg, s, reply) {
+    const d = s.data;
+    if (!s.type.school_id) {                                  // jaga-jaga: penugasan lama tanpa school_id -> ambil dari profil pembina
+        const pf = await supabase.from('profiles').select('school_id').eq('id', s.coach.userId).maybeSingle();
+        s.type.school_id = (pf.data && pf.data.school_id) || null;
+    }
+    if (!s.type.school_id) { reply('⚠️ Data sekolah akun Anda belum lengkap, jurnal belum bisa disimpan. Hubungi admin.'); return; }
+    const row = {
+        extracurricular_type_id: s.type.id, meeting_date: d.date, title: d.title, activity_description: d.desc,
+        location: d.loc, evaluation: d.evalText, students_present: d.present, students_absent: d.absent,
+        author_name: s.coach.name, created_by: s.coach.userId, school_id: s.type.school_id
+    };
+    const ins = await supabase.from('extracurricular_journals').insert(row).select('id, school_id').single();
+    if (ins.error || !ins.data) {
+        console.error('[EKSKUL WA] gagal menyimpan jurnal:', ins.error && ins.error.message);
+        reply('⚠️ Jurnal gagal disimpan. Coba ketik *OK* lagi, atau *BATAL*.');
+        return;
+    }
+    s.journal = { id: ins.data.id, title: d.title, school_id: ins.data.school_id || s.type.school_id, type_id: s.type.id };
+    s.step = 'PHOTOS';
+    const pending = s.photos; s.photos = [];
+    let stored = 0, failed = 0;
+    for (const p of pending) {
+        const r = await ekskulStorePhoto(s, p.msg, p.img);
+        if (r.ok) stored++; else failed++;
+    }
+    reply('✅ *Jurnal tersimpan* (' + ddmmyyyy(d.date) + ' - ' + d.title + ').' +
+        (pending.length ? '\n📷 ' + stored + ' foto yang Anda kirim tadi ikut tersimpan' + (failed ? ' (' + failed + ' gagal)' : '') + '.' : '') +
+        '\n\nSekarang kirim foto kegiatan (maksimal ' + EKSKUL_MAX_PHOTOS + ' foto). Ketik *SELESAI* bila sudah.');
+}
+
+// Simpan satu foto ke jurnal. Diserialkan per jurnal agar batas jumlah foto tepat walau album masuk bersamaan.
+function ekskulStorePhoto(s, msg, img) {
+    const jid = s.journal.id;
+    const prev = ekskulPhotoChains.get(jid) || Promise.resolve();
+    const next = prev.then(function() { return ekskulStorePhotoInner(s, msg, img); }).catch(function(e) { console.error('[EKSKUL WA]', e.message); return { ok: false, reason: 'error' }; });
+    ekskulPhotoChains.set(jid, next);
+    next.then(function() { if (ekskulPhotoChains.get(jid) === next) ekskulPhotoChains.delete(jid); });
+    return next;
+}
+async function ekskulStorePhotoInner(s, msg, img) {
+    const j = s.journal;
+    const fname = 'WA-' + msg.key.id + '.jpg';
+    const dupe = await supabase.from('extracurricular_journal_photos').select('id').eq('journal_id', j.id).eq('file_name', fname).limit(1);
+    if (dupe.data && dupe.data.length) return { ok: true, dupe: true };                // pesan yang sama terkirim ulang
+    if ((await ekskulPhotoCount(j.id)) >= EKSKUL_MAX_PHOTOS) return { ok: false, reason: 'limit' };
+    let buffer;
+    try { buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger: pino({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage }); }
+    catch (e) { console.error('[EKSKUL WA] gagal mengunduh foto:', e.message); return { ok: false, reason: 'download' }; }
+    if (!buffer || buffer.length === 0) return { ok: false, reason: 'download' };
+    if (buffer.length > NOTICE_MAX_BYTES) return { ok: false, reason: 'size' };
+    const mime = (img && img.mimetype) || 'image/jpeg';
+    const filePath = j.school_id + '/' + j.type_id + '/' + j.id + '/' + crypto.randomUUID() + (mime === 'image/png' ? '.png' : '.jpg');
+    const up = await supabase.storage.from(EKSKUL_BUCKET).upload(filePath, buffer, { contentType: mime, upsert: false });
+    if (up.error) { console.error('[EKSKUL WA] upload gagal:', up.error.message); return { ok: false, reason: 'upload' }; }
+    const ins = await supabase.from('extracurricular_journal_photos').insert({
+        journal_id: j.id, file_path: filePath, file_name: fname, caption: img && img.caption ? ekskulClean(img.caption, 200) : null,
+        file_size: buffer.length, school_id: j.school_id, created_by: s.coach.userId
+    });
+    if (ins.error) {
+        await supabase.storage.from(EKSKUL_BUCKET).remove([filePath]);
+        console.error('[EKSKUL WA] gagal mencatat foto:', ins.error.message);
+        return { ok: false, reason: 'db' };
+    }
+    return { ok: true };
+}
+
+// Foto masuk saat sesi ekskul aktif: langsung disimpan (setelah jurnal tersimpan) atau ditampung dulu.
+async function handleEkskulPhoto(msg, img, from) {
+    const s = ekskulSessions.get(from);
+    if (!s) return false;
+    if (Date.now() - s.at > (s.step === 'PHOTOS' ? EKSKUL_PHOTO_TTL : EKSKUL_SESSION_TTL)) { ekskulEnd(from); return false; }
+    const cfg = await getBotSettings();
+    if (!cfg.ekskul_journal_wa_enabled) { ekskulEnd(from); return false; }
+    ekskulTouch(s);
+    if (s.step !== 'PHOTOS') {
+        if (s.photos.length >= EKSKUL_MAX_PHOTOS) return true;
+        s.photos.push({ msg: msg, img: img });
+        ekskulScheduleAck(from, s, msg, 'hold');
+        return true;
+    }
+    const r = await ekskulStorePhoto(s, msg, img);
+    if (r.ok) { if (!r.dupe) s.ackOk++; } else s.ackFail.push(r.reason);
+    ekskulScheduleAck(from, s, msg, 'saved');
+    return true;
+}
+// Satu balasan per kiriman foto (bukan satu per foto) supaya album tidak membanjiri chat.
+function ekskulScheduleAck(from, s, msg, mode) {
+    if (s.ackTimer) clearTimeout(s.ackTimer);
+    s.ackTimer = setTimeout(async function() {
+        s.ackTimer = null;
+        const reply = ekskulReplyFn(from, msg);
+        if (mode === 'hold') { reply('📷 ' + s.photos.length + ' foto diterima dan akan disimpan setelah jurnal tersimpan. Lanjutkan menjawab pertanyaan di atas.'); return; }
+        let total = 0;
+        try { total = await ekskulPhotoCount(s.journal.id); } catch (e) {}
+        const reasons = { limit: 'batas ' + EKSKUL_MAX_PHOTOS + ' foto per jurnal tercapai', size: 'ukuran foto lebih dari 10 MB', download: 'foto gagal diunduh, kirim ulang', upload: 'gagal menyimpan, coba lagi nanti', db: 'gagal menyimpan, coba lagi nanti', error: 'terjadi gangguan, coba lagi nanti' };
+        const fails = Array.from(new Set(s.ackFail)).map(function(r) { return reasons[r] || r; });
+        const ok = s.ackOk, bad = s.ackFail.length;
+        s.ackOk = 0; s.ackFail = [];
+        reply((ok ? '✅ ' + ok + ' foto tersimpan' : '') + (ok && bad ? ', ' : '') + (bad ? '⚠️ ' + bad + ' foto gagal (' + fails.join('; ') + ')' : '') +
+            '. Total foto jurnal ini: ' + total + '/' + EKSKUL_MAX_PHOTOS + '.' + (total >= EKSKUL_MAX_PHOTOS ? '' : ' Kirim lagi atau ketik *SELESAI*.'));
+    }, 4000);
+}
+// END-EKSKUL-WA
 
 // ===================== NOTIFIKASI PELANGGARAN BARU KE ORANG TUA =====================
 // Dipicu aplikasi tepat setelah catatan pelanggaran disimpan (tanpa polling). Satu catatan = satu WA.
