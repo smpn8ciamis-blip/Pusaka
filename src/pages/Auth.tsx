@@ -444,32 +444,35 @@ export default function Auth() {
       )}
 
       <div className="grid w-full lg:grid-cols-2 xl:grid-cols-[1.1fr_1fr]">
-        {/* Panel merek (layar lebar): logo, judul, dan keunggulan dikelompokkan rapat di tengah */}
-        <aside className="relative hidden overflow-hidden bg-gradient-to-br from-primary via-primary to-primary/70 p-10 text-primary-foreground lg:flex lg:flex-col xl:p-14">
+        {/* Panel merek (layar lebar): latar setinggi baris; isinya menempel di atas layar (sticky) setinggi satu layar,
+            sehingga judul dan kartu keunggulan selalu terlihat sejajar dengan formulir tanpa perlu gulir. */}
+        <aside className="relative hidden overflow-clip bg-gradient-to-br from-primary via-primary to-primary/70 text-primary-foreground lg:block">
           <div className="pointer-events-none absolute inset-0 opacity-[0.09] [background-image:radial-gradient(circle,#fff_1px,transparent_1px)] [background-size:22px_22px]" />
           <div className="pointer-events-none absolute -right-28 -top-28 h-96 w-96 rounded-full bg-white/[0.07]" />
           <div className="pointer-events-none absolute -bottom-36 -left-24 h-[28rem] w-[28rem] rounded-full bg-black/[0.06]" />
 
-          <div className="relative my-auto max-w-lg space-y-6">
-            <BrandLogos left={settings?.logo_url} right={settings?.right_logo_url} size="lg" />
-            <BrandTitle title={brand.title} note={brand.note} school={brand.school} tone="light" />
-            <ul className="grid gap-2.5 pt-3">
-              {[
-                { icon: GraduationCap, text: 'Akademik, nilai, dan rapor' },
-                { icon: ClipboardCheck, text: 'Kehadiran dan jadwal' },
-                { icon: FileText, text: 'Layanan dan surat online' },
-              ].map(({ icon: Icon, text }) => (
-                <li key={text} className="flex items-center gap-3 rounded-xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-medium">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/15"><Icon className="h-4 w-4" aria-hidden="true" /></span>
-                  {text}
-                </li>
-              ))}
-            </ul>
-          </div>
+          <div className="sticky top-0 flex h-screen flex-col p-10 xl:px-14 xl:py-12">
+            <div className="my-auto max-w-lg space-y-5">
+              <BrandLogos left={settings?.logo_url} right={settings?.right_logo_url} size="lg" />
+              <BrandTitle title={brand.title} note={brand.note} school={brand.school} tone="light" />
+              <ul className="grid gap-2.5 pt-2 [@media(max-height:720px)]:hidden">
+                {[
+                  { icon: GraduationCap, text: 'Akademik, nilai, dan rapor' },
+                  { icon: ClipboardCheck, text: 'Kehadiran dan jadwal' },
+                  { icon: FileText, text: 'Layanan dan surat online' },
+                ].map(({ icon: Icon, text }) => (
+                  <li key={text} className="flex items-center gap-3 rounded-xl border border-white/15 bg-white/10 px-4 py-2.5 text-sm font-medium">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/15"><Icon className="h-4 w-4" aria-hidden="true" /></span>
+                    {text}
+                  </li>
+                ))}
+              </ul>
+            </div>
 
-          <Link to="/" className="relative inline-flex w-fit items-center gap-2 text-sm text-primary-foreground/85 transition-colors hover:text-primary-foreground">
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" />Kembali ke website sekolah
-          </Link>
+            <Link to="/" className="inline-flex w-fit items-center gap-2 text-sm text-primary-foreground/85 transition-colors hover:text-primary-foreground">
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />Kembali ke website sekolah
+            </Link>
+          </div>
         </aside>
 
         {/* Formulir */}
