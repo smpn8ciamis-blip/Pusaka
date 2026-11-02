@@ -145,7 +145,8 @@ export default function BendaharaDashboard() {
       let recentGttPttQuery = supabase
         .from("gtt_ptt_honorariums")
         .select(`
-          id, receipt_number, receipt_date, net_amount, payment_month, payment_year, teacher_id,
+          id, receipt_number, receipt_date, net_amount, payment_month, payment_year, teacher_id, staff_id,
+          staff:staff_id(id, full_name),
           teachers(id, user_id, profiles:user_id(full_name))
         `)
         .order("receipt_date", { ascending: false })

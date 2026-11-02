@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
@@ -28,9 +28,18 @@ interface Teacher {
   } | null;
 }
 
+interface StaffRecipient {
+  id: string;
+  full_name: string;
+  nip: string | null;
+  position: string | null;
+  staff_type: string;
+}
+
 interface Honorarium {
   id: string;
-  teacher_id: string;
+  teacher_id: string | null;
+  staff_id: string | null;
   honorarium_amount: number;
   tax_percentage: number;
   tax_amount: number;
@@ -40,13 +49,17 @@ interface Honorarium {
   receipt_number: string;
   receipt_date: string;
   description: string | null;
-  teachers: Teacher;
+  teachers: Teacher | null;
+  staff: StaffRecipient | null;
 }
 
 const MONTHS = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
 ];
+
+const recipientName = (h: Honorarium) =>
+  h.staff?.full_name || h.teachers?.profiles?.full_name || 'N/A';
 
 export default function GttPttHonorarium() {
   const { user } = useAuth();
@@ -104,6 +117,20 @@ export default function GttPttHonorarium() {
     }
   });
 
+  // Fetch staff (tabel staf)
+  const { data: staffList = [] } = useQuery({
+    queryKey: ['staff-for-honorarium'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('staff' as any)
+        .select('id, full_name, nip, position, staff_type, status')
+        .neq('status', 'nonaktif')
+        .order('full_name');
+      if (error) throw error;
+      return (data ?? []) as unknown as StaffRecipient[];
+    }
+  });
+
   // Fetch honorariums
   const { data: honorariums = [] } = useQuery({
     queryKey: ['gtt-ptt-honorariums'],
@@ -112,6 +139,7 @@ export default function GttPttHonorarium() {
         .from('gtt_ptt_honorariums')
         .select(`
           *,
+          staff:staff_id (id, full_name, nip, position, staff_type),
           teachers:teacher_id (
             id,
             nip,
@@ -127,19 +155,20 @@ export default function GttPttHonorarium() {
       if (error) throw error;
 
       // Fetch profiles for teacher names
-      const userIds = data.map(h => h.teachers?.user_id).filter(Boolean);
+      const userIds = data.map((h: any) => h.teachers?.user_id).filter(Boolean);
       const { data: profiles } = await supabase
         .from('profiles')
         .select('id, full_name')
         .in('id', userIds);
 
-      return data.map(honorarium => ({
+      return data.map((honorarium: any) => ({
         ...honorarium,
-        teachers: {
+        staff: honorarium.staff || null,
+        teachers: honorarium.teachers ? {
           ...honorarium.teachers,
           profiles: profiles?.find(p => p.id === honorarium.teachers?.user_id) || null
-        }
-      }));
+        } : null
+      })) as unknown as Honorarium[];
     }
   });
 
@@ -155,6 +184,14 @@ export default function GttPttHonorarium() {
       return data;
     }
   });
+
+  // selectedTeacherId berisi "teacher:<id>" atau "staff:<id>"
+  const recipientPayload = () => {
+    const [kind, rid] = selectedTeacherId.split(':');
+    return kind === 'staff'
+      ? { staff_id: rid, teacher_id: null }
+      : { teacher_id: rid, staff_id: null };
+  };
 
   // Create honorarium mutation
   const createMutation = useMutation({
@@ -172,7 +209,7 @@ export default function GttPttHonorarium() {
       const { error } = await supabase
         .from('gtt_ptt_honorariums')
         .insert({
-          teacher_id: selectedTeacherId,
+          ...recipientPayload(),
           honorarium_amount: amount,
           tax_percentage: taxPct,
           tax_amount: taxAmt,
@@ -211,7 +248,7 @@ export default function GttPttHonorarium() {
       const { error } = await supabase
         .from('gtt_ptt_honorariums')
         .update({
-          teacher_id: selectedTeacherId,
+          ...recipientPayload(),
           honorarium_amount: amount,
           tax_percentage: taxPct,
           tax_amount: taxAmt,
@@ -267,7 +304,9 @@ export default function GttPttHonorarium() {
 
   const handleEdit = (honorarium: Honorarium) => {
     setEditingHonorarium(honorarium);
-    setSelectedTeacherId(honorarium.teacher_id);
+    setSelectedTeacherId(
+      honorarium.staff_id ? `staff:${honorarium.staff_id}` : `teacher:${honorarium.teacher_id}`
+    );
     setHonorariumAmount(honorarium.honorarium_amount.toString());
     setTaxPercentage(honorarium.tax_percentage.toString());
     setPaymentMonth(honorarium.payment_month);
@@ -317,7 +356,8 @@ export default function GttPttHonorarium() {
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       result = result.filter(h => 
-        h.teachers?.profiles?.full_name?.toLowerCase().includes(query) ||
+        recipientName(h).toLowerCase().includes(query) ||
+        h.staff?.nip?.toLowerCase().includes(query) ||
         h.receipt_number.toLowerCase().includes(query) ||
         h.teachers?.nip?.toLowerCase().includes(query) ||
         h.teachers?.nuptk?.toLowerCase().includes(query)
@@ -340,7 +380,7 @@ export default function GttPttHonorarium() {
       
       switch (sortField) {
         case 'name':
-          comparison = (a.teachers?.profiles?.full_name || '').localeCompare(b.teachers?.profiles?.full_name || '');
+          comparison = recipientName(a).localeCompare(recipientName(b));
           break;
         case 'amount':
           comparison = a.net_amount - b.net_amount;
@@ -380,7 +420,7 @@ export default function GttPttHonorarium() {
     const thisMonthTotal = thisMonthData.reduce((sum, h) => sum + h.net_amount, 0);
     
     // Count unique teachers
-    const uniqueTeachers = new Set(honorariums.map(h => h.teacher_id)).size;
+    const uniqueTeachers = new Set(honorariums.map(h => h.staff_id ? `staff:${h.staff_id}` : `teacher:${h.teacher_id}`)).size;
     
     return {
       totalTransactions: honorariums.length,
@@ -423,11 +463,26 @@ export default function GttPttHonorarium() {
                       <SelectValue placeholder="Pilih guru/pegawai..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {teachers.map((teacher) => (
-                        <SelectItem key={teacher.id} value={teacher.id}>
-                          {teacher.profiles?.full_name || 'N/A'} - {teacher.subject}
-                        </SelectItem>
-                      ))}
+                      {teachers.length > 0 && (
+                        <SelectGroup>
+                          <SelectLabel>Guru</SelectLabel>
+                          {teachers.map((teacher) => (
+                            <SelectItem key={`teacher:${teacher.id}`} value={`teacher:${teacher.id}`}>
+                              {teacher.profiles?.full_name || 'N/A'} - {teacher.subject}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )}
+                      {staffList.length > 0 && (
+                        <SelectGroup>
+                          <SelectLabel>Staf</SelectLabel>
+                          {staffList.map((st) => (
+                            <SelectItem key={`staff:${st.id}`} value={`staff:${st.id}`}>
+                              {st.full_name} - {st.position || (st.staff_type === 'tata_usaha' ? 'Tata Usaha' : 'Karyawan')}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -677,7 +732,7 @@ export default function GttPttHonorarium() {
                   filteredHonorariums.map((honorarium) => (
                     <TableRow key={honorarium.id}>
                       <TableCell className="font-medium">
-                        {honorarium.teachers?.profiles?.full_name || 'N/A'}
+                        {recipientName(honorarium)}
                       </TableCell>
                       <TableCell>
                         {MONTHS[honorarium.payment_month - 1]} {honorarium.payment_year}
