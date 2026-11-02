@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Loader2, PencilLine, Trash2, UserCheck, UserPlus, Users } from 'lucide-react';
+import { Loader2, MessageCircle, Pencil, PencilLine, Trash2, UserCheck, UserPlus, Users } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -25,6 +26,7 @@ interface Assignment {
   jabatan: string | null;
   email: string | null;
   has_account: boolean;
+  phone: string | null;
 }
 
 interface TeacherOption {
@@ -68,6 +70,9 @@ export default function EkskulCoaches() {
   const [typeId, setTypeId] = useState('');
   const [manual, setManual] = useState(emptyManual);
   const [staffId, setStaffId] = useState(NO_ACCOUNT);
+  const [waPhone, setWaPhone] = useState('');                       // No. WA opsional saat menugaskan
+  const [phoneEdit, setPhoneEdit] = useState<Assignment | null>(null); // dialog ubah/hapus No. WA
+  const [phoneValue, setPhoneValue] = useState('');
 
   const { data: assignments = [], isLoading: assignmentsLoading } = useQuery({
     queryKey: ['ekskul-assignments'],
@@ -133,7 +138,42 @@ export default function EkskulCoaches() {
   };
 
   const assign = useMutation({
-    mutationFn: async (): Promise<{ has_account: boolean }> => {
+    mutationFn: async (): Promise<{ has_account: boolean; phone_error?: string }> => {
+      const res = await doAssign();
+      // No. WhatsApp (opsional) disimpan setelah penugasan berhasil; gagal di sini tidak membatalkan penugasan.
+      const uid = mode === 'teacher' ? selectedTeacher?.user_id : hasStaffAccount ? staffId : null;
+      if (waPhone.trim() && uid) {
+        const { error } = await ekskulDb.rpc('set_ekskul_pembina_phone', { _user_id: uid, _phone: waPhone.trim() });
+        if (error) return { ...res, phone_error: error.message };
+      }
+      return res;
+    },
+    onSuccess: (res) => {
+      refresh();
+      queryClient.invalidateQueries({ queryKey: ['ekskul-assignments'] });
+      if (res.phone_error) toast.error(`Pembina ditugaskan, tetapi No. WhatsApp belum tersimpan: ${res.phone_error}`);
+      setWaPhone('');
+      if (mode === 'teacher') {
+        toast.success(
+          res?.has_account
+            ? 'Guru ditugaskan. Menu Jurnal & Anggota Ekskul kini muncul di akun guru tersebut.'
+            : 'Guru ditugaskan sebagai pembina (guru ini belum punya akun, jadi tanpa akses menu).',
+        );
+        setTeacherId('');
+      } else {
+        toast.success(
+          res?.has_account
+            ? 'Pembina tersimpan. Akun login terpilih kini bisa mengelola Jurnal & Anggota Ekskul (menu muncul setelah login ulang/muat ulang).'
+            : 'Pembina tersimpan (data manual, tanpa akses akun).',
+        );
+        setManual(emptyManual);
+        setStaffId(NO_ACCOUNT);
+      }
+    },
+    onError: (err: { message?: string }) => toast.error(err?.message || 'Gagal menugaskan pembina'),
+  });
+
+  const doAssign = async (): Promise<{ has_account: boolean }> => {
       if (mode === 'manual' && hasStaffAccount) {
         const { data, error } = await ekskulDb.rpc('assign_ekskul_pembina_akun', {
           _type_id: typeId,
@@ -161,28 +201,23 @@ export default function EkskulCoaches() {
       const { data, error } = await ekskulDb.rpc('assign_ekskul_pembina', args);
       if (error) throw error;
       return data as { has_account: boolean };
+  };
+
+  const savePhone = useMutation({
+    mutationFn: async ({ userId, phone }: { userId: string; phone: string }) => {
+      const { data, error } = await ekskulDb.rpc('set_ekskul_pembina_phone', { _user_id: userId, _phone: phone });
+      if (error) throw error;
+      return (data as { phone: string | null } | null)?.phone ?? null;
     },
-    onSuccess: (res) => {
-      refresh();
-      if (mode === 'teacher') {
-        toast.success(
-          res?.has_account
-            ? 'Guru ditugaskan. Menu Jurnal & Anggota Ekskul kini muncul di akun guru tersebut.'
-            : 'Guru ditugaskan sebagai pembina (guru ini belum punya akun, jadi tanpa akses menu).',
-        );
-        setTeacherId('');
-      } else {
-        toast.success(
-          res?.has_account
-            ? 'Pembina tersimpan. Akun login terpilih kini bisa mengelola Jurnal & Anggota Ekskul (menu muncul setelah login ulang/muat ulang).'
-            : 'Pembina tersimpan (data manual, tanpa akses akun).',
-        );
-        setManual(emptyManual);
-        setStaffId(NO_ACCOUNT);
-      }
+    onSuccess: (phone) => {
+      queryClient.invalidateQueries({ queryKey: ['ekskul-assignments'] });
+      toast.success(phone ? `No. WhatsApp tersimpan (${phone}).` : 'No. WhatsApp dihapus.');
+      setPhoneEdit(null);
     },
-    onError: (err: { message?: string }) => toast.error(err?.message || 'Gagal menugaskan pembina'),
+    onError: (err: { message?: string }) => toast.error(err?.message || 'Gagal menyimpan No. WhatsApp'),
   });
+
+  const openPhoneEdit = (a: Assignment) => { setPhoneEdit(a); setPhoneValue(a.phone ?? ''); };
 
   const unassign = useMutation({
     mutationFn: async (a: Assignment) => {
@@ -297,6 +332,14 @@ export default function EkskulCoaches() {
                 </>
               )}
 
+              {((mode === 'teacher' && !!selectedTeacher?.user_id) || (mode === 'manual' && hasStaffAccount)) && (
+                <div className="space-y-1.5">
+                  <Label>No. WhatsApp pembina (opsional)</Label>
+                  <Input value={waPhone} maxLength={20} inputMode="tel" onChange={(e) => setWaPhone(e.target.value)} placeholder="08123456789" />
+                  <p className="text-xs text-muted-foreground">Dipakai bot WhatsApp untuk mengenali pembina saat mengisi jurnal &amp; mengirim foto. Bisa diubah/dihapus kapan saja di daftar di bawah.</p>
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 <Label>Ekstrakurikuler *</Label>
                 <Select value={typeId} onValueChange={setTypeId}>
@@ -343,11 +386,27 @@ export default function EkskulCoaches() {
                               <span className="block truncate text-xs text-muted-foreground">
                                 {[a.nip && `NIP ${a.nip}`, a.email].filter(Boolean).join(' • ') || '—'}
                               </span>
+                              <span className={`flex items-center gap-1 truncate text-xs ${a.phone ? 'text-muted-foreground' : a.user_id ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                                <MessageCircle className="h-3 w-3 shrink-0" />
+                                {a.phone ? `WA ${a.phone}` : a.user_id ? 'No. WA belum diisi (bot tidak mengenali)' : 'Tanpa akun: No. WA tidak dipakai'}
+                              </span>
                             </span>
                             <span className="flex shrink-0 items-center gap-1">
                               <Badge variant={a.has_account ? 'secondary' : 'outline'} className="text-[10px]">
                                 {a.has_account ? 'Akses akun' : 'Tanpa akses'}
                               </Badge>
+                              {a.user_id && (
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-7 w-7"
+                                  onClick={() => openPhoneEdit(a)}
+                                  aria-label="Ubah No. WhatsApp"
+                                  title="Ubah / hapus No. WhatsApp"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                              )}
                               <Button
                                 size="icon"
                                 variant="ghost"
@@ -370,6 +429,49 @@ export default function EkskulCoaches() {
           </div>
         )}
       </div>
+
+      <Dialog open={!!phoneEdit} onOpenChange={(o) => !o && setPhoneEdit(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>No. WhatsApp pembina</DialogTitle>
+            <DialogDescription>
+              {phoneEdit?.full_name}. Bot WhatsApp mengenali pembina dari nomor ini, jadi harus sama dengan nomor WhatsApp yang dipakai mengirim pesan ke bot.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="wa-phone">No. WhatsApp</Label>
+            <Input
+              id="wa-phone"
+              value={phoneValue}
+              maxLength={20}
+              inputMode="tel"
+              autoFocus
+              onChange={(e) => setPhoneValue(e.target.value)}
+              placeholder="08123456789"
+            />
+            <p className="text-xs text-muted-foreground">Format bebas (08…, 628…, +62…). Disimpan sebagai 08xxxxxxxxxx. Kosongkan lalu simpan, atau klik Hapus nomor, untuk menghapus.</p>
+          </div>
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button
+              variant="outline"
+              className="text-destructive"
+              disabled={!phoneEdit?.phone || savePhone.isPending}
+              onClick={() => phoneEdit?.user_id && savePhone.mutate({ userId: phoneEdit.user_id, phone: '' })}
+            >
+              <Trash2 className="mr-2 h-4 w-4" /> Hapus nomor
+            </Button>
+            <span className="flex gap-2">
+              <Button variant="outline" onClick={() => setPhoneEdit(null)}>Batal</Button>
+              <Button
+                disabled={savePhone.isPending || !phoneEdit?.user_id}
+                onClick={() => phoneEdit?.user_id && savePhone.mutate({ userId: phoneEdit.user_id, phone: phoneValue })}
+              >
+                {savePhone.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Simpan
+              </Button>
+            </span>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }
