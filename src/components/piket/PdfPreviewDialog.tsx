@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Download, Printer, Loader2 } from "lucide-react";
@@ -11,10 +11,14 @@ interface Props {
   filename: string;
   /** Membuat dokumen saat dialog dibuka (dipanggil ulang setiap dibuka agar data terbaru). */
   build: () => Promise<jsPDF>;
+  /** Kontrol tambahan di atas pratinjau (mis. titimangsa). */
+  toolbar?: ReactNode;
+  /** Ubah nilai ini untuk membuat ulang PDF saat dialog masih terbuka. */
+  rebuildKey?: string;
 }
 
 /** Pratinjau PDF sebelum diunduh / dicetak. */
-export function PdfPreviewDialog({ open, onClose, title, filename, build }: Props) {
+export function PdfPreviewDialog({ open, onClose, title, filename, build, toolbar, rebuildKey }: Props) {
   const [url, setUrl] = useState<string | null>(null);
   const [doc, setDoc] = useState<jsPDF | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -38,7 +42,7 @@ export function PdfPreviewDialog({ open, onClose, title, filename, build }: Prop
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, rebuildKey]);
 
   const print = () => {
     try { frame.current?.contentWindow?.focus(); frame.current?.contentWindow?.print(); }
@@ -49,6 +53,7 @@ export function PdfPreviewDialog({ open, onClose, title, filename, build }: Prop
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-4xl">
         <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
+        {toolbar}
         <div className="h-[70vh] w-full overflow-hidden rounded-md border bg-muted/30">
           {err ? (
             <p className="p-6 text-sm text-destructive">{err}</p>

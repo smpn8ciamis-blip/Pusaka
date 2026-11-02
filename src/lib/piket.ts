@@ -187,6 +187,9 @@ export async function buildPiketPdf(opts: {
   school?: any;
   punches?: Map<string, PiketPunch[]>;
   cfg?: PiketCfg;
+  /** Titimangsa (tempat & tanggal tanda tangan), diatur manual. Tanggal format YYYY-MM-DD; bila kosong: akhir bulan periode. */
+  signDate?: string;
+  signCity?: string;
 }): Promise<jsPDF> {
   const { rows, shift, ym, school, punches, cfg } = opts;
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -224,9 +227,10 @@ export async function buildPiketPdf(opts: {
   doc.text(`Total tercatat: ${list.length}   Hadir: ${hadir}   Tidak hadir: ${list.filter((r) => r.status === "tidak_hadir").length}   Izin: ${list.filter((r) => r.status === "izin").length}`, 14, y);
   y += 10;
   const cx = w - 50;
-  const city = school?.city || "Ciamis";
+  const city = opts.signCity?.trim() || school?.city || "Ciamis";
+  const signDate = opts.signDate || monthRange(ym).to; // bukan tanggal cetak
   if (y > 235) { doc.addPage(); y = 25; }
-  doc.text(`${city}, ${formatTanggalPanjang(new Date())}`, cx, y, { align: "center" });
+  doc.text(`${city}, ${formatTanggalPanjang(signDate)}`, cx, y, { align: "center" });
   doc.text("Mengetahui,", cx, y + 5, { align: "center" });
   doc.text(school?.headmaster_position || "Kepala Sekolah", cx, y + 10, { align: "center" });
   doc.setFont("helvetica", "bold");
