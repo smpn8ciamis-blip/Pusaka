@@ -1439,26 +1439,37 @@ function ekskulSummary(s) {
         (s.photos.length ? '\nFoto menunggu: ' + s.photos.length : '') + '\n\nKetik *OK* untuk menyimpan, atau *BATAL*.';
 }
 // Pembina = akun yang nomor HP-nya (profil atau staf) sama dengan nomor pengirim DAN punya penugasan ekskul.
+// Nomor dibandingkan sebagai angka (abaikan spasi, tanda -, +, 0/62 di depan) karena format penyimpanannya bebas: 0812-3456, +62 812..., dst.
+function ekskulNormPhone(v) {
+    let d = String(v == null ? '' : v).replace(/\D/g, '');
+    if (!d) return '';
+    if (d.startsWith('0')) d = '62' + d.slice(1);
+    else if (d.startsWith('8')) d = '62' + d;
+    return d;
+}
 async function ekskulFindCoach(senderPhone) {
-    const variants = phoneVariants(senderPhone);
-    const ids = [];
-    const pRes = await supabase.from('profiles').select('id').in('phone', variants);
-    if (pRes.error) throw pRes.error;
-    (pRes.data || []).forEach(function(x) { if (ids.indexOf(x.id) === -1) ids.push(x.id); });
-    const sRes = await supabase.from('staff').select('user_id').in('phone', variants).not('user_id', 'is', null);
-    if (!sRes.error) (sRes.data || []).forEach(function(x) { if (ids.indexOf(x.user_id) === -1) ids.push(x.user_id); });
-    if (!ids.length) return null;
+    const want = ekskulNormPhone(senderPhone);
+    if (!want) return null;
     const cRes = await supabase.from('extracurricular_coaches')
-        .select('user_id, school_id, extracurricular_types(id, name, school_id, is_active)').in('user_id', ids);
+        .select('user_id, school_id, extracurricular_types(id, name, school_id, is_active)').limit(2000);
     if (cRes.error) throw cRes.error;
-    const rows = (cRes.data || []).filter(function(r) { return r.extracurricular_types && r.extracurricular_types.is_active !== false; });
+    const rows = (cRes.data || []).filter(function(r) { return r.user_id && r.extracurricular_types && r.extracurricular_types.is_active !== false; });
     if (!rows.length) return null;
-    const userId = rows[0].user_id;                         // beberapa akun satu nomor: pakai akun pertama yang punya penugasan
-    const types = rows.filter(function(r) { return r.user_id === userId; }).map(function(r) {
+    const uids = Array.from(new Set(rows.map(function(r) { return r.user_id; })));
+    const pRes = await supabase.from('profiles').select('id, full_name, phone').in('id', uids);
+    if (pRes.error) throw pRes.error;
+    const sRes = await supabase.from('staff').select('user_id, phone').in('user_id', uids);
+    const match = new Set();
+    (pRes.data || []).forEach(function(x) { if (ekskulNormPhone(x.phone) === want) match.add(x.id); });
+    (sRes.data || []).forEach(function(x) { if (ekskulNormPhone(x.phone) === want) match.add(x.user_id); });
+    if (!match.size) return null;
+    const mine = rows.filter(function(r) { return match.has(r.user_id); });
+    const userId = mine[0].user_id;                         // beberapa akun satu nomor: pakai akun pertama yang punya penugasan
+    const types = mine.filter(function(r) { return r.user_id === userId; }).map(function(r) {
         return { id: r.extracurricular_types.id, name: r.extracurricular_types.name, school_id: r.school_id || r.extracurricular_types.school_id || null };
     }).sort(function(a, b) { return a.name.localeCompare(b.name); });
-    const pf = await supabase.from('profiles').select('full_name').eq('id', userId).maybeSingle();
-    return { userId: userId, name: (pf.data && pf.data.full_name) || null, types: types };
+    const prof = (pRes.data || []).find(function(x) { return x.id === userId; });
+    return { userId: userId, name: (prof && prof.full_name) || null, types: types };
 }
 function ekskulNewSession(coach) { return { coach: coach, at: Date.now(), step: 'DATE', type: null, data: {}, photos: [], journal: null, ackTimer: null, ackOk: 0, ackFail: [] }; }
 function ekskulTouch(s) { s.at = Date.now(); }
@@ -1489,7 +1500,7 @@ async function handleEkskulMessage(msg, from, text, cleanText, senderPhone) {
         if (!senderPhone) { if (cmd === 'jurnal') reply('Nomor WhatsApp Anda tidak terbaca. Coba lagi lewat chat langsung.'); return cmd === 'jurnal'; }
         const coach = await ekskulFindCoach(senderPhone);
         if (!coach) {
-            if (cmd === 'jurnal') reply('Nomor WhatsApp ini belum dikenali sebagai pembina ekskul.\n\nPastikan: (1) nomor HP di profil akun Pusaka Anda sama dengan nomor WhatsApp ini, dan (2) kesiswaan sudah menugaskan Anda sebagai pembina ekskul.');
+            if (cmd === 'jurnal') reply('Nomor WhatsApp ini belum dikenali sebagai pembina ekskul.\n\nPastikan: (1) No. WhatsApp Anda sudah diisi kesiswaan/admin di menu Pembina Ekstrakurikuler dan sama dengan nomor ini, dan (2) Anda sudah ditugaskan sebagai pembina ekskul.');
             return cmd === 'jurnal';                         // "foto" dari non-pembina: abaikan tanpa membalas
         }
         if (s) ekskulEnd(from);
