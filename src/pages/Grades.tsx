@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Plus, Search, Printer, Download, Award, TrendingUp, FileText, Scale, FileSpreadsheet } from 'lucide-react';
@@ -43,6 +44,9 @@ interface StudentInput {
 }
 
 /** Nilai awal tabel input dari data server (kolom lama + nilai jenis buatan guru). */
+/** Siswa aktif = status 'aktif' dan bukan alumni (sama dengan aturan di menu Siswa). */
+const isActiveStudent = (st: any) => (st?.status ?? 'aktif') === 'aktif' && !st?.is_alumni;
+
 function buildInputs(students: any[], customScores: Record<string, Record<string, number>>) {
   const next: Record<string, StudentInput> = {};
   for (const st of students) {
@@ -198,6 +202,17 @@ function GradesPage() {
     },
     enabled: !!selectedSchedule,
   });
+
+  // Hanya siswa aktif yang tampil; saklar menampilkan juga siswa nonaktif/alumni (riwayat nilai)
+  const [showInactive, setShowInactive] = useState(false);
+  const gridStudents = useMemo(
+    () => ((scheduleStudents as any[]) || []).filter((st) => showInactive || isActiveStudent(st)),
+    [scheduleStudents, showInactive],
+  );
+  const inactiveCount = useMemo(
+    () => ((scheduleStudents as any[]) || []).filter((st) => !isActiveStudent(st)).length,
+    [scheduleStudents],
+  );
 
   // Ujian CBT yang nilainya otomatis masuk ke mapel/kelas ini
   const { data: linkedCbt = [] } = useQuery({
@@ -431,7 +446,7 @@ function GradesPage() {
     const text = e.clipboardData.getData('text');
     if (!/[\t\n]/.test(text.trim())) return; // satu nilai: perilaku biasa
     e.preventDefault();
-    const students = (scheduleStudents as any[]) || [];
+    const students = (gridStudents as any[]) || [];
     const changes: Parameters<typeof applyChanges>[0] = [];
     let skipped = 0;
     parseClipboardGrid(text).forEach((line, dr) => {
@@ -496,7 +511,7 @@ function GradesPage() {
   });
 
   const handleExportPDF = async () => {
-    if (!scheduleStudents || !selectedSchedule) {
+    if (!gridStudents || !selectedSchedule) {
       toast.error('Pilih mata pelajaran terlebih dahulu');
       return;
     }
@@ -530,7 +545,7 @@ function GradesPage() {
     doc.text(`Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}`, 14, startY + 20);
 
     // Table data
-    const tableData = scheduleStudents.map((student: any, index: number) => {
+    const tableData = gridStudents.map((student: any, index: number) => {
       const grade = student.existingGrade;
       const finalGrade = grade?.final_grade || 0;
       const { label } = getGradeLabel(Number(finalGrade));
@@ -564,8 +579,8 @@ function GradesPage() {
       subject: schedule.subject,
       class: schedule.classes?.name,
       printDate: new Date().toISOString(),
-      totalStudents: scheduleStudents.length,
-      grades: scheduleStudents.map((s: any) => {
+      totalStudents: gridStudents.length,
+      grades: gridStudents.map((s: any) => {
         const grade = s.existingGrade;
         const finalGrade = grade?.final_grade || 0;
         return {
@@ -610,7 +625,7 @@ function GradesPage() {
   };
 
   const handleExport = () => {
-    if (!scheduleStudents || !selectedSchedule) {
+    if (!gridStudents || !selectedSchedule) {
       toast.error('Pilih mata pelajaran terlebih dahulu');
       return;
     }
@@ -619,7 +634,7 @@ function GradesPage() {
     
     const csvContent = [
       ['NIS', 'Nama', 'Kelas', ...components.map((c) => csvCell(`${c.name} (${c.weight}%)`)), ...(showCats ? cats.map((k) => `Rata-rata ${CATEGORY_LABEL[k]}`) : []), 'Nilai Akhir', 'Predikat'].join(','),
-      ...scheduleStudents.map((s: any) => {
+      ...gridStudents.map((s: any) => {
         const grade = s.existingGrade;
         const finalGrade = grade?.final_grade || 0;
         const { label } = getGradeLabel(Number(finalGrade));
@@ -644,8 +659,10 @@ function GradesPage() {
   };
 
   const filteredStudents = students?.filter((student) =>
-    toTitleCase(student.full_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    student.nis?.toLowerCase().includes(searchTerm.toLowerCase())
+    (showInactive || isActiveStudent(student)) && (
+      toTitleCase(student.full_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      student.nis?.toLowerCase().includes(searchTerm.toLowerCase())
+    )
   );
 
   return (
@@ -699,7 +716,7 @@ function GradesPage() {
                         </Button>
                       )}
                       {selectedSchedule && (
-                        <Button type="button" variant="outline" className="gap-2 shrink-0" onClick={() => setIsImportOpen(true)} disabled={!scheduleStudents || scheduleStudents.length === 0}>
+                        <Button type="button" variant="outline" className="gap-2 shrink-0" onClick={() => setIsImportOpen(true)} disabled={!gridStudents || gridStudents.length === 0}>
                           <FileSpreadsheet className="h-4 w-4" />
                           Impor Excel/CSV
                         </Button>
@@ -747,7 +764,27 @@ function GradesPage() {
                     </div>
                   )}
 
-                  {selectedSchedule && scheduleStudents && scheduleStudents.length > 0 && (
+                  {selectedSchedule && (scheduleStudents as any[] | undefined) && (
+                    <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border p-3 text-sm">
+                      <span>
+                        Tampilkan siswa nonaktif (pindah/keluar/alumni)
+                        <span className="block text-xs text-muted-foreground">
+                          {showInactive
+                            ? 'Siswa nonaktif ikut tampil agar riwayat nilainya bisa dilihat.'
+                            : `Hanya siswa aktif yang tampil${inactiveCount > 0 ? ` (${inactiveCount} siswa nonaktif disembunyikan)` : ''}.`}
+                        </span>
+                      </span>
+                      <Switch checked={showInactive} onCheckedChange={setShowInactive} />
+                    </label>
+                  )}
+
+                  {selectedSchedule && (scheduleStudents as any[] | undefined) && gridStudents.length === 0 && (
+                    <p className="py-6 text-center text-sm text-muted-foreground">
+                      {inactiveCount > 0 ? 'Tidak ada siswa aktif di kelas ini. Nyalakan saklar di atas untuk melihat siswa nonaktif.' : 'Belum ada siswa di kelas ini.'}
+                    </p>
+                  )}
+
+                  {selectedSchedule && gridStudents && gridStudents.length > 0 && (
                     <div className="space-y-4">
                       <p className="text-xs text-muted-foreground">
                         Tips: Enter atau panah bawah pindah ke siswa berikutnya. Anda bisa menyalin kolom nilai dari Excel lalu menempelnya di sel pertama. Ketikan tersimpan otomatis sebagai draf di perangkat ini.
@@ -773,7 +810,7 @@ function GradesPage() {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {scheduleStudents.map((student: any, index) => {
+                            {gridStudents.map((student: any, index) => {
                               const input = inputs[student.id];
                               const finalGrade = computeFinal(components, toScores(input));
                               const { label, color } = getGradeLabel(finalGrade);
@@ -782,7 +819,14 @@ function GradesPage() {
                               return (
                                 <TableRow key={student.id}>
                                   <TableCell>{index + 1}</TableCell>
-                                  <TableCell className="font-medium sticky left-0 z-10 bg-background">{toTitleCase(student.full_name)}</TableCell>
+                                  <TableCell className="font-medium sticky left-0 z-10 bg-background">
+                                    {toTitleCase(student.full_name)}
+                                    {!isActiveStudent(student) && (
+                                      <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+                                        {student.is_alumni ? 'alumni' : (student.status ?? 'nonaktif')}
+                                      </span>
+                                    )}
+                                  </TableCell>
                                   {components.map((c, ci) => {
                                     const raw = c.legacy_key ? input?.legacy[c.legacy_key] : c.id ? input?.custom[c.id] : '';
                                     return (
@@ -913,6 +957,10 @@ function GradesPage() {
               <TrendingUp className="h-5 w-5 text-primary" />
               Daftar Siswa
             </CardTitle>
+            <label className="flex cursor-pointer items-center gap-2 pt-1 text-xs text-muted-foreground">
+              <Switch checked={showInactive} onCheckedChange={setShowInactive} />
+              Tampilkan siswa nonaktif
+            </label>
           </CardHeader>
           <CardContent>
             <Table>
@@ -931,7 +979,14 @@ function GradesPage() {
                     <TableRow key={student.id}>
                       <TableCell>{index + 1}</TableCell>
                       <TableCell className="font-medium">{student.nis}</TableCell>
-                      <TableCell>{toTitleCase(student.full_name)}</TableCell>
+                      <TableCell>
+                        {toTitleCase(student.full_name)}
+                        {!isActiveStudent(student) && (
+                          <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                            {student.is_alumni ? 'alumni' : (student.status ?? 'nonaktif')}
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell>{student.classes?.name || '-'}</TableCell>
                       <TableCell>{student.gender === 'L' ? 'Laki-laki' : 'Perempuan'}</TableCell>
                     </TableRow>
