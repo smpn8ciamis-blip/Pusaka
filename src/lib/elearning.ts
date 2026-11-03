@@ -59,6 +59,10 @@ export interface ElearningMaterial {
   file_size: number | null;
   is_published: boolean;
   accepts_submissions: boolean;
+  /** Jenis penilaian tujuan nilai jawaban siswa (kunci bawaan: tugas/kuis/uts/uas/praktik) */
+  grade_legacy_key?: string | null;
+  /** …atau nama jenis penilaian buatan guru */
+  grade_component_name?: string | null;
   created_at: string;
   classes?: { name: string } | null;
   teachers?: { profiles?: { full_name: string | null } | null } | null;
@@ -81,4 +85,37 @@ export interface ElearningSubmission {
   graded_at: string | null;
   submitted_at: string;
   updated_at: string;
+}
+
+/** Pilihan jenis penilaian dari RPC elearning_grade_targets. */
+export interface GradeTargetOption {
+  key: string; // 'legacy:tugas' | 'name:Portofolio'
+  label: string;
+  weight: number;
+  category?: string;
+}
+
+export const NO_GRADE_TARGET = 'none';
+
+/** Kunci pilihan (untuk <Select>) dari pemetaan yang tersimpan pada materi. */
+export function gradeTargetKeyOf(m: { grade_legacy_key?: string | null; grade_component_name?: string | null }): string {
+  if (m.grade_legacy_key) return `legacy:${m.grade_legacy_key}`;
+  if (m.grade_component_name) return `name:${m.grade_component_name}`;
+  return NO_GRADE_TARGET;
+}
+
+/** Kolom basis data dari kunci pilihan. */
+export function gradeTargetFields(key: string): { grade_legacy_key: string | null; grade_component_name: string | null } {
+  if (key.startsWith('legacy:')) return { grade_legacy_key: key.slice(7), grade_component_name: null };
+  if (key.startsWith('name:')) return { grade_legacy_key: null, grade_component_name: key.slice(5) };
+  return { grade_legacy_key: null, grade_component_name: null };
+}
+
+const LEGACY_LABEL: Record<string, string> = { tugas: 'Tugas', kuis: 'Kuis', uts: 'UTS', uas: 'UAS', praktik: 'Praktik' };
+
+/** Nama tampilan pemetaan (tanpa memuat daftar jenis penilaian). */
+export function gradeTargetLabel(key: string): string {
+  if (key.startsWith('legacy:')) return LEGACY_LABEL[key.slice(7)] ?? key.slice(7);
+  if (key.startsWith('name:')) return key.slice(5);
+  return '';
 }
