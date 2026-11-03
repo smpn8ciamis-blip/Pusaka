@@ -214,6 +214,7 @@ export function GradeComponentsDialog({
           <div className="rounded-lg bg-muted/50 p-3 text-xs space-y-1 text-muted-foreground">
             <p><b>Kategori</b>: kelompokkan jenis ke Pengetahuan, Keterampilan, atau Sikap. Setiap kategori ditampilkan dengan rata-rata berbobot sendiri; <b>nilai akhir</b> tetap satu angka dari semua jenis sesuai bobot di atas.</p>
             <p><b>Terima nilai CBT sebagai</b>: bila ujian CBT diatur masuk ke komponen (Tugas/Kuis/UTS/UAS/Praktik), pilih jenis penilaian yang menerimanya. Ujian CBT yang komponennya tidak dipilih di sini tidak ikut dihitung.</p>
+            <p><b>E-Learning</b>: tujuan nilai tiap materi/tugas dipilih di menu E-Learning (“Nilai masuk ke”). Jenis penilaian yang dipilih di sana harus ada di daftar ini; bila Anda mengganti nama atau menghapusnya, nilai e-learning untuk jenis itu tidak ikut dihitung sampai tujuan diubah.</p>
             <p>Nilai siswa yang sudah ada tidak hilang. Menghapus jenis buatan sendiri akan menghapus nilai siswa pada jenis itu; nilai Tugas/Kuis/UTS/UAS/Praktik tetap tersimpan walau tidak dipakai di rumus.</p>
             {removedCustom.length > 0 && (
               <p className="text-destructive font-medium">Akan dihapus beserta nilainya: {removedCustom.map((c) => c.name).join(', ')}</p>

@@ -1,10 +1,11 @@
 import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Eye, EyeOff, FileText, GraduationCap, Image as ImageIcon, Loader2, Pencil, Plus, Search, Trash2, Upload } from 'lucide-react';
+import { Eye, EyeOff, FileText, GraduationCap, Image as ImageIcon, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, Upload } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { ElearningViewer } from '@/components/ElearningViewer';
 import { SubmissionsDialog } from '@/components/SubmissionsDialog';
+import { GradeTargetSelect } from '@/components/elearning/GradeTargetSelect';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,7 +27,8 @@ import { isPayloadTooLarge } from '@/lib/pdfCompress';
 import { prepareFile } from '@/lib/elearningUpload';
 import {
   ELEARNING_ACCEPT, ELEARNING_BUCKET, ELEARNING_MAX_BYTES, KIND_LABEL, detectElearningKind,
-  formatFileSize, safeFileName, type ElearningMaterial,
+  NO_GRADE_TARGET, formatFileSize, gradeTargetFields, gradeTargetKeyOf, gradeTargetLabel, safeFileName,
+  type ElearningMaterial,
 } from '@/lib/elearning';
 
 // Tabel baru belum ada di types.ts yang digenerate
@@ -54,6 +56,7 @@ export default function Elearning() {
   const [description, setDescription] = useState('');
   const [published, setPublished] = useState(true);
   const [acceptsSubs, setAcceptsSubs] = useState(true);
+  const [gradeTarget, setGradeTarget] = useState(NO_GRADE_TARGET);
   const [gradingFor, setGradingFor] = useState<ElearningMaterial | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [editing, setEditing] = useState<ElearningMaterial | null>(null);
@@ -134,6 +137,7 @@ export default function Elearning() {
     setDescription('');
     setPublished(true);
     setAcceptsSubs(true);
+    setGradeTarget(NO_GRADE_TARGET);
     setFile(null);
     if (fileRef.current) fileRef.current.value = '';
     setFormOpen(true);
@@ -146,6 +150,7 @@ export default function Elearning() {
     setDescription(m.description ?? '');
     setPublished(m.is_published);
     setAcceptsSubs(m.accepts_submissions ?? true);
+    setGradeTarget(gradeTargetKeyOf(m));
     setFile(null);
     if (fileRef.current) fileRef.current.value = '';
     setFormOpen(true);
@@ -193,6 +198,8 @@ export default function Elearning() {
         description: description.trim() || null,
         is_published: published,
         accepts_submissions: acceptsSubs,
+        // nilai jawaban hanya mengalir bila materi menerima jawaban
+        ...gradeTargetFields(acceptsSubs ? gradeTarget : NO_GRADE_TARGET),
       };
 
       // Tanpa ganti file: cukup perbarui data
@@ -258,6 +265,48 @@ export default function Elearning() {
       toast.success(now ? 'Materi ditampilkan ke siswa' : 'Materi disembunyikan dari siswa');
     },
     onError: () => toast.error('Gagal mengubah status materi'),
+  });
+
+  // Ubah tujuan nilai langsung dari kartu materi
+  const setTarget = useMutation({
+    mutationFn: async ({ m, key }: { m: ElearningMaterial; key: string }) => {
+      const { error } = await db.from('elearning_materials').update(gradeTargetFields(key)).eq('id', m.id);
+      if (error) throw error;
+      return key;
+    },
+    onSuccess: (key) => {
+      queryClient.invalidateQueries({ queryKey: ['elearning-materials'] });
+      queryClient.invalidateQueries({ queryKey: ['grades-linked-elearning'] });
+      queryClient.invalidateQueries({ queryKey: ['schedule-students-grades'] });
+      queryClient.invalidateQueries({ queryKey: ['grade-scores'] });
+      toast.success(key === NO_GRADE_TARGET
+        ? 'Materi tidak lagi mengalirkan nilai ke menu Nilai'
+        : `Nilai materi ini akan masuk ke “${gradeTargetLabel(key)}” di menu Nilai`);
+    },
+    onError: () => toast.error('Gagal mengubah tujuan nilai'),
+  });
+
+  // Kirim ulang semua nilai materi ke menu Nilai
+  const syncGrades = useMutation({
+    mutationFn: async (m: ElearningMaterial) => {
+      const { data, error } = await db.rpc('elearning_sync_grades', { p_material: m.id });
+      if (error) throw error;
+      return data as { ok: number; skip: number; no_schedule: number; no_component: number };
+    },
+    onSuccess: (r) => {
+      queryClient.invalidateQueries({ queryKey: ['schedule-students-grades'] });
+      queryClient.invalidateQueries({ queryKey: ['grade-scores'] });
+      if (r.no_schedule > 0) {
+        toast.error(`${r.no_schedule} nilai tidak terkirim: kelas/mapel ini tidak punya jadwal pada tahun ajaran & semester aktif.`);
+      } else if (r.no_component > 0) {
+        toast.error(`${r.no_component} nilai tidak terkirim: jenis penilaian tujuan tidak ada di menu Nilai (cek “Atur Jenis & Bobot”).`);
+      } else if (r.ok === 0) {
+        toast.info('Belum ada jawaban yang dinilai, jadi belum ada nilai yang dikirim.');
+      } else {
+        toast.success(`${r.ok} nilai siswa dikirim ke menu Nilai`);
+      }
+    },
+    onError: (err: { message?: string }) => toast.error(`Gagal menyinkronkan nilai${err?.message ? `: ${err.message}` : ''}`),
   });
 
   const remove = useMutation({
@@ -340,6 +389,32 @@ export default function Elearning() {
                       {m.is_published ? 'Tampil' : 'Draf'}
                     </Badge>
                   </div>
+                  {m.accepts_submissions && (
+                    <div className="flex items-center gap-2 rounded-md bg-muted/40 p-2">
+                      <span className="shrink-0 text-xs text-muted-foreground">Nilai masuk ke</span>
+                      <GradeTargetSelect
+                        className="h-8 min-w-0 flex-1 text-xs"
+                        classId={m.class_id}
+                        subject={m.subject}
+                        value={gradeTargetKeyOf(m)}
+                        disabled={setTarget.isPending}
+                        onChange={(key) => setTarget.mutate({ m, key })}
+                      />
+                      {gradeTargetKeyOf(m) !== NO_GRADE_TARGET && (
+                        <Button
+                          size="icon" variant="outline" className="h-8 w-8 shrink-0"
+                          title="Kirim ulang semua nilai materi ini ke menu Nilai"
+                          aria-label="Sinkronkan nilai ke menu Nilai"
+                          disabled={syncGrades.isPending}
+                          onClick={() => syncGrades.mutate(m)}
+                        >
+                          {syncGrades.isPending && syncGrades.variables?.id === m.id
+                            ? <Loader2 className="h-4 w-4 animate-spin" />
+                            : <RefreshCw className="h-4 w-4" />}
+                        </Button>
+                      )}
+                    </div>
+                  )}
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs text-muted-foreground">
                       {KIND_LABEL[m.file_type]} {m.file_size ? `• ${formatFileSize(m.file_size)}` : ''}
@@ -383,7 +458,7 @@ export default function Elearning() {
           <div className="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto px-6 py-3">
             <div className="space-y-1.5">
               <Label>Kelas & mata pelajaran *</Label>
-              <Select value={groupKey} onValueChange={setGroupKey}>
+              <Select value={groupKey} onValueChange={(v) => { setGroupKey(v); setGradeTarget(NO_GRADE_TARGET); }}>
                 <SelectTrigger><SelectValue placeholder="Pilih kelas dan mapel" /></SelectTrigger>
                 <SelectContent>
                   {groupOptions.map((g) => <SelectItem key={g.key} value={g.key}>{g.class_name} — {g.subject}</SelectItem>)}
@@ -419,6 +494,21 @@ export default function Elearning() {
               </span>
               <Switch checked={acceptsSubs} onCheckedChange={setAcceptsSubs} />
             </label>
+            {acceptsSubs && (
+              <div className="space-y-1.5">
+                <Label>Nilai masuk ke jenis penilaian</Label>
+                <GradeTargetSelect
+                  classId={selectedGroup?.class_id}
+                  subject={selectedGroup?.subject}
+                  value={gradeTarget}
+                  onChange={setGradeTarget}
+                  disabled={!selectedGroup}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Nilai yang Anda beri pada jawaban siswa otomatis tampil di menu Nilai. Bila beberapa materi masuk ke jenis yang sama, nilai siswa adalah rata-rata materi yang sudah dinilai.
+                </p>
+              </div>
+            )}
             <label className="flex cursor-pointer items-center justify-between rounded-md border p-3 text-sm">
               <span>
                 Tampilkan ke siswa

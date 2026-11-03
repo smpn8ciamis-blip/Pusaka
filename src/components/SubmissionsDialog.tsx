@@ -8,7 +8,10 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
-import { SUBMISSION_BUCKET, formatFileSize, type ElearningMaterial, type ElearningSubmission } from '@/lib/elearning';
+import {
+  NO_GRADE_TARGET, SUBMISSION_BUCKET, formatFileSize, gradeTargetKeyOf, gradeTargetLabel,
+  type ElearningMaterial, type ElearningSubmission,
+} from '@/lib/elearning';
 import { openStorageFile } from '@/lib/openStorageFile';
 import { format } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
@@ -107,6 +110,11 @@ export function SubmissionsDialog({ material, onClose }: { material: ElearningMa
           <DialogTitle className="truncate">Jawaban Siswa — {material?.title}</DialogTitle>
           <DialogDescription>
             {subs.length} dari {students.length} siswa sudah mengumpulkan.
+            {material && gradeTargetKeyOf(material) !== NO_GRADE_TARGET && (
+              <span className="mt-1 block text-primary">
+                Nilai yang disimpan otomatis masuk ke “{gradeTargetLabel(gradeTargetKeyOf(material))}” di menu Nilai.
+              </span>
+            )}
           </DialogDescription>
         </DialogHeader>
 

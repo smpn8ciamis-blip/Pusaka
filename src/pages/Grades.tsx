@@ -219,6 +219,24 @@ function GradesPage() {
     },
   });
 
+  // Materi/tugas e-learning yang nilainya otomatis masuk ke mapel/kelas ini
+  const { data: linkedElearning = [] } = useQuery({
+    queryKey: ['grades-linked-elearning', selectedSchedule],
+    enabled: !!selectedSchedule,
+    queryFn: async () => {
+      const sc = schedules?.find((x: any) => x.id === selectedSchedule);
+      if (!sc) return [];
+      const { data, error } = await (supabase as any).from('elearning_materials')
+        .select('id, title, subject, grade_legacy_key, grade_component_name')
+        .eq('class_id', sc.class_id)
+        .or('grade_legacy_key.not.is.null,grade_component_name.not.is.null');
+      if (error) return [];
+      return ((data || []) as any[]).filter(
+        (m) => String(m.subject || '').trim().toLowerCase() === String(sc.subject || '').trim().toLowerCase(),
+      );
+    },
+  });
+
   // Jenis penilaian & bobot jadwal terpilih (rumus bawaan bila guru belum mengatur)
   const { components, isDefault } = useGradeComponents(selectedSchedule || null);
   const { data: customScores } = useCustomScores(selectedSchedule || null);
@@ -708,6 +726,24 @@ function GradesPage() {
                         );
                       })}
                       <p className="text-muted-foreground">Mengubah komponen tersebut di sini akan tertimpa lagi bila siswa menyelesaikan atau guru mengirim ulang nilai CBT.</p>
+                    </div>
+                  )}
+
+                  {selectedSchedule && linkedElearning.length > 0 && (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/30 p-3 text-xs space-y-1">
+                      <p className="font-medium">Nilai dari E-Learning terisi otomatis:</p>
+                      {linkedElearning.map((m: any) => {
+                        const target = m.grade_legacy_key
+                          ? components.find((c) => c.legacy_key === m.grade_legacy_key)
+                          : components.find((c) => !c.legacy_key && c.name.trim().toLowerCase() === String(m.grade_component_name).trim().toLowerCase());
+                        return (
+                          <p key={m.id}>
+                            • <b>{target ? target.name : String(m.grade_legacy_key ?? m.grade_component_name).toUpperCase()}</b> ← {m.title}
+                            {!target && <span className="text-destructive font-medium"> — tidak ada jenis penilaian yang menerimanya, nilai ini tidak ikut dihitung. Atur lewat “Atur Jenis & Bobot” atau ubah tujuan nilai di menu E-Learning.</span>}
+                          </p>
+                        );
+                      })}
+                      <p className="text-muted-foreground">Bila beberapa materi masuk ke jenis yang sama, nilainya adalah rata-rata materi yang sudah dinilai. Mengubah kolom tersebut di sini akan tertimpa lagi saat guru menilai ulang jawaban siswa.</p>
                     </div>
                   )}
 
