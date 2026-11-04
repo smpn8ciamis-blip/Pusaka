@@ -539,6 +539,10 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const tataUsahaMenuItems: MenuItem[] = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/tata-usaha-dashboard' },
 
+    // --- Data Siswa ---
+    { icon: Images, label: 'Galeri Foto Siswa', href: '/galeri-siswa' },
+    { icon: Phone, label: 'Buku Kontak Siswa', href: '/buku-kontak-siswa' },
+
     // --- Surat & Perjalanan ---
     { icon: FileSignature, label: 'Surat Tugas', href: '/assignment-letters' },
     { icon: Plane, label: 'SPPD', href: '/official-travel' },
