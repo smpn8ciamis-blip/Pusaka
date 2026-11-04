@@ -99,6 +99,8 @@ const WhatsAppBotSettings = lazy(() => import("./pages/WhatsAppBotSettings"));
 const FingerprintSettings = lazy(() => import("./pages/FingerprintSettings"));
 const BulkPhotoUpload = lazy(() => import("./pages/BulkPhotoUpload"));
 const StudentMutations = lazy(() => import("./pages/StudentMutations"));
+const StudentGallery = lazy(() => import("./pages/StudentGallery"));
+const StudentContactBook = lazy(() => import("./pages/StudentContactBook"));
 const GuruPiketDashboard = lazy(() => import("./pages/GuruPiketDashboard"));
 const EkskulJournal = lazy(() => import("./pages/EkskulJournal"));
 const PenjabSnp = lazy(() => import("./pages/PenjabSnp"));
@@ -251,6 +253,8 @@ const App = () => (
               <Route path="/teachers" element={<ProtectedRoute><Teachers /></ProtectedRoute>} />
               <Route path="/students" element={<ProtectedRoute><Students /></ProtectedRoute>} />
               <Route path="/student-mutations" element={<ProtectedRoute allowedRoles={['admin', 'kesiswaan']}><StudentMutations /></ProtectedRoute>} />
+              <Route path="/galeri-siswa" element={<ProtectedRoute allowedRoles={['admin', 'kesiswaan']}><StudentGallery /></ProtectedRoute>} />
+              <Route path="/buku-kontak-siswa" element={<ProtectedRoute allowedRoles={['admin', 'kesiswaan']}><StudentContactBook /></ProtectedRoute>} />
               <Route path="/students/:id" element={<ProtectedRoute><StudentDetail /></ProtectedRoute>} />
               <Route path="/classes" element={<ProtectedRoute><Classes /></ProtectedRoute>} />
               <Route path="/alumni" element={<ProtectedRoute><Alumni /></ProtectedRoute>} />
