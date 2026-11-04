@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image as ImageIcon, Search, User } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -14,6 +14,7 @@ import {
   applyDirectory, isActiveStudent, studentStatusLabel,
   type DirectorySortKey, type DirectoryStudent, type SortDir, type StatusFilter,
 } from '@/lib/studentDirectory';
+import { resolveStudentPhoto } from '@/lib/studentPhoto';
 import { toTitleCase } from '@/lib/utils';
 
 const SORTS: { value: string; label: string; key: DirectorySortKey; dir: SortDir }[] = [
@@ -25,13 +26,39 @@ const SORTS: { value: string; label: string; key: DirectorySortKey; dir: SortDir
   { value: 'nis-desc', label: 'NIS (besar → kecil)', key: 'nis', dir: 'desc' },
 ];
 
-function Photo({ s, className }: { s: DirectoryStudent; className?: string }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [s.photo_url]);
-  if (!s.photo_url || failed) {
-    return <div className={`flex items-center justify-center bg-muted text-muted-foreground ${className ?? ''}`}><User className="h-10 w-10" /></div>;
+/**
+ * Foto siswa. Bila alamat tersimpan gagal dimuat (404 "Object not found", alamat server lama, bucket lain,
+ * bucket privat), dicoba jalur alternatif; bila tetap gagal tampil ikon dan label "Foto tidak ditemukan".
+ */
+function Photo({ s, className, onSrc }: { s: DirectoryStudent; className?: string; onSrc?: (src: string | null) => void }) {
+  const [src, setSrc] = useState<string | null>(s.photo_url);
+  const urlRef = useRef(s.photo_url);
+  urlRef.current = s.photo_url;
+  const [missing, setMissing] = useState(false);
+
+  useEffect(() => { setSrc(s.photo_url); setMissing(false); }, [s.photo_url]);
+  useEffect(() => { onSrc?.(src); }, [src]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onError = () => {
+    const original = s.photo_url;
+    if (!original) return;
+    setSrc(null);
+    resolveStudentPhoto(original).then((u) => {
+      // abaikan hasil yang datang terlambat bila foto siswa sudah berganti
+      if (urlRef.current !== original) return;
+      if (u) setSrc(u); else setMissing(true);
+    });
+  };
+
+  if (!src) {
+    return (
+      <div className={`flex flex-col items-center justify-center gap-1 bg-muted text-muted-foreground ${className ?? ''}`}>
+        <User className="h-10 w-10" />
+        {missing && <span className="px-2 text-center text-[11px] leading-tight text-destructive">Foto tidak ditemukan di server</span>}
+      </div>
+    );
   }
-  return <img src={s.photo_url} alt={`Foto ${s.full_name}`} loading="lazy" onError={() => setFailed(true)} className={`object-cover ${className ?? ''}`} />;
+  return <img src={src} alt={`Foto ${s.full_name}`} loading="lazy" onError={onError} className={`object-cover ${className ?? ''}`} />;
 }
 
 export default function StudentGallery() {
@@ -47,6 +74,7 @@ export default function StudentGallery() {
   const [pageSize, setPageSize] = useState(24);
   const [page, setPage] = useState(1);
   const [detail, setDetail] = useState<DirectoryStudent | null>(null);
+  const [detailSrc, setDetailSrc] = useState<string | null>(null);
 
   const s = SORTS.find((x) => x.value === sort) ?? SORTS[0];
   const filtered = useMemo(
@@ -162,7 +190,7 @@ export default function StudentGallery() {
         )}
       </div>
 
-      <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
+      <Dialog open={!!detail} onOpenChange={(o) => { if (!o) { setDetail(null); setDetailSrc(null); } }}>
         <DialogContent className="max-w-sm">
           {detail && (
             <>
@@ -172,12 +200,16 @@ export default function StudentGallery() {
                   {detail.classes?.name ?? 'Tanpa kelas'} • NIS {detail.nis ?? '-'}{detail.nisn ? ` • NISN ${detail.nisn}` : ''} • {studentStatusLabel(detail)}
                 </DialogDescription>
               </DialogHeader>
-              <Photo s={detail} className="mx-auto max-h-[60dvh] w-full rounded-md !object-contain" />
-              {detail.photo_url && (
+              <Photo s={detail} onSrc={setDetailSrc} className="mx-auto max-h-[60dvh] w-full rounded-md !object-contain" />
+              {detailSrc ? (
                 <Button variant="outline" asChild>
-                  <a href={detail.photo_url} target="_blank" rel="noopener noreferrer">Buka foto ukuran penuh</a>
+                  <a href={detailSrc} target="_blank" rel="noopener noreferrer">Buka foto ukuran penuh</a>
                 </Button>
-              )}
+              ) : detail.photo_url ? (
+                <p className="text-xs text-muted-foreground">
+                  File foto tidak ada di penyimpanan server. Unggah ulang lewat menu Siswa atau Unggah Foto Massal.
+                </p>
+              ) : null}
             </>
           )}
         </DialogContent>

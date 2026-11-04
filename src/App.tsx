@@ -253,8 +253,8 @@ const App = () => (
               <Route path="/teachers" element={<ProtectedRoute><Teachers /></ProtectedRoute>} />
               <Route path="/students" element={<ProtectedRoute><Students /></ProtectedRoute>} />
               <Route path="/student-mutations" element={<ProtectedRoute allowedRoles={['admin', 'kesiswaan']}><StudentMutations /></ProtectedRoute>} />
-              <Route path="/galeri-siswa" element={<ProtectedRoute allowedRoles={['admin', 'kesiswaan']}><StudentGallery /></ProtectedRoute>} />
-              <Route path="/buku-kontak-siswa" element={<ProtectedRoute allowedRoles={['admin', 'kesiswaan']}><StudentContactBook /></ProtectedRoute>} />
+              <Route path="/galeri-siswa" element={<ProtectedRoute allowedRoles={['admin', 'kesiswaan', 'tata_usaha']}><StudentGallery /></ProtectedRoute>} />
+              <Route path="/buku-kontak-siswa" element={<ProtectedRoute allowedRoles={['admin', 'kesiswaan', 'tata_usaha']}><StudentContactBook /></ProtectedRoute>} />
               <Route path="/students/:id" element={<ProtectedRoute><StudentDetail /></ProtectedRoute>} />
               <Route path="/classes" element={<ProtectedRoute><Classes /></ProtectedRoute>} />
               <Route path="/alumni" element={<ProtectedRoute><Alumni /></ProtectedRoute>} />
