@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { supabase } from '@/integrations/supabase/client';
 import {
   NO_GRADE_TARGET, SUBMISSION_BUCKET, formatFileSize, gradeTargetKeyOf, gradeTargetLabel,
@@ -19,7 +20,10 @@ import { id as localeId } from 'date-fns/locale';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = supabase as any;
 
-interface StudentRow { id: string; full_name: string; nis: string | null }
+interface StudentRow { id: string; full_name: string; nis: string | null; status: string | null; is_alumni: boolean | null }
+
+/** Siswa aktif = status 'aktif' dan bukan alumni (sama dengan menu Siswa & Nilai). */
+const isActiveStudent = (s: Pick<StudentRow, 'status' | 'is_alumni'>) => (s.status ?? 'aktif') === 'aktif' && !s.is_alumni;
 
 function GradeBox({ sub, onSaved }: { sub: ElearningSubmission; onSaved: () => void }) {
   const [score, setScore] = useState(sub.score?.toString() ?? '');
@@ -64,6 +68,7 @@ function GradeBox({ sub, onSaved }: { sub: ElearningSubmission; onSaved: () => v
 export function SubmissionsDialog({ material, onClose }: { material: ElearningMaterial | null; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
+  const [showInactive, setShowInactive] = useState(false);
 
   const { data: students = [], isLoading: sLoading } = useQuery({
     queryKey: ['submission-students', material?.class_id],
@@ -71,7 +76,7 @@ export function SubmissionsDialog({ material, onClose }: { material: ElearningMa
     queryFn: async (): Promise<StudentRow[]> => {
       const { data, error } = await supabase
         .from('students')
-        .select('id, full_name, nis')
+        .select('id, full_name, nis, status, is_alumni')
         .eq('class_id', material!.class_id)
         .order('full_name');
       if (error) throw error;
@@ -91,12 +96,17 @@ export function SubmissionsDialog({ material, onClose }: { material: ElearningMa
 
   const byStudent = useMemo(() => new Map(subs.map((s) => [s.student_id, s])), [subs]);
 
+  const inactiveCount = useMemo(() => students.filter((s) => !isActiveStudent(s)).length, [students]);
+  const activeIds = useMemo(() => new Set(students.filter(isActiveStudent).map((s) => s.id)), [students]);
+  const submittedActive = useMemo(() => subs.filter((x) => activeIds.has(x.student_id)).length, [subs, activeIds]);
+
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
     return students
+      .filter((s) => showInactive || isActiveStudent(s))
       .filter((s) => !term || `${s.full_name} ${s.nis ?? ''}`.toLowerCase().includes(term))
       .sort((a, b) => Number(!!byStudent.get(b.id)) - Number(!!byStudent.get(a.id)) || a.full_name.localeCompare(b.full_name));
-  }, [students, search, byStudent]);
+  }, [students, search, byStudent, showInactive]);
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['material-submissions', material?.id] });
@@ -109,7 +119,7 @@ export function SubmissionsDialog({ material, onClose }: { material: ElearningMa
         <DialogHeader className="shrink-0 px-6 pb-3 pr-12 pt-6">
           <DialogTitle className="truncate">Jawaban Siswa — {material?.title}</DialogTitle>
           <DialogDescription>
-            {subs.length} dari {students.length} siswa sudah mengumpulkan.
+            {submittedActive} dari {activeIds.size} siswa aktif sudah mengumpulkan.
             {material && gradeTargetKeyOf(material) !== NO_GRADE_TARGET && (
               <span className="mt-1 block text-primary">
                 Nilai yang disimpan otomatis masuk ke “{gradeTargetLabel(gradeTargetKeyOf(material))}” di menu Nilai.
@@ -123,6 +133,12 @@ export function SubmissionsDialog({ material, onClose }: { material: ElearningMa
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input className="pl-9" placeholder="Cari siswa…" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
+          {inactiveCount > 0 && (
+            <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+              <Switch checked={showInactive} onCheckedChange={setShowInactive} />
+              Tampilkan siswa nonaktif/mutasi ({inactiveCount}) untuk melihat riwayat jawabannya
+            </label>
+          )}
         </div>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 pb-6">
@@ -137,7 +153,14 @@ export function SubmissionsDialog({ material, onClose }: { material: ElearningMa
                 <div key={st.id} className="space-y-2 rounded-lg border p-3 text-sm">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="truncate font-medium">{st.full_name}</p>
+                      <p className="truncate font-medium">
+                        {st.full_name}
+                        {!isActiveStudent(st) && (
+                          <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+                            {st.is_alumni ? 'alumni' : (st.status ?? 'nonaktif')}
+                          </span>
+                        )}
+                      </p>
                       <p className="text-xs text-muted-foreground">{st.nis ?? ''}</p>
                     </div>
                     {sub ? (
