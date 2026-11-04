@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { CheckCircle2, ExternalLink, Loader2, Search } from 'lucide-react';
+import { CheckCircle2, Eye, FileText, Loader2, Search } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,7 +13,7 @@ import {
   NO_GRADE_TARGET, SUBMISSION_BUCKET, formatFileSize, gradeTargetKeyOf, gradeTargetLabel,
   type ElearningMaterial, type ElearningSubmission,
 } from '@/lib/elearning';
-import { openStorageFile } from '@/lib/openStorageFile';
+import { SubmissionPreviewDialog, type PreviewItem } from '@/components/elearning/SubmissionPreviewDialog';
 import { format } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
 
@@ -69,6 +69,7 @@ export function SubmissionsDialog({ material, onClose }: { material: ElearningMa
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [showInactive, setShowInactive] = useState(false);
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
   const { data: students = [], isLoading: sLoading } = useQuery({
     queryKey: ['submission-students', material?.class_id],
@@ -107,6 +108,37 @@ export function SubmissionsDialog({ material, onClose }: { material: ElearningMa
       .filter((s) => !term || `${s.full_name} ${s.nis ?? ''}`.toLowerCase().includes(term))
       .sort((a, b) => Number(!!byStudent.get(b.id)) - Number(!!byStudent.get(a.id)) || a.full_name.localeCompare(b.full_name));
   }, [students, search, byStudent, showInactive]);
+
+  // Pratinjau: siswa yang sudah mengumpulkan (urutan sama dengan daftar di layar)
+  const previewItems = useMemo<PreviewItem[]>(
+    () => rows.flatMap((st) => {
+      const sub = byStudent.get(st.id);
+      return sub ? [{ sub, studentName: st.full_name }] : [];
+    }),
+    [rows, byStudent],
+  );
+  const openPreview = (studentId: string) => {
+    const i = previewItems.findIndex((x) => x.sub.student_id === studentId);
+    if (i >= 0) setPreviewIndex(i);
+  };
+
+  // Miniatur gambar jawaban (satu permintaan untuk semua gambar)
+  const imagePaths = useMemo(
+    () => subs.filter((x) => x.file_path && x.file_type === 'image').map((x) => x.file_path as string).sort(),
+    [subs],
+  );
+  const { data: thumbs = {} } = useQuery({
+    queryKey: ['submission-thumbs', material?.id, imagePaths.join('|')],
+    enabled: !!material && imagePaths.length > 0,
+    staleTime: 50 * 60_000,
+    queryFn: async (): Promise<Record<string, string>> => {
+      const { data, error } = await supabase.storage.from(SUBMISSION_BUCKET).createSignedUrls(imagePaths, 3600);
+      if (error) return {};
+      const out: Record<string, string> = {};
+      (data ?? []).forEach((d) => { if (d.path && d.signedUrl) out[d.path] = d.signedUrl; });
+      return out;
+    },
+  });
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['material-submissions', material?.id] });
@@ -181,13 +213,21 @@ export function SubmissionsDialog({ material, onClose }: { material: ElearningMa
                         <p className="whitespace-pre-wrap rounded-md bg-muted/50 p-2 text-sm">{sub.answer_text}</p>
                       )}
                       {sub.file_path && (
-                        <button
-                          type="button"
-                          className="flex items-center gap-1 text-xs text-primary underline"
-                          onClick={() => openStorageFile(SUBMISSION_BUCKET, sub.file_path!, sub.file_name ?? undefined)}
-                        >
-                          <ExternalLink className="h-3 w-3" /> {sub.file_name} ({formatFileSize(sub.file_size)})
-                        </button>
+                        sub.file_type === 'image' && thumbs[sub.file_path] ? (
+                          <button
+                            type="button"
+                            className="block overflow-hidden rounded-md border focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                            onClick={() => openPreview(st.id)}
+                            title="Klik untuk memperbesar"
+                          >
+                            <img src={thumbs[sub.file_path]} alt={sub.file_name ?? 'Jawaban siswa'} loading="lazy" className="max-h-40 w-auto max-w-full object-contain" />
+                          </button>
+                        ) : (
+                          <Button type="button" variant="outline" size="sm" className="h-auto justify-start gap-2 py-1.5 text-xs" onClick={() => openPreview(st.id)}>
+                            {sub.file_type === 'image' ? <Eye className="h-4 w-4 shrink-0" /> : <FileText className="h-4 w-4 shrink-0" />}
+                            <span className="truncate">Lihat {sub.file_name} ({formatFileSize(sub.file_size)})</span>
+                          </Button>
+                        )
                       )}
                       <GradeBox sub={sub} onSaved={refresh} />
                     </>
@@ -198,6 +238,14 @@ export function SubmissionsDialog({ material, onClose }: { material: ElearningMa
           )}
         </div>
       </DialogContent>
+
+      <SubmissionPreviewDialog
+        items={previewItems}
+        index={previewIndex}
+        onIndexChange={setPreviewIndex}
+        onClose={() => setPreviewIndex(null)}
+        footer={(item) => <GradeBox sub={item.sub} onSaved={refresh} />}
+      />
     </Dialog>
   );
 }
