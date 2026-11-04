@@ -223,7 +223,16 @@ app.use((req, res, next) => {
 
 // CORS: isi CORS_ORIGINS (pisahkan koma, mis. https://pusaka.sekolah.sch.id) agar hanya situs itu yang boleh memanggil API.
 // Bila kosong, perilaku lama dipertahankan (semua origin) supaya tidak ada yang putus.
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map((x) => x.trim()).filter(Boolean);
+// Situs resmi sekolah selalu diizinkan walau CORS_ORIGINS diisi: aplikasi bisa dibuka lewat
+// smpn8ciamis.sch.id maupun pusaka.smpn8ciamis.sch.id, sedangkan API ada di pusaka.smpn8ciamis.sch.id/wa-api.
+const CORS_ORIGINS_CONFIGURED = (process.env.CORS_ORIGINS || '').split(',').map((x) => x.trim().replace(/\/+$/, '')).filter(Boolean);
+const CORS_ORIGINS = CORS_ORIGINS_CONFIGURED.length
+    ? [...new Set([
+        ...CORS_ORIGINS_CONFIGURED,
+        'https://smpn8ciamis.sch.id', 'https://www.smpn8ciamis.sch.id',
+        'https://pusaka.smpn8ciamis.sch.id', 'https://www.pusaka.smpn8ciamis.sch.id',
+    ])]
+    : [];
 app.use((req, res, next) => {
     const origin = req.headers.origin;
     if (!CORS_ORIGINS.length) res.header('Access-Control-Allow-Origin', '*');
