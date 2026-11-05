@@ -384,7 +384,7 @@ function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Pengaturan Mutasi Masuk</DialogTitle>
-          <DialogDescription>Hanya admin yang dapat mengubah pengaturan ini.</DialogDescription>
+          <DialogDescription>Hanya admin dan tata usaha yang dapat mengubah pengaturan ini.</DialogDescription>
         </DialogHeader>
         <div className="space-y-5">
           <div className="space-y-1.5">
@@ -436,7 +436,7 @@ export default function StudentAdmissions() {
   const { userRole } = useAuth();
   const queryClient = useQueryClient();
   const { settings } = useStudentIntake();
-  const isAdmin = userRole === 'admin' || userRole === 'super_admin';
+  const isAdmin = userRole === 'admin' || userRole === 'super_admin' || userRole === 'tata_usaha'; // boleh mengubah pengaturan & menghapus catatan
 
   const [formOpen, setFormOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);

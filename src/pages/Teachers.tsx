@@ -1,3 +1,4 @@
+import { useAuth } from '@/contexts/AuthContext';
 import { useState, useMemo } from 'react';
 import { cleanPhoneNumber, isValidPhoneNumber } from '@/lib/phone';
 import { DashboardLayout } from '@/components/DashboardLayout';
@@ -41,6 +42,8 @@ function TeachersPage() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const itemsPerPage = 20;
   const queryClient = useQueryClient();
+  const { userRole } = useAuth();
+  const canAssignAdmin = userRole !== 'tata_usaha'; // tata usaha hanya boleh membuat akun guru
 
   // Fetch total count for pagination
   const { data: totalCount } = useQuery({
@@ -462,7 +465,7 @@ function TeachersPage() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="teacher">Guru</SelectItem>
-                          <SelectItem value="admin">Admin</SelectItem>
+                          {canAssignAdmin && <SelectItem value="admin">Admin</SelectItem>}
                         </SelectContent>
                       </Select>
                     </div>

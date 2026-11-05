@@ -540,9 +540,17 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const tataUsahaMenuItems: MenuItem[] = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/tata-usaha-dashboard' },
 
-    // --- Data Siswa ---
+    // --- Master Data (akses penuh, sama seperti admin) ---
+    { icon: UserCircle, label: 'Guru', href: '/teachers' },
+    { icon: Briefcase, label: 'Staf', href: '/staff' },
+    { icon: Users, label: 'Siswa', href: '/students' },
+    { icon: BookOpen, label: 'Kelas', href: '/classes' },
+    { icon: UserPlus, label: 'Mutasi Masuk', href: '/mutasi-masuk' },
+    { icon: UserMinus, label: 'Mutasi Keluar', href: '/student-mutations' },
     { icon: Images, label: 'Galeri Foto Siswa', href: '/galeri-siswa' },
     { icon: Phone, label: 'Buku Kontak Siswa', href: '/buku-kontak-siswa' },
+    { icon: Award, label: 'Alumni', href: '/alumni' },
+    { icon: CalendarClock, label: 'Tahun Pelajaran', href: '/academic-year-settings' },
 
     // --- Surat & Perjalanan ---
     { icon: FileSignature, label: 'Surat Tugas', href: '/assignment-letters' },

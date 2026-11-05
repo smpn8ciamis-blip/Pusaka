@@ -298,7 +298,7 @@ function StudentMutationsPage() {
   };
 
   return (
-    <ProtectedRoute allowedRoles={['admin', 'kesiswaan']}>
+    <ProtectedRoute allowedRoles={['admin', 'kesiswaan', 'tata_usaha']}>
       <DashboardLayout>
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">

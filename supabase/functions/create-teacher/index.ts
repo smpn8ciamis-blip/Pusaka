@@ -6,17 +6,17 @@ const corsHeaders = {
 };
 
 // Helper function to verify admin authentication and get school_id
-async function verifyAdminAuth(req: Request, supabaseClient: any): Promise<{ user: any; schoolId: string | null; error: string | null }> {
+async function verifyAdminAuth(req: Request, supabaseClient: any): Promise<{ user: any; schoolId: string | null; callerRole: string | null; error: string | null }> {
   const authHeader = req.headers.get('Authorization');
   if (!authHeader) {
-    return { user: null, schoolId: null, error: 'No authorization header provided' };
+    return { user: null, schoolId: null, callerRole: null, error: 'No authorization header provided' };
   }
 
   const jwt = authHeader.replace('Bearer ', '');
   const { data: { user }, error } = await supabaseClient.auth.getUser(jwt);
   
   if (error || !user) {
-    return { user: null, schoolId: null, error: 'Invalid or expired token' };
+    return { user: null, schoolId: null, callerRole: null, error: 'Invalid or expired token' };
   }
 
   // Check if user has admin role and get school_id
@@ -26,11 +26,12 @@ async function verifyAdminAuth(req: Request, supabaseClient: any): Promise<{ use
     .eq('user_id', user.id)
     .single();
 
-  if (roleError || (roleData?.role !== 'admin' && roleData?.role !== 'super_admin')) {
-    return { user: null, schoolId: null, error: 'Admin access required' };
+  // admin, super_admin, dan tata_usaha (master data) boleh; tata_usaha dibatasi di bawah
+  if (roleError || !['admin', 'super_admin', 'tata_usaha'].includes(roleData?.role)) {
+    return { user: null, schoolId: null, callerRole: null, error: 'Admin or tata usaha access required' };
   }
 
-  return { user, schoolId: roleData?.school_id || null, error: null };
+  return { user, schoolId: roleData?.school_id || null, callerRole: roleData.role, error: null };
 }
 
 Deno.serve(async (req) => {
@@ -51,7 +52,7 @@ Deno.serve(async (req) => {
     );
 
     // Verify admin authentication
-    const { user: adminUser, schoolId, error: authError } = await verifyAdminAuth(req, supabaseClient);
+    const { user: adminUser, schoolId, callerRole, error: authError } = await verifyAdminAuth(req, supabaseClient);
     if (authError) {
       console.log('Authentication failed:', authError);
       return new Response(
@@ -68,6 +69,14 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({ error: 'Missing required fields: email, password, fullName, subject, role' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Tata usaha hanya boleh membuat akun guru biasa (bukan admin) agar tidak bisa menaikkan hak akses.
+    if (callerRole === 'tata_usaha' && role !== 'teacher') {
+      return new Response(
+        JSON.stringify({ error: 'Tata usaha hanya boleh membuat akun dengan role guru' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
