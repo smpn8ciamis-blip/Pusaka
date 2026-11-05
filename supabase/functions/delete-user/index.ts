@@ -6,17 +6,17 @@ const corsHeaders = {
 };
 
 // Helper function to verify admin authentication and get school_id
-async function verifyAdminAuth(req: Request, supabaseClient: any): Promise<{ user: any; schoolId: string | null; isSuperAdmin: boolean; error: string | null }> {
+async function verifyAdminAuth(req: Request, supabaseClient: any): Promise<{ user: any; schoolId: string | null; isSuperAdmin: boolean; callerRole: string | null; error: string | null }> {
   const authHeader = req.headers.get('Authorization');
   if (!authHeader) {
-    return { user: null, schoolId: null, isSuperAdmin: false, error: 'No authorization header provided' };
+    return { user: null, schoolId: null, isSuperAdmin: false, callerRole: null, error: 'No authorization header provided' };
   }
 
   const jwt = authHeader.replace('Bearer ', '');
   const { data: { user }, error } = await supabaseClient.auth.getUser(jwt);
   
   if (error || !user) {
-    return { user: null, schoolId: null, isSuperAdmin: false, error: 'Invalid or expired token' };
+    return { user: null, schoolId: null, isSuperAdmin: false, callerRole: null, error: 'Invalid or expired token' };
   }
 
   // Check if user has admin role and get school_id
@@ -26,11 +26,11 @@ async function verifyAdminAuth(req: Request, supabaseClient: any): Promise<{ use
     .eq('user_id', user.id)
     .single();
 
-  if (roleError || (roleData?.role !== 'admin' && roleData?.role !== 'super_admin')) {
-    return { user: null, schoolId: null, isSuperAdmin: false, error: 'Admin access required' };
+  if (roleError || !['admin', 'super_admin', 'tata_usaha'].includes(roleData?.role)) {
+    return { user: null, schoolId: null, isSuperAdmin: false, callerRole: null, error: 'Admin or tata usaha access required' };
   }
 
-  return { user, schoolId: roleData?.school_id || null, isSuperAdmin: roleData?.role === 'super_admin', error: null };
+  return { user, schoolId: roleData?.school_id || null, isSuperAdmin: roleData?.role === 'super_admin', callerRole: roleData.role, error: null };
 }
 
 Deno.serve(async (req) => {
@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
     );
 
     // Verify admin authentication
-    const { user: adminUser, schoolId, isSuperAdmin, error: authError } = await verifyAdminAuth(req, supabaseClient);
+    const { user: adminUser, schoolId, isSuperAdmin, callerRole, error: authError } = await verifyAdminAuth(req, supabaseClient);
     if (authError) {
       console.log('Authentication failed:', authError);
       return new Response(
@@ -75,6 +75,26 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: 'Cannot delete your own account' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
+    }
+
+    // Tata usaha tidak boleh menghapus akun admin / super admin (mencegah pengambilalihan)
+    if (callerRole === 'tata_usaha') {
+      const { data: targetRoles } = await supabaseClient
+        .from('user_roles')
+        .select('role, school_id')
+        .eq('user_id', userId);
+      if ((targetRoles || []).some((r: any) => r.role === 'admin' || r.role === 'super_admin')) {
+        return new Response(
+          JSON.stringify({ error: 'Tata usaha tidak boleh menghapus akun admin' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      if (!(targetRoles || []).length) {
+        return new Response(
+          JSON.stringify({ error: 'Pengguna tidak ditemukan' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     // Non-super-admin can only delete users from their own school

@@ -21,7 +21,7 @@ export interface IntakeSettings {
  */
 export function useStudentIntake() {
   const { userRole } = useAuth();
-  const canUse = userRole === 'admin' || userRole === 'kesiswaan' || userRole === 'super_admin';
+  const canUse = userRole === 'admin' || userRole === 'kesiswaan' || userRole === 'tata_usaha' || userRole === 'super_admin';
   const q = useQuery({
     queryKey: ['mutasi-masuk-settings'],
     enabled: canUse,

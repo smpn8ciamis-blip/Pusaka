@@ -293,5 +293,5 @@ function StaffPage() {
 }
 
 export default function Staff() {
-  return <ProtectedRoute allowedRoles={['admin', 'super_admin']}><StaffPage /></ProtectedRoute>;
+  return <ProtectedRoute allowedRoles={['admin', 'super_admin', 'tata_usaha']}><StaffPage /></ProtectedRoute>;
 }

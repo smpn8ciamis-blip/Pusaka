@@ -253,8 +253,8 @@ const App = () => (
               <Route path="/staff-dashboard" element={<StaffDashboard />} />
               <Route path="/teachers" element={<ProtectedRoute><Teachers /></ProtectedRoute>} />
               <Route path="/students" element={<ProtectedRoute><Students /></ProtectedRoute>} />
-              <Route path="/mutasi-masuk" element={<ProtectedRoute allowedRoles={['admin', 'kesiswaan']}><StudentAdmissions /></ProtectedRoute>} />
-              <Route path="/student-mutations" element={<ProtectedRoute allowedRoles={['admin', 'kesiswaan']}><StudentMutations /></ProtectedRoute>} />
+              <Route path="/mutasi-masuk" element={<ProtectedRoute allowedRoles={['admin', 'kesiswaan', 'tata_usaha']}><StudentAdmissions /></ProtectedRoute>} />
+              <Route path="/student-mutations" element={<ProtectedRoute allowedRoles={['admin', 'kesiswaan', 'tata_usaha']}><StudentMutations /></ProtectedRoute>} />
               <Route path="/galeri-siswa" element={<ProtectedRoute allowedRoles={['admin', 'kesiswaan', 'tata_usaha']}><StudentGallery /></ProtectedRoute>} />
               <Route path="/buku-kontak-siswa" element={<ProtectedRoute allowedRoles={['admin', 'kesiswaan', 'tata_usaha']}><StudentContactBook /></ProtectedRoute>} />
               <Route path="/students/:id" element={<ProtectedRoute><StudentDetail /></ProtectedRoute>} />
