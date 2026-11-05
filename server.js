@@ -2118,9 +2118,22 @@ app.post('/admin/reload-config', requireAdmin, (req, res) => {
 // sehingga pratinjau memuat judul, ringkasan, dan gambar cover. Pengunjung biasa langsung dialihkan ke halaman berita.
 // Hanya membaca berita berstatus published; tanpa login (memang untuk publik).
 const SITE_URL = (process.env.SITE_URL || 'https://pusaka.smpn8ciamis.sch.id').replace(/\/+$/, '');
+// Ikon situs eksplisit (logo sekolah) di HTML pratinjau tautan, agar crawler tidak memakai ikon bawaan/cadangan lain.
+// Parameter ?v= mengubah alamat sehingga cache ikon lama di aplikasi pesan/peramban tidak terpakai.
+const OG_ICON_VERSION = process.env.OG_ICON_VERSION || '2';
+function ogIconTags(base) {
+    const v = '?v=' + encodeURIComponent(OG_ICON_VERSION);
+    return '<link rel="icon" href="' + escHtml(base + '/favicon.ico' + v) + '" sizes="any">\n' +
+        '<link rel="icon" type="image/png" sizes="48x48" href="' + escHtml(base + '/favicon-48.png' + v) + '">\n' +
+        '<link rel="icon" type="image/png" sizes="256x256" href="' + escHtml(base + '/favicon.png' + v) + '">\n' +
+        '<link rel="apple-touch-icon" href="' + escHtml(base + '/icon-192.png' + v) + '">';
+}
+
 function absUrl(u) {
     const s = String(u || '').trim();
     if (!s) return '';
+    // gambar yang masih ditaruh di hosting Lovable diabaikan -> jatuh ke logo/kartu bawaan sekolah
+    if (/^(https?:)?\/\/([a-z0-9-]+\.)*(lovable\.app|lovableproject\.com|lovable\.dev|gptengineer\.app)(\/|$)/i.test(s)) return '';
     if (/^https?:\/\//i.test(s)) return s;
     if (s.startsWith('//')) return 'https:' + s;
     return SITE_URL + (s.startsWith('/') ? '' : '/') + s;
@@ -2246,7 +2259,7 @@ async function ogBeritaHandler(req, res) {
         const tags = meta.map(function(m) { return '<meta property="' + m[0] + '" content="' + escHtml(m[1]) + '">'; }).join('\n');
         res.set('Cache-Control', 'public, max-age=300');
         res.type('html').send('<!doctype html><html lang="id"><head><meta charset="utf-8"><title>' + escHtml(title) + '</title>\n' +
-            '<meta name="description" content="' + escHtml(desc) + '">\n<link rel="canonical" href="' + escHtml(url) + '">\n' + tags + '\n' +
+            '<meta name="description" content="' + escHtml(desc) + '">\n<link rel="canonical" href="' + escHtml(url) + '">\n' + ogIconTags(SITE_URL) + '\n' + tags + '\n' +
             '<meta http-equiv="refresh" content="0;url=' + escHtml(url) + '"></head><body><p><a href="' + escHtml(url) + '">' + escHtml(n.title) + '</a></p>' +
             '<script>location.replace(' + JSON.stringify(url).replace(/</g, '\\u003c') + ')</script></body></html>');
     } catch (e) {
@@ -2314,7 +2327,7 @@ async function ogHalamanHandler(req, res) {
         const tags = meta.map(function(m) { return '<meta property="' + m[0] + '" content="' + escHtml(m[1]) + '">'; }).join('\n');
         res.set('Cache-Control', 'public, max-age=300');
         res.type('html').send('<!doctype html><html lang="id"><head><meta charset="utf-8"><title>' + escHtml(title) + '</title>\n' +
-            '<meta name="description" content="' + escHtml(desc) + '">\n<link rel="canonical" href="' + escHtml(url) + '">\n' + tags + '\n' +
+            '<meta name="description" content="' + escHtml(desc) + '">\n<link rel="canonical" href="' + escHtml(url) + '">\n' + ogIconTags(base) + '\n' + tags + '\n' +
             '<meta http-equiv="refresh" content="0;url=' + escHtml(url) + '"></head><body><p><a href="' + escHtml(url) + '">' + escHtml(title) + '</a></p>' +
             '<script>location.replace(' + JSON.stringify(url).replace(/</g, '\\u003c') + ')</script></body></html>');
     } catch (e) {
