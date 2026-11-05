@@ -13,7 +13,7 @@ import {
   Award, FileSignature, Plane, Receipt, FileSpreadsheet, Wallet, FileBarChart,
   Inbox, Send, Hammer, Vote, Upload, Bell, Lock, Landmark, Server, UserMinus,
   Sparkles, CreditCard, ScanLine, LayoutDashboard, Search, Star, Moon, CalendarDays, KeyRound, Fingerprint, Briefcase, HeartHandshake,
-  Gauge, Images, Phone,
+  Gauge, Images, Phone, UserPlus,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -275,6 +275,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         { icon: Briefcase, label: 'Staf', href: '/staff' },
         { icon: Users, label: 'Siswa', href: '/students' },
         { icon: BookOpen, label: 'Kelas', href: '/classes' },
+        { icon: UserPlus, label: 'Mutasi Masuk', href: '/mutasi-masuk' },
         { icon: UserMinus, label: 'Mutasi Keluar', href: '/student-mutations' },
         { icon: Images, label: 'Galeri Foto Siswa', href: '/galeri-siswa' },
         { icon: Phone, label: 'Buku Kontak Siswa', href: '/buku-kontak-siswa' },
@@ -574,6 +575,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: CreditCard, label: 'Absensi RFID', href: '/rfid-attendance' },
     { icon: HeartHandshake, label: 'Absensi Salat', href: '/kelola-salat' },
     { icon: KeyRound, label: 'Akun Siswa', href: '/akun-siswa' },
+    { icon: UserPlus, label: 'Mutasi Masuk', href: '/mutasi-masuk' },
     { icon: Images, label: 'Galeri Foto Siswa', href: '/galeri-siswa' },
     { icon: Phone, label: 'Buku Kontak Siswa', href: '/buku-kontak-siswa' },
     { icon: AlertTriangle, label: 'Poin Pelanggaran', href: '/violations' },
