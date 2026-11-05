@@ -58,14 +58,17 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 });
 
 const app = express();
+// Bot berjalan di belakang nginx (127.0.0.1): percayai HANYA header X-Forwarded-For dari proxy lokal itu,
+// agar req.ip = alamat pengunjung sebenarnya (bukan 127.0.0.1 untuk semua orang) dan pembatas laju bekerja per IP.
+app.set('trust proxy', 'loopback');
 app.use(express.json({ limit: '100kb' }));
 
 // Pembatas laju sederhana (dalam memori) untuk endpoint yang terbuka tanpa login.
-function rateLimit(name, max, windowMs) {
+function rateLimit(name, max, windowMs, keyFn) {
     const hits = new Map();
     setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (now - v.t > windowMs) hits.delete(k); }, windowMs).unref();
     return (req, res, next) => {
-        const key = name + ':' + (req.ip || 'x');
+        const key = name + ':' + (req.ip || 'x') + (keyFn ? ':' + keyFn(req) : '');
         const now = Date.now();
         const v = hits.get(key);
         if (!v || now - v.t > windowMs) { hits.set(key, { t: now, n: 1 }); return next(); }
@@ -988,19 +991,31 @@ async function resolveUserId(token) {
     return body.id;
 }
 
+// Batas percobaan token salah per IP (mencegah tebak-tebak token & banjir panggilan ke server auth).
+const AUTH_FAIL_MAX = 20, AUTH_FAIL_WINDOW = 10 * 60 * 1000;
+const authFails = new Map();
+setInterval(() => { const now = Date.now(); for (const [k, v] of authFails) if (now - v.t > AUTH_FAIL_WINDOW) authFails.delete(k); }, 60 * 1000).unref();
+function authBlocked(req) { const v = authFails.get(req.ip || 'x'); return !!v && Date.now() - v.t <= AUTH_FAIL_WINDOW && v.n >= AUTH_FAIL_MAX; }
+function authFailed(req) {
+    const k = req.ip || 'x', now = Date.now(), v = authFails.get(k);
+    if (!v || now - v.t > AUTH_FAIL_WINDOW) authFails.set(k, { t: now, n: 1 }); else v.n++;
+}
+function authTooMany(res) { return res.status(429).json({ status: 'error', message: 'Terlalu banyak percobaan gagal. Coba lagi beberapa menit lagi.' }); }
+
 async function requireAdmin(req, res, next) {
     try {
+        if (authBlocked(req)) return authTooMany(res);
         const auth = req.headers.authorization || '';
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
         if (!token) return res.status(401).json({ status: 'error', message: 'Token tidak ada.' });
         let userId;
         try { userId = await resolveUserId(token); }
-        catch (e) { return res.status(401).json({ status: 'error', message: 'Token tidak valid (' + e.message + ').' }); }
+        catch (e) { authFailed(req); return res.status(401).json({ status: 'error', message: 'Token tidak valid (' + e.message + ').' }); }
         const roleRes = await supabase.from('user_roles').select('role').eq('user_id', userId);
         const roles = roleRes.data, rErr = roleRes.error;
         if (rErr) throw rErr;
         const isAdmin = (roles || []).some(function(r){ return r.role === 'admin' || r.role === 'super_admin'; });
-        if (!isAdmin) return res.status(403).json({ status: 'error', message: 'Hanya admin.' });
+        if (!isAdmin) { authFailed(req); return res.status(403).json({ status: 'error', message: 'Hanya admin.' }); }
         req.adminUserId = userId;
         next();
     } catch (e) {
@@ -1010,11 +1025,12 @@ async function requireAdmin(req, res, next) {
 
 async function requireUser(req, res, next) {
     try {
+        if (authBlocked(req)) return authTooMany(res);
         const auth = req.headers.authorization || '';
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
         if (!token) return res.status(401).json({ status: 'error', message: 'Token tidak ada.' });
         try { req.userId = await resolveUserId(token); }
-        catch (e) { return res.status(401).json({ status: 'error', message: 'Token tidak valid (' + e.message + ').' }); }
+        catch (e) { authFailed(req); return res.status(401).json({ status: 'error', message: 'Token tidak valid (' + e.message + ').' }); }
         next();
     } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
 }
@@ -2383,8 +2399,16 @@ app.get('/', (req, res) => res.json({
 //   Server Address = domain/IP server ini, Port = port HTTP bot (atau port nginx yang meneruskan /iclock/ ke bot)
 // Mesin baru otomatis terdaftar "menunggu"; admin mengaktifkannya di halaman Mesin Fingerprint.
 const fpSeen = new Map(); // sn -> { at, active }
+const fpNewTimes = []; // waktu pendaftaran mesin baru (batas per jam)
+// Batas per IP untuk semua jalur /iclock/ (mesin asli ~6-10 permintaan/menit) + nomor seri harus berformat wajar.
+app.use('/iclock', rateLimit('iclock', 300, 60000), (req, res, next) => {
+    const sn = String(req.query.SN || req.query.sn || '');
+    if (sn && !/^[A-Za-z0-9._-]{3,64}$/.test(sn)) return res.status(400).type('text/plain').send('ERROR: bad SN');
+    next();
+});
 const rawText = express.text({ type: function() { return true; }, limit: '5mb' });
 async function fpDevice(sn, ip) {
+    if (fpSeen.size > 2000) fpSeen.clear(); // cegah memori membengkak oleh nomor seri palsu
     const c = fpSeen.get(sn);
     if (c && Date.now() - c.at < 30000) return c.active;
     let active = false;
@@ -2392,6 +2416,11 @@ async function fpDevice(sn, ip) {
         const r = await supabase.from('fingerprint_devices').select('is_active').eq('serial_number', sn).maybeSingle();
         if (r.error) throw r.error;
         if (!r.data) {
+            // Batasi pendaftaran mesin baru (maks. 5 per jam) agar tabel tidak dibanjiri nomor seri palsu.
+            const nowMs = Date.now();
+            while (fpNewTimes.length && nowMs - fpNewTimes[0] > 3600000) fpNewTimes.shift();
+            if (fpNewTimes.length >= 5) { fpSeen.set(sn, { at: nowMs, active: false }); return false; }
+            fpNewTimes.push(nowMs);
             await supabase.from('fingerprint_devices').insert({ serial_number: sn, name: 'Mesin ' + sn, is_active: false, last_seen_at: new Date().toISOString(), last_ip: ip });
             console.log('[FINGERPRINT] Mesin baru terdeteksi (menunggu aktivasi admin): ' + sn);
         } else {
@@ -2403,7 +2432,7 @@ async function fpDevice(sn, ip) {
     return active;
 }
 function fpSn(req) { return String(req.query.SN || req.query.sn || '').trim().slice(0, 64); }
-function fpIp(req) { return String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim().slice(0, 64); }
+function fpIp(req) { return String(req.ip || req.socket.remoteAddress || '').slice(0, 64); }
 
 // Jabat tangan awal + konfigurasi
 app.get('/iclock/cdata', async (req, res) => {
