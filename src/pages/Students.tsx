@@ -21,7 +21,8 @@ import { ClassPromotionDialog } from '@/components/ClassPromotionDialog';
 import { GraduateStudentsDialog } from '@/components/GraduateStudentsDialog';
 import { ClassHistoryReportDialog, StudentClassHistoryButton } from '@/components/StudentClassHistory';
 import * as XLSX from 'xlsx';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { useStudentIntake } from '@/hooks/useStudentIntake';
 import { HighlightText } from '@/components/HighlightText';
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
@@ -369,6 +370,11 @@ function StudentsPage() {
     onError: (error: any) => toast.error('Gagal menghapus siswa: ' + error.message),
   });
 
+  const intake = useStudentIntake();
+  const { canUseMutasiMasuk } = intake;
+  // peran yang tidak bisa membaca pengaturan: biarkan basis data yang memutuskan (pesannya jelas)
+  const allowDirect = intake.allowDirect || !canUseMutasiMasuk;
+
   const importStudentsMutation = useMutation({
     mutationFn: async (file: File) => {
       const text = await file.text();
@@ -379,6 +385,7 @@ function StudentsPage() {
       if (!requiredHeaders.every(h => headers.includes(h))) throw new Error('Format tidak valid. Header minimal: NIS, Nama');
       let insertedCount = 0, updatedCount = 0, errorCount = 0;
       const errors: string[] = [];
+      const skippedNew: string[] = [];
       for (let i = 1; i < lines.length; i++) {
         const values = lines[i].split(',').map(v => v.trim());
         if (values.length < 2) continue;
@@ -404,16 +411,20 @@ function StudentsPage() {
         if (existingStudent) {
           const { error } = await supabase.from('students').update(studentData).eq('id', existingStudent.id);
           if (error) { errorCount++; errors.push(`Baris ${i + 1} (${nis}): ${error.message}`); } else updatedCount++;
+        } else if (!allowDirect) {
+          // siswa baru hanya lewat menu Mutasi Masuk
+          skippedNew.push(nis);
         } else {
           const { error } = await supabase.from('students').insert(studentData);
           if (error) { errorCount++; errors.push(`Baris ${i + 1} (${nis}): ${error.message}`); } else insertedCount++;
         }
       }
-      return { insertedCount, updatedCount, errorCount, errors };
+      return { insertedCount, updatedCount, errorCount, errors, skippedNew };
     },
-    onSuccess: ({ insertedCount, updatedCount, errorCount, errors }) => {
+    onSuccess: ({ insertedCount, updatedCount, errorCount, errors, skippedNew }) => {
       queryClient.invalidateQueries({ queryKey: ['students'] });
       const messages = [];
+      if (skippedNew.length > 0) messages.push(`${skippedNew.length} NIS baru dilewati (siswa baru hanya lewat menu Mutasi Masuk)`);
       if (insertedCount > 0) messages.push(`${insertedCount} siswa ditambahkan`);
       if (updatedCount > 0) messages.push(`${updatedCount} siswa diperbarui`);
       if (errorCount > 0) messages.push(`${errorCount} gagal`);
@@ -1079,9 +1090,15 @@ function StudentsPage() {
             <GraduateStudentsDialog />
             <ClassHistoryReportDialog />
             <Dialog open={isDialogOpen} onOpenChange={handleDialogClose}>
-              <DialogTrigger asChild>
-                <Button><Plus className="mr-2 h-4 w-4" /> Tambah Siswa</Button>
-              </DialogTrigger>
+              {allowDirect ? (
+                <DialogTrigger asChild>
+                  <Button><Plus className="mr-2 h-4 w-4" /> Tambah Siswa</Button>
+                </DialogTrigger>
+              ) : canUseMutasiMasuk ? (
+                <Button asChild>
+                  <Link to="/mutasi-masuk"><Plus className="mr-2 h-4 w-4" /> Mutasi Masuk</Link>
+                </Button>
+              ) : null}
               <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader><DialogTitle>{editingStudent ? 'Edit Siswa' : 'Tambah Siswa Baru'}</DialogTitle></DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4">

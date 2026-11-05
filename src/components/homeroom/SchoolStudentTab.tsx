@@ -2,6 +2,8 @@
 // Akun Siswa untuk admin / kesiswaan: seperti tampilan wali kelas, tetapi cakupannya satu sekolah.
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { useStudentIntake } from "@/hooks/useStudentIntake";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -138,6 +140,7 @@ export default function SchoolStudentTab() {
   const resetPage = () => setPage(1);
 
   const handleAdd = () => { setEditing(null); setFormOpen(true); };
+  const { allowDirect } = useStudentIntake();
   const handleEdit = (r: AdminStudentRow) => { setEditing(toStudent(r)); setFormOpen(true); };
   const handleManageAccount = (r: AdminStudentRow) => { setAccountRow(r); setAccountOpen(true); };
   const handleDelete = async (r: AdminStudentRow) => {
@@ -176,10 +179,19 @@ export default function SchoolStudentTab() {
               <Zap className="h-4 w-4" />
               Generate Akun Massal
             </Button>
-            <Button size="sm" className="gap-2" onClick={handleAdd} disabled={!schoolId}>
-              <Plus className="h-4 w-4" />
-              Tambah Siswa
-            </Button>
+            {allowDirect ? (
+              <Button size="sm" className="gap-2" onClick={handleAdd} disabled={!schoolId}>
+                <Plus className="h-4 w-4" />
+                Tambah Siswa
+              </Button>
+            ) : (
+              <Button size="sm" className="gap-2" asChild>
+                <Link to="/mutasi-masuk">
+                  <Plus className="h-4 w-4" />
+                  Mutasi Masuk
+                </Link>
+              </Button>
+            )}
           </div>
         </div>
 

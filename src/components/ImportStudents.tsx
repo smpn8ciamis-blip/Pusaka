@@ -10,11 +10,16 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
+import { Link } from 'react-router-dom';
+import { useStudentIntake } from '@/hooks/useStudentIntake';
 
 export function ImportStudents() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const queryClient = useQueryClient();
+  const intake = useStudentIntake();
+  const { canUseMutasiMasuk } = intake;
+  const allowDirect = intake.allowDirect || !canUseMutasiMasuk;
 
   const { data: classes } = useQuery({
     queryKey: ['classes'],
@@ -196,6 +201,13 @@ export function ImportStudents() {
         <p className="text-sm text-muted-foreground">
           Import data siswa dari file Excel secara massal
         </p>
+        {!allowDirect && (
+          <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            Siswa baru yang masuk saat tahun ajaran berjalan hanya dapat ditambahkan lewat menu{' '}
+            {canUseMutasiMasuk ? <Link to="/mutasi-masuk" className="font-semibold underline">Mutasi Masuk</Link> : <b>Mutasi Masuk</b>}.
+            Impor massal dibuka sementara oleh admin lewat pengaturan “Penerimaan awal tahun ajaran” di menu tersebut.
+          </p>
+        )}
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleDownloadTemplate} className="gap-2">
             <Download className="h-4 w-4" />
@@ -203,7 +215,7 @@ export function ImportStudents() {
           </Button>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-              <Button className="gap-2 bg-gradient-primary">
+              <Button className="gap-2 bg-gradient-primary" disabled={!allowDirect}>
                 <Upload className="h-4 w-4" />
                 Import Data
               </Button>
@@ -241,7 +253,7 @@ export function ImportStudents() {
                   <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
                     Batal
                   </Button>
-                  <Button onClick={handleImport} disabled={!selectedFile}>
+                  <Button onClick={handleImport} disabled={!selectedFile || !allowDirect}>
                     Import
                   </Button>
                 </div>
