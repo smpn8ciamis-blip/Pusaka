@@ -716,7 +716,7 @@ function TeachersPage() {
 
 export default function Teachers() {
   return (
-    <ProtectedRoute requireRole="admin">
+    <ProtectedRoute allowedRoles={['admin', 'tata_usaha']}>
       <TeachersPage />
     </ProtectedRoute>
   );
