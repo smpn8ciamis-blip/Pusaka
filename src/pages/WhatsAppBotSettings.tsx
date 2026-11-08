@@ -541,6 +541,8 @@ function ReminderTab() {
   const [assignWa, setAssignWa] = useState(true);
   const [assignFu, setAssignFu] = useState(true);
   const [parentQuery, setParentQuery] = useState(true);
+  const [waMenu, setWaMenu] = useState(true);
+  const [waButtons, setWaButtons] = useState(false);
   const [violationWa, setViolationWa] = useState(true);
   const [ekskulWa, setEkskulWa] = useState(true);
   const [assignFuTime, setAssignFuTime] = useState('09:00');
@@ -578,6 +580,8 @@ function ReminderTab() {
       setAssignWa(data.assignment_wa_enabled !== false);
       setAssignFu(data.assignment_followup_enabled !== false);
       setParentQuery(data.parent_query_enabled !== false);
+      setWaMenu(data.wa_menu_enabled !== false);
+      setWaButtons(data.wa_buttons_enabled === true);
       setViolationWa(data.violation_wa_enabled !== false);
       setEkskulWa(data.ekskul_journal_wa_enabled !== false);
       setAssignFuTime(String(data.assignment_followup_time || '09:00').slice(0, 5));
@@ -609,6 +613,8 @@ function ReminderTab() {
         assignment_wa_enabled: assignWa,
         assignment_followup_enabled: assignFu,
         parent_query_enabled: parentQuery,
+        wa_menu_enabled: waMenu,
+        wa_buttons_enabled: waButtons,
         violation_wa_enabled: violationWa,
         ekskul_journal_wa_enabled: ekskulWa,
         assignment_followup_time: /^\d{2}:\d{2}$/.test(assignFuTime) ? assignFuTime : '09:00',
@@ -823,6 +829,22 @@ function ReminderTab() {
           </div>
           <p className="text-xs text-muted-foreground">
             Orang tua yang nomornya sudah tertaut ke siswa (kirim <b>DAFTAR</b> ke bot, lalu isi NISN dan tanggal lahir) dapat mengetik <b>cek poin</b> untuk melihat total poin dan rincian pelanggaran, atau <b>absen</b> untuk rekap kehadiran 30 hari terakhir. Nomor yang belum tertaut dibalas petunjuk menautkan. Bot hanya menjawab saat dichat (tidak memeriksa berkala). Isi balasan bisa diubah di tab Template.
+          </p>
+        </div>
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="menu-en">Menu perintah WA untuk orang tua &amp; guru (ketik <b>menu</b>)</Label>
+            <Switch id="menu-en" checked={waMenu} onCheckedChange={setWaMenu} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Bila orang tua/guru mengetik <b>menu</b> (atau salam seperti <b>halo</b>), bot membalas daftar perintah bernomor sesuai perannya: orang tua (cek poin, absen), pembina ekskul (jurnal, foto), dan penerima surat tugas (<b>surat tugas</b>: pilih surat lalu kirim foto bukti kunjungan langsung di chat). Cukup balas nomornya. Nomor yang belum dikenal hanya dibalas bila mengetik <b>menu</b> (isinya petunjuk <b>DAFTAR</b>); salam biasa dari nomor asing tidak dibalas.
+          </p>
+          <div className="flex items-center justify-between border-t pt-2">
+            <Label htmlFor="btn-en">Kirim juga tombol asli WhatsApp (eksperimental)</Label>
+            <Switch id="btn-en" checked={waButtons} onCheckedChange={setWaButtons} disabled={!waMenu} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Tombol dikirim sebagai pesan tambahan setelah menu teks. WhatsApp tidak resmi mendukung tombol pada nomor non-bisnis, jadi di sebagian HP tombol bisa tidak tampil atau ditampilkan sebagai pesan kosong; menu bernomor tetap bisa dipakai. Bila tombol tidak muncul di HP uji Anda, biarkan mati.
           </p>
         </div>
         <div className="space-y-2 rounded-lg border p-3">
