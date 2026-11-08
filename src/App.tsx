@@ -72,6 +72,7 @@ const ExtracurricularHonorarium = lazy(() => import("./pages/ExtracurricularHono
 const NarasumberHonorarium = lazy(() => import("./pages/NarasumberHonorarium"));
 const StaffAccounts = lazy(() => import("./pages/StaffAccounts"));
 const SuratMasuk = lazy(() => import("./pages/SuratMasuk"));
+const DisposisiSaya = lazy(() => import("./pages/DisposisiSaya"));
 const SuratKeluar = lazy(() => import("./pages/SuratKeluar"));
 const Staff = lazy(() => import("./pages/Staff"));
 const StaffDashboard = lazy(() => import("./pages/StaffDashboard"));
@@ -337,6 +338,7 @@ const App = () => (
               <Route path="/kode-label-settings" element={<ProtectedRoute><KodeLabelSettings /></ProtectedRoute>} />
               <Route path="/changelog" element={<ProtectedRoute><Changelog /></ProtectedRoute>} />
               <Route path="/surat-masuk" element={<ProtectedRoute><SuratMasuk /></ProtectedRoute>} />
+              <Route path="/disposisi-saya" element={<ProtectedRoute><DisposisiSaya /></ProtectedRoute>} />
               <Route path="/surat-keluar" element={<ProtectedRoute><SuratKeluar /></ProtectedRoute>} />
               <Route path="/tata-usaha-dashboard" element={<ProtectedRoute><TataUsahaDashboard /></ProtectedRoute>} />
               <Route path="/important-event-notes" element={<ProtectedRoute><ImportantEventNotes /></ProtectedRoute>} />

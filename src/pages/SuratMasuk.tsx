@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
-import { Plus, Pencil, Trash2, Mail, Search, Upload, FileText, ExternalLink, X, ArrowRight, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { Plus, Pencil, Trash2, Mail, Search, Upload, FileText, ExternalLink, X, ArrowRight, CheckCircle, Clock, AlertCircle, Play } from 'lucide-react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -42,8 +42,12 @@ interface Disposisi {
   status: string;
   tanggal_disposisi: string;
   tanggal_selesai: string | null;
+  tujuan_user_id?: string | null;
+  tindak_lanjut?: string | null;
   created_at: string;
 }
+
+interface Penerima { user_id: string; full_name: string; kind: string; detail: string | null }
 
 const KATEGORI_OPTIONS = [
   { value: 'umum', label: 'Umum' },
@@ -97,6 +101,8 @@ export default function SuratMasuk() {
 
   const [disposisiForm, setDisposisiForm] = useState({
     tujuan_disposisi: '',
+    tujuan_user_id: '',
+    status: 'proses',
     instruksi: '',
     catatan: '',
     tanggal_disposisi: format(new Date(), 'yyyy-MM-dd'),
@@ -123,6 +129,19 @@ export default function SuratMasuk() {
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data as Disposisi[];
+    },
+  });
+
+  // akun guru/staf yang bisa dipilih sebagai penerima (RPC; hanya admin & tata usaha)
+  const { data: penerimaList } = useQuery({
+    queryKey: ['disposisi-penerima'],
+    staleTime: 60_000,
+    retry: false,
+    queryFn: async (): Promise<Penerima[]> => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (supabase as any).rpc('disposisi_penerima');
+      if (error) throw error;
+      return (data ?? []) as Penerima[];
     },
   });
 
@@ -248,8 +267,11 @@ export default function SuratMasuk() {
 
   const createDisposisiMutation = useMutation({
     mutationFn: async (data: typeof disposisiForm & { surat_masuk_id: string }) => {
-      const { error } = await supabase.from('disposisi_surat').insert({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase as any).from('disposisi_surat').insert({
         ...data,
+        tujuan_user_id: data.tujuan_user_id || null,
+        tanggal_selesai: data.status === 'selesai' ? data.tanggal_disposisi : null,
         created_by: user?.id,
       });
       if (error) throw error;
@@ -267,10 +289,8 @@ export default function SuratMasuk() {
 
   const updateDisposisiMutation = useMutation({
     mutationFn: async (data: { id: string; status: string; tanggal_selesai?: string }) => {
-      const { error } = await supabase.from('disposisi_surat').update({
-        status: data.status,
-        tanggal_selesai: data.status === 'selesai' ? format(new Date(), 'yyyy-MM-dd') : null,
-      }).eq('id', data.id);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase as any).rpc('disposisi_update_status', { p_id: data.id, p_status: data.status });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -314,6 +334,8 @@ export default function SuratMasuk() {
   const resetDisposisiForm = (clearSurat = true) => {
     setDisposisiForm({
       tujuan_disposisi: '',
+      tujuan_user_id: '',
+      status: 'proses',
       instruksi: '',
       catatan: '',
       tanggal_disposisi: format(new Date(), 'yyyy-MM-dd'),
@@ -678,12 +700,38 @@ export default function SuratMasuk() {
                         <TableRow key={disposisi.id}>
                           <TableCell>{index + 1}</TableCell>
                           <TableCell className="font-medium">{surat?.nomor_surat || '-'}</TableCell>
-                          <TableCell>{disposisi.tujuan_disposisi}</TableCell>
-                          <TableCell className="max-w-[200px] truncate">{disposisi.instruksi}</TableCell>
+                          <TableCell>
+                            {disposisi.tujuan_disposisi}
+                            {disposisi.tujuan_user_id && <p className="text-xs text-muted-foreground">akun terhubung</p>}
+                          </TableCell>
+                          <TableCell className="max-w-[240px]">
+                            <p className="truncate">{disposisi.instruksi}</p>
+                            {disposisi.tindak_lanjut && <p className="mt-0.5 text-xs text-muted-foreground">Tindak lanjut: {disposisi.tindak_lanjut}</p>}
+                          </TableCell>
                           <TableCell>{format(new Date(disposisi.tanggal_disposisi), 'd MMM yyyy', { locale: id })}</TableCell>
                           <TableCell>{getStatusBadge(disposisi.status)}</TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-1">
+                              {disposisi.status === 'pending' && (
+                                <Button
+                                  variant="outline" size="sm" className="h-8 gap-1"
+                                  onClick={() => updateDisposisiMutation.mutate({ id: disposisi.id, status: 'proses' })}
+                                  disabled={updateDisposisiMutation.isPending}
+                                  title="Tandai Diproses"
+                                >
+                                  <Play className="h-3.5 w-3.5" /> Proses
+                                </Button>
+                              )}
+                              {disposisi.status !== 'selesai' && (
+                                <Button
+                                  size="sm" className="h-8 gap-1 bg-green-600 hover:bg-green-700"
+                                  onClick={() => updateDisposisiMutation.mutate({ id: disposisi.id, status: 'selesai' })}
+                                  disabled={updateDisposisiMutation.isPending}
+                                  title="Tandai Selesai"
+                                >
+                                  <CheckCircle className="h-3.5 w-3.5" /> Selesai
+                                </Button>
+                              )}
                               {disposisi.status !== 'selesai' && (
                                 <Select
                                   value={disposisi.status}
@@ -732,6 +780,32 @@ export default function SuratMasuk() {
             </div>
           )}
           <form onSubmit={handleSubmitDisposisi} className="space-y-4">
+            {penerimaList && penerimaList.length > 0 && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Penerima (akun guru/staf)</label>
+                <Select
+                  value={disposisiForm.tujuan_user_id || 'none'}
+                  onValueChange={(v) => {
+                    if (v === 'none') { setDisposisiForm({ ...disposisiForm, tujuan_user_id: '' }); return; }
+                    const r = penerimaList.find((x) => x.user_id === v);
+                    setDisposisiForm({
+                      ...disposisiForm,
+                      tujuan_user_id: v,
+                      tujuan_disposisi: r ? (r.detail ? `${r.full_name} (${r.detail})` : r.full_name) : disposisiForm.tujuan_disposisi,
+                    });
+                  }}
+                >
+                  <SelectTrigger><SelectValue placeholder="Pilih penerima" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Tanpa akun (ketik manual)</SelectItem>
+                    {penerimaList.map((r) => (
+                      <SelectItem key={r.user_id} value={r.user_id}>{r.full_name} • {r.kind}{r.detail ? ` • ${r.detail}` : ''}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Penerima yang dipilih melihat disposisi ini di menu “Disposisi Saya” dan dapat mengubah statusnya.</p>
+              </div>
+            )}
             <div className="space-y-2">
               <label className="text-sm font-medium">Tujuan Disposisi</label>
               <Input
@@ -754,6 +828,15 @@ export default function SuratMasuk() {
                   {INSTRUKSI_OPTIONS.map((instruksi) => (
                     <SelectItem key={instruksi} value={instruksi}>{instruksi}</SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Status</label>
+              <Select value={disposisiForm.status} onValueChange={(v) => setDisposisiForm({ ...disposisiForm, status: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
