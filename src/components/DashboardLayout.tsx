@@ -454,6 +454,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
 
   const baseTeacherMenuItems: MenuItem[] = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/dashboard' },
+    { icon: Inbox, label: 'Disposisi Saya', href: '/disposisi-saya' },
     { icon: Calendar, label: 'Jadwal', href: '/schedules' },
     { icon: ClipboardList, label: 'Absensi', href: '/attendance' },
     { icon: FileText, label: 'Jurnal Mengajar', href: '/journals' },
@@ -512,6 +513,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
 
   const bendaharaMenuItems: MenuItem[] = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/bendahara-dashboard' },
+    { icon: Inbox, label: 'Disposisi Saya', href: '/disposisi-saya' },
     { icon: FileSignature, label: 'Surat Tugas', href: '/assignment-letters' },
     { icon: Plane, label: 'SPPD', href: '/official-travel' },
     { icon: FileCheck, label: 'Bukti Kunjungan Guru', href: '/my-letters' },
@@ -572,6 +574,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
 
   const stafMenuItems: MenuItem[] = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/staff-dashboard' },
+    { icon: Inbox, label: 'Disposisi Saya', href: '/disposisi-saya' },
     { icon: FileCheck, label: 'Surat Tugas Saya', href: '/my-letters' },
     ...(isEkskulCoach ? ekskulCoachMenuItems : []),
     ...(hasPiketDuty ? [{ icon: Fingerprint, label: 'Log Piket Saya', href: '/my-piket' }] : []),
@@ -579,6 +582,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
 
   const kesiswaanMenuItems: MenuItem[] = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/kesiswaan-dashboard' },
+    { icon: Inbox, label: 'Disposisi Saya', href: '/disposisi-saya' },
     { icon: ClipboardList, label: 'Absensi', href: '/attendance' },
     { icon: CreditCard, label: 'Absensi RFID', href: '/rfid-attendance' },
     { icon: HeartHandshake, label: 'Absensi Salat', href: '/kelola-salat' },
@@ -603,6 +607,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
 
   const guruPiketMenuItems: MenuItem[] = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/guru-piket-dashboard' },
+    { icon: Inbox, label: 'Disposisi Saya', href: '/disposisi-saya' },
     { icon: ClipboardList, label: 'Isi Absensi', href: '/attendance' },
     { icon: FileText, label: 'Dispensasi Siswa', href: '/dispensasi-siswa' },
     { icon: CreditCard, label: 'Absensi RFID', href: '/rfid-attendance' },
@@ -614,6 +619,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
 
   const pembinaEkskulMenuItems: MenuItem[] = [
     { icon: BookOpen, label: 'Jurnal Ekskul', href: '/ekskul-journal' },
+    { icon: Inbox, label: 'Disposisi Saya', href: '/disposisi-saya' },
     { icon: Users, label: 'Anggota Ekskul', href: '/ekskul-members' },
     { icon: Settings, label: 'Pengaturan', href: '/settings' },
   ];
