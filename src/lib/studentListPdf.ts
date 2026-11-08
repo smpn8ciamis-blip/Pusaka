@@ -12,8 +12,12 @@ export interface StudentListRow {
 export interface StudentListPdfOptions {
   title: string; // default "Daftar Siswa"
   className: string;
+  /** Nama wali kelas; selalu tampil di bagian atas ("Wali Kelas : ...") bila ada */
   homeroomName?: string | null;
   homeroomNip?: string | null;
+  /** true = tanda tangan bawah memuat tulisan "Wali Kelas,", nama, dan NIP wali kelas;
+   *  false = tanpa tulisan "Wali Kelas," dan nama/NIP berupa titik-titik (diisi tangan). Default true. */
+  fillSignature?: boolean;
   students: StudentListRow[];
   /** judul kolom tambahan (boleh kosong); jumlah elemen = jumlah kolom tambahan */
   extraColumns: string[];
@@ -51,14 +55,12 @@ export async function buildStudentListPdf(opts: StudentListPdfOptions, settings:
   const ml = 18;
   const mr = 18;
   const cw = pw - ml - mr;
-  const bottomLimit = ph - 16;
+  const bottomLimit = ph - 13;
   const FONT = 'times';
   const SIZE = 10.5;
   const lineH = 4.6;
   const padX = 1.8;
-  const padY = 1.6;
-  const minRowH = 7;
-  const headH = 8;
+  const headH = 7.5;
   const printedAt = opts.printedAt ?? new Date();
 
   const setFont = (style: 'normal' | 'bold' | 'italic' = 'normal', size = SIZE) => {
@@ -68,22 +70,22 @@ export async function buildStudentListPdf(opts: StudentListPdfOptions, settings:
   };
 
   // ---------- Kop & judul ----------
-  let y = (await addLetterheadToPDF(doc, settings)) + 4;
+  let y = (await addLetterheadToPDF(doc, settings)) + 3;
   setFont('bold', 13);
   const title = clean(opts.title) || DEFAULT_STUDENT_LIST_TITLE;
   doc.text(title.toUpperCase(), pw / 2, y + 3, { align: 'center' });
-  y += 10;
+  y += 9;
 
   const dots = (w: number) => '.'.repeat(Math.max(3, Math.floor(w / Math.max(0.1, doc.getTextWidth('.')))));
   setFont();
   const labelW = 26;
   doc.text('Kelas', ml, y);
   doc.text(`: ${clean(opts.className) || '-'}`, ml + labelW, y);
-  y += lineH + 0.8;
+  y += lineH + 0.6;
   doc.text('Wali Kelas', ml, y);
   const wali = clean(opts.homeroomName);
   doc.text(`: ${wali || dots(60)}`, ml + labelW, y);
-  y += lineH + 3.5;
+  y += lineH + 2.5;
 
   // ---------- Kolom ----------
   const extra = opts.extraColumns.slice(0, MAX_EXTRA_COLUMNS).map((h) => clean(h));
@@ -105,22 +107,39 @@ export async function buildStudentListPdf(opts: StudentListPdfOptions, settings:
   widths.forEach((w) => xs.push(xs[xs.length - 1] + w));
   const right = xs[xs.length - 1];
 
-  // ---------- Tinggi baris (nama panjang bisa 2+ baris) ----------
-  setFont();
-  const rows = opts.students.map((s) => {
-    const nameLines = doc.splitTextToSize(clean(s.nama) || '-', wNama - padX * 2) as string[];
-    return { nisn: clean(s.nisn), nameLines, h: Math.max(minRowH, nameLines.length * lineH + padY * 2) };
-  });
-
   // ---------- Blok tanda tangan ----------
-  const gapBeforeSig = 8;
-  const sigGap = 22; // ruang tanda tangan
+  const gapBeforeSig = 6;
+  const sigGap = 16; // ruang tanda tangan
   const sigH = lineH * 2 + sigGap + lineH * 2 + 1;
   const sigW = 66;
-
-  // ---------- Paginasi baris ----------
   const firstTop = y;
   const nextTop = 16;
+
+  // ---------- Tinggi baris (nama panjang bisa 2+ baris) ----------
+  // Usahakan SEMUA siswa + titimangsa/tanda tangan muat satu halaman: pakai baris sebesar mungkin
+  // dari daftar ukuran berikut (rapat bila siswa banyak). Bila tetap tidak muat, baris 7 mm & pindah halaman.
+  const SIZES: Array<[number, number]> = [[7, 10.5], [6.5, 10.5], [6, 10], [5.7, 10], [5.4, 9.5], [5.2, 9.5], [5, 9.5], [4.8, 9]];
+  const buildRows = (rowH: number, fs: number) => {
+    setFont('normal', fs);
+    const lh = fs * 0.3528 * 1.18;
+    const pad = 0.6;
+    return opts.students.map((s) => {
+      const nameLines = doc.splitTextToSize(clean(s.nama) || '-', wNama - padX * 2) as string[];
+      // satu baris: tinggi persis rowH; nama 2+ baris: baris membesar secukupnya
+      const h = nameLines.length <= 1 ? rowH : Math.max(rowH, nameLines.length * lh + pad * 2);
+      return { nisn: clean(s.nisn), nameLines, lh, fs, h };
+    });
+  };
+  const onePageAvail = bottomLimit - firstTop - headH - gapBeforeSig - sigH;
+  let rows = buildRows(SIZES[0][0], SIZES[0][1]);
+  let fitted = false;
+  for (const [rh, fs] of SIZES) {
+    const cand = buildRows(rh, fs);
+    if (cand.reduce((a, r) => a + r.h, 0) <= onePageAvail) { rows = cand; fitted = true; break; }
+  }
+  if (!fitted) rows = buildRows(SIZES[0][0], SIZES[0][1]);
+
+  // ---------- Paginasi baris ----------
   const pages: number[][] = [];
   {
     let cur: number[] = [];
@@ -182,10 +201,13 @@ export async function buildStudentListPdf(opts: StudentListPdfOptions, settings:
     let cy = drawHeader(top);
     idxs.forEach((ri) => {
       const r = rows[ri];
-      setFont();
-      doc.text(String(ri + 1), (xs[0] + xs[1]) / 2, cy + padY + lineH * 0.8, { align: 'center' });
-      if (r.nisn) doc.text(r.nisn, xs[1] + padX, cy + padY + lineH * 0.8);
-      r.nameLines.forEach((ln, li) => doc.text(ln, xs[2] + padX, cy + padY + li * lineH + lineH * 0.8));
+      setFont('normal', r.fs);
+      const em = r.fs * 0.3528;
+      const blockTop = cy + (r.h - r.nameLines.length * r.lh) / 2;
+      const midBase = cy + r.h / 2 + em * 0.34; // garis dasar teks satu baris, tepat di tengah sel
+      doc.text(String(ri + 1), (xs[0] + xs[1]) / 2, midBase, { align: 'center' });
+      if (r.nisn) doc.text(r.nisn, xs[1] + padX, midBase);
+      r.nameLines.forEach((ln, li) => doc.text(ln, xs[2] + padX, blockTop + (li + 0.5) * r.lh + em * 0.34));
       cy += r.h;
     });
     // garis: tepi atas, bawah judul kolom, tiap baris, tepi bawah, dan garis tegak
@@ -209,10 +231,11 @@ export async function buildStudentListPdf(opts: StudentListPdfOptions, settings:
   const place = clean(opts.place);
   doc.text(`${place ? `${place}, ` : ''}${dots(sigW - 2 - (place ? doc.getTextWidth(`${place}, `) : 0))}`, sx, sy);
   sy += lineH;
-  doc.text('Wali Kelas,', sx, sy);
+  const fillSig = opts.fillSignature !== false;
+  if (fillSig) doc.text('Wali Kelas,', sx, sy);
   sy += sigGap + lineH;
   const nip = clean(opts.homeroomNip);
-  if (wali) {
+  if (fillSig && wali) {
     setFont('bold');
     doc.text(wali, sx, sy);
     setFont();
@@ -220,7 +243,7 @@ export async function buildStudentListPdf(opts: StudentListPdfOptions, settings:
     doc.text(dots(sigW - 6), sx, sy);
   }
   sy += lineH;
-  doc.text(`NIP. ${nip || dots(sigW - 12)}`, sx, sy);
+  doc.text(`NIP. ${fillSig && nip ? nip : dots(sigW - 12)}`, sx, sy);
 
   // ---------- Catatan cetak di setiap halaman ----------
   const total = doc.getNumberOfPages();

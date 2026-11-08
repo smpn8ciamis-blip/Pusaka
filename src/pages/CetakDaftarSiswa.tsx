@@ -259,8 +259,9 @@ export default function CetakDaftarSiswa() {
   const pdfOptions = (): StudentListPdfOptions => ({
     title: prefs.title,
     className: cls?.name ?? '',
-    homeroomName: prefs.fillHomeroom ? homeroom?.teacher_name : null,
-    homeroomNip: prefs.fillHomeroom ? homeroom?.teacher_nip : null,
+    homeroomName: homeroom?.teacher_name, // "Wali Kelas : ..." di atas selalu tampil
+    homeroomNip: homeroom?.teacher_nip,
+    fillSignature: prefs.fillHomeroom, // tanda tangan bawah: tulisan "Wali Kelas,", nama & NIP mengikuti saklar
     students: classStudents.map((s) => ({ nisn: s.nisn, nama: toTitleCase(s.full_name) })),
     extraColumns: prefs.headings.slice(0, prefs.extraCount),
     place: prefs.place,
@@ -372,7 +373,7 @@ export default function CetakDaftarSiswa() {
               </div>
               <label className="flex items-center gap-2 pb-2 text-sm">
                 <Checkbox checked={prefs.fillHomeroom} onCheckedChange={(v) => patch({ fillHomeroom: v === true })} />
-                Isi nama &amp; NIP wali kelas otomatis
+                Isi tulisan “Wali Kelas”, nama &amp; NIP di tanda tangan bawah
               </label>
             </div>
 
