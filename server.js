@@ -1,4 +1,5 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadMediaMessage } = require('@whiskeysockets/baileys');
+const baileys = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadMediaMessage } = baileys;
 const { createClient } = require('@supabase/supabase-js');
 const WebSocket = require('ws');
 const express = require('express');
@@ -426,6 +427,31 @@ function recordSend(entry) {
         }).catch((e) => { sendLogDbOffUntil = Date.now() + 10 * 60 * 1000; console.error('[LOG WA]', e && e.message); });
     } catch (e) { /* abaikan */ }
 }
+// Tombol "quick reply" format native-flow (yang dipakai WhatsApp sekarang; format `buttons` lama sudah tidak tampil di sebagian besar HP).
+// Eksperimental: WhatsApp tidak resmi mendukungnya untuk nomor non-bisnis, hasilnya bisa berbeda antar versi WhatsApp.
+// Balasan tombol diterima kembali sebagai interactiveResponseMessage (id "pusaka:<kunci>") dan diubah jadi perintah oleh buttonCommand().
+async function sendNativeButtons(jid, c) {
+    const proto = baileys.proto, gen = baileys.generateWAMessageFromContent;
+    if (!proto || !gen || typeof sock.relayMessage !== 'function') throw new Error('Versi Baileys tidak mendukung tombol native-flow');
+    const full = gen(jid, {
+        viewOnceMessage: { message: {
+            messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
+            interactiveMessage: proto.Message.InteractiveMessage.create({
+                body: proto.Message.InteractiveMessage.Body.create({ text: String(c.text || '') }),
+                footer: proto.Message.InteractiveMessage.Footer.create({ text: String(c.footer || '') }),
+                nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
+                    buttons: c.nativeButtons.map(function(b) { return { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: b.label, id: b.id }) }; })
+                })
+            })
+        } }
+    }, {});
+    await sock.relayMessage(jid, full.message, {
+        messageId: full.key.id,
+        additionalNodes: [{ tag: 'biz', attrs: {}, content: [{ tag: 'interactive', attrs: { type: 'native_flow', v: '1' },
+            content: [{ tag: 'native_flow', attrs: { v: '9', name: 'mixed' } }] }] }]
+    });
+    return full;
+}
 async function sendSafeMessage(jid, content, options) {
     options = options || {};
     const meta = currentTask ? currentTask.meta : {};
@@ -438,7 +464,7 @@ async function sendSafeMessage(jid, content, options) {
     try {
         await sock.sendPresenceUpdate('composing', jid);
         await new Promise(r => setTimeout(r, 1500));
-        const sent = await sock.sendMessage(jid, content, options);
+        const sent = (content && content.nativeButtons) ? await sendNativeButtons(jid, content) : await sock.sendMessage(jid, content, options);
         await sock.sendPresenceUpdate('paused', jid);
         entry.at = new Date().toISOString();
         entry.wa_id = sent && sent.key && sent.key.id ? sent.key.id : null;
@@ -1451,8 +1477,8 @@ async function sendMenu(from, msg, kind) {
             const chunk = keys.slice(i, i + 3);
             enqueueTask(function() {
                 return sendSafeMessage(from, {
-                    text: 'Tombol cepat:', footer: 'Pusaka - SMPN 8 Ciamis', headerType: 1,
-                    buttons: chunk.map(function(k) { return { buttonId: 'pusaka:' + k, buttonText: { displayText: MENU_ACTIONS[k].label }, type: 1 }; })
+                    text: 'Pilih perintah dengan menekan tombol:', footer: 'Pusaka - SMPN 8 Ciamis',
+                    nativeButtons: chunk.map(function(k) { return { id: 'pusaka:' + k, label: MENU_ACTIONS[k].label }; })
                 });
             }, { to: from, kind: 'balasan' });
         }
