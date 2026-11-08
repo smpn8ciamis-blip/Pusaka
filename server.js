@@ -328,6 +328,8 @@ const DEFAULT_BOT_SETTINGS = {
     homeroom_att_reminder_enabled: false, // ingatkan wali kelas bila absensi kelasnya belum diisi guru jam pertama
     homeroom_att_reminder_times: '08:30', // jam pengecekan (WIB), boleh lebih dari satu dipisah koma
     parent_query_enabled: true,       // orang tua (nomor tertaut) bisa mengetik "cek poin" / "absen" ke bot
+    wa_menu_enabled: true,            // ketik "menu" (atau salam) -> bot membalas menu perintah bernomor untuk ortu/guru
+    wa_buttons_enabled: false,        // kirim juga tombol asli WhatsApp (eksperimental; bisa tidak tampil di sebagian HP)
     assignment_followup_enabled: true, // pengingat WA H+1 bagi pelaksana SPPD yang belum mengunggah foto bukti kunjungan
     assignment_followup_time: '09:00', // jam kirim (WIB), sekali sehari
     assignment_wa_enabled: true,      // WA ke guru/staf saat SPPD dibuat (jenis, waktu, lokasi + pengingat LPT & bukti kunjungan)
@@ -504,19 +506,40 @@ async function startBot() {
                     const took = await handleEkskulPhoto(msg, imgMsg, from).catch(function(e) { console.error('[EKSKUL WA]', e.message); return true; });
                     if (took) continue;
                 }
+                // Sesi "surat tugas": foto langsung jadi bukti kunjungan surat yang dipilih (tanpa perlu membalas notifikasi).
+                if (suratSessions.has(from)) {
+                    const tookS = await handleSuratPhoto(msg, imgMsg, from).catch(function(e) { console.error('[SURAT WA]', e.message); return true; });
+                    if (tookS) continue;
+                }
                 const stanzaId = imgMsg.contextInfo && imgMsg.contextInfo.stanzaId;
                 if (stanzaId) await handleNoticePhotoReply(msg, imgMsg, stanzaId, from);
                 continue;
             }
-            const text = (messageContent.conversation || (messageContent.extendedTextMessage && messageContent.extendedTextMessage.text) || '').trim();
+            // Jawaban tombol asli WhatsApp diperlakukan seperti perintah teks (hanya id "pusaka:..." yang dikenal).
+            let text = (buttonCommand(messageContent) || messageContent.conversation || (messageContent.extendedTextMessage && messageContent.extendedTextMessage.text) || '').trim();
             if (!text) continue;
-            const cleanText = text.toLowerCase();
+            let cleanText = text.toLowerCase();
             const senderPhone = getSenderPhoneNumber(msg);
             await sock.readMessages([msg.key]).catch(() => {});
+            // Balasan angka setelah menu ("1", "2", ...) diubah menjadi perintahnya. Tidak berlaku saat sesi lain sedang berjalan.
+            if (!ekskulSessions.has(from) && !regSessions.has(from) && !suratSessions.has(from)) {
+                const picked = menuPick(from, cleanText);
+                if (picked) { text = picked; cleanText = picked; }
+            }
             // Pembina ekskul: JURNAL / FOTO dan seluruh jawaban selama sesi. Dicek paling awal agar jawaban bebas (mis. "cek ...") tidak tertukar perintah lain.
             if (ekskulSessions.has(from) || ekskulCommand(cleanText)) {
                 const handled = await handleEkskulMessage(msg, from, text, cleanText, senderPhone).catch(function(e) { console.error('[EKSKUL WA]', e.message); try { ekskulReplyFn(from, msg)('⚠️ Terjadi gangguan. Coba lagi nanti.'); } catch (x) {} return true; });
                 if (handled) continue;
+            }
+            // Surat tugas saya (bukti kunjungan lewat chat) dan menu perintah.
+            if (suratSessions.has(from) || suratCommand(cleanText)) {
+                const handledS = await handleSuratMessage(msg, from, cleanText, senderPhone).catch(function(e) { console.error('[SURAT WA]', e.message); return false; });
+                if (handledS) continue;
+            }
+            const menuKind = menuCommand(cleanText);
+            if (menuKind && !regSessions.has(from) && !suratSessions.has(from)) {
+                await sendMenu(from, msg, menuKind).catch(function(e) { console.error('[MENU WA]', e.message); });
+                continue;
             }
             // Orang tua (nomor sudah tertaut): "cek poin" / "absen". Dicek lebih dulu karena "cek ..." juga dipakai perintah admin.
             const parentCmd = parentCommand(cleanText);
@@ -592,7 +615,7 @@ async function startBot() {
                                 const realPhone = getSenderPhoneNumber(msg);
                                 await supabase.from('students').update({ parent_phone: realPhone }).eq('nisn', session.nisn);
                                 knownUsers.add(from); saveKnownUsers();
-                                await sendSafeMessage(from, { text: 'BERHASIL!\nNomor (' + realPhone + ') tertaut dengan ' + session.full_name + '.\n\nSekarang Anda bisa mengetik:\n• *cek poin* - poin pelanggaran dan rinciannya\n• *absen* - rekap kehadiran 30 hari terakhir' }, { quoted: msg });
+                                await sendSafeMessage(from, { text: 'BERHASIL!\nNomor (' + realPhone + ') tertaut dengan ' + session.full_name + '.\n\nSekarang Anda bisa mengetik:\n• *cek poin* - poin pelanggaran dan rinciannya\n• *absen* - rekap kehadiran 30 hari terakhir\n• *menu* - tampilkan semua pilihan' }, { quoted: msg });
                                 regSessions.delete(from);
                             } else { await sendSafeMessage(from, { text: 'Tanggal lahir tidak sesuai. Ketik BATAL.' }, { quoted: msg }); }
                         } catch (e) {}
@@ -1341,6 +1364,206 @@ async function handleParentQuery(kind, msg, from) {
             if (text) reply(text);
         } catch (e) { console.error('[ORTU WA]', e.message); reply('Data ' + st.full_name + ' gagal dimuat. Coba lagi nanti.'); }
     }
+}
+
+// ===================== MENU PERINTAH (ketik MENU) + TOMBOL + "SURAT TUGAS SAYA" =====================
+// Menu bernomor (balas 1/2/3) selalu berfungsi. Tombol asli WhatsApp hanya dikirim bila admin menyalakan
+// saklar "wa_buttons_enabled" (default mati) dan SELALU sebagai pesan tambahan setelah menu teks, supaya bila
+// tombol tidak tampil di HP penerima, menu teks tetap terbaca. Isi tombol diterima kembali sebagai perintah teks.
+const MENU_ACTIONS = {
+    poin:   { label: 'Cek Poin',          cmd: 'cek poin',    hint: 'poin pelanggaran anak' },
+    absen:  { label: 'Absen Anak',        cmd: 'absen',       hint: 'rekap kehadiran 30 hari' },
+    daftar: { label: 'Tautkan Nomor',     cmd: 'daftar',      hint: 'hubungkan nomor ini dengan NISN anak' },
+    jurnal: { label: 'Isi Jurnal Ekskul', cmd: 'jurnal',      hint: 'buat jurnal kegiatan ekskul' },
+    foto:   { label: 'Foto Ekskul',       cmd: 'foto',        hint: 'tambah foto ke jurnal ekskul' },
+    surat:  { label: 'Surat Tugas Saya',  cmd: 'surat tugas', hint: 'kirim foto bukti kunjungan' }
+};
+const MENU_WORDS = ['menu', 'bantuan', 'help', 'perintah', 'daftar perintah'];
+const MENU_GREETINGS = ['halo', 'hai', 'hi', 'hallo', 'p', 'permisi', 'assalamualaikum', 'assalamu alaikum', 'assalamualaikum wr wb', 'selamat pagi', 'selamat siang', 'selamat sore', 'selamat malam'];
+const MENU_TTL = 10 * 60 * 1000;
+const MENU_GAP_MS = 5000;
+const menuSessions = new Map();     // chat JID -> { keys: [...], at }
+const menuLast = new Map();
+
+function menuCommand(cleanText) {
+    const t = String(cleanText).replace(/\s+/g, ' ').trim();
+    if (MENU_WORDS.indexOf(t) !== -1) return 'explicit';
+    if (MENU_GREETINGS.indexOf(t) !== -1) return 'greeting';   // dijawab hanya bila nomor dikenali (ortu/guru)
+    return null;
+}
+// Jawaban tombol asli WhatsApp -> teks perintah. Hanya id yang dikenal ("pusaka:<kunci>") yang diterima.
+function buttonCommand(mc) {
+    let id = null;
+    try {
+        if (mc.buttonsResponseMessage) id = mc.buttonsResponseMessage.selectedButtonId;
+        else if (mc.templateButtonReplyMessage) id = mc.templateButtonReplyMessage.selectedId;
+        else if (mc.listResponseMessage && mc.listResponseMessage.singleSelectReply) id = mc.listResponseMessage.singleSelectReply.selectedRowId;
+        else if (mc.interactiveResponseMessage && mc.interactiveResponseMessage.nativeFlowResponseMessage) {
+            id = JSON.parse(mc.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson || '{}').id;
+        }
+    } catch (e) { return null; }
+    if (typeof id !== 'string' || id.indexOf('pusaka:') !== 0) return null;
+    const key = id.slice(7);
+    if (key === 'menu') return 'menu';
+    return Object.prototype.hasOwnProperty.call(MENU_ACTIONS, key) ? MENU_ACTIONS[key].cmd : null;
+}
+
+// Peran pengirim yang dikenali dari nomor WA: ortu (tertaut ke siswa aktif), pembina ekskul, penerima surat tugas.
+async function menuRoles(from, sender, cfg) {
+    const roles = { ortu: false, coach: false, surat: false };
+    if (!sender) return roles;
+    try {
+        if (cfg.parent_query_enabled) {
+            const r = await supabase.from('students').select('id').in('parent_phone', phoneVariants(sender)).eq('status', 'aktif').eq('is_alumni', false).limit(1);
+            roles.ortu = !r.error && (r.data || []).length > 0;
+        }
+        if (cfg.ekskul_journal_wa_enabled) roles.coach = !!(await ekskulFindCoach(sender));
+        if (cfg.assignment_wa_enabled) roles.surat = (await suratPending(from, sender)).known;
+    } catch (e) { console.error('[MENU WA]', e.message); }
+    return roles;
+}
+async function sendMenu(from, msg, kind) {
+    const cfg = await getBotSettings();
+    if (!cfg.wa_menu_enabled) return;
+    const sender = getSenderPhoneNumber(msg);
+    if (Date.now() - (menuLast.get(from) || 0) < MENU_GAP_MS) return;
+    menuLast.set(from, Date.now());
+    if (menuLast.size > 2000) menuLast.clear();
+    const roles = await menuRoles(from, sender, cfg);
+    const keys = [];
+    if (roles.ortu) keys.push('poin', 'absen');
+    if (roles.coach) keys.push('jurnal', 'foto');
+    if (roles.surat) keys.push('surat');
+    if (keys.length === 0) {
+        if (kind === 'greeting') return;                           // nomor tidak dikenal: salam biasa tidak dibalas
+        keys.push('daftar');
+    }
+    const lines = keys.map(function(k, i) { return (i + 1) + '. *' + MENU_ACTIONS[k].label + '* - ' + MENU_ACTIONS[k].hint; });
+    const text = '📋 *MENU PUSAKA*\nSMP Negeri 8 Ciamis\n\nBalas dengan *nomor* pilihan Anda:\n\n' + lines.join('\n') +
+        '\n\n_Atau ketik perintahnya: ' + keys.map(function(k) { return '*' + MENU_ACTIONS[k].cmd + '*'; }).join(', ') + '._' +
+        (keys.indexOf('daftar') !== -1 ? '' : '\nKetik *menu* kapan saja untuk menampilkan pilihan ini lagi.');
+    menuSessions.set(from, { keys: keys, at: Date.now() });
+    if (menuSessions.size > 2000) menuSessions.clear();
+    enqueueTask(function() { return sendSafeMessage(from, { text: text }, { quoted: msg }); }, { to: from, kind: 'balasan' });
+    if (cfg.wa_buttons_enabled) {
+        // Tombol asli: maksimal 3 per pesan. Bila tidak tampil di HP penerima, menu teks di atas tetap bisa dipakai.
+        for (let i = 0; i < keys.length; i += 3) {
+            const chunk = keys.slice(i, i + 3);
+            enqueueTask(function() {
+                return sendSafeMessage(from, {
+                    text: 'Tombol cepat:', footer: 'Pusaka - SMPN 8 Ciamis', headerType: 1,
+                    buttons: chunk.map(function(k) { return { buttonId: 'pusaka:' + k, buttonText: { displayText: MENU_ACTIONS[k].label }, type: 1 }; })
+                });
+            }, { to: from, kind: 'balasan' });
+        }
+    }
+}
+// Balasan angka setelah menu ("1" -> perintah ke-1). Mengembalikan teks perintah atau null.
+function menuPick(from, cleanText) {
+    const s = menuSessions.get(from);
+    if (!s) return null;
+    if (Date.now() - s.at > MENU_TTL) { menuSessions.delete(from); return null; }
+    if (!/^[1-9]$/.test(cleanText)) return null;
+    const key = s.keys[parseInt(cleanText, 10) - 1];
+    if (!key) return null;
+    menuSessions.delete(from);
+    return MENU_ACTIONS[key].cmd;
+}
+
+// ---- Surat tugas saya: pilih surat yang buktinya belum lengkap, lalu kirim foto langsung ke chat ----
+const SURAT_LOOKBACK_DAYS = 45;
+const SURAT_SESSION_TTL = 30 * 60 * 1000;
+const suratSessions = new Map();     // chat JID -> { step: 'PICK' | 'PHOTOS', items, rec, at }
+function suratCommand(cleanText) {
+    const t = String(cleanText).replace(/\s+/g, ' ').trim();
+    return ['surat tugas', 'surat tugas saya', 'bukti kunjungan', 'sppd', 'lpt'].indexOf(t) !== -1;
+}
+// known = nomor ini pernah menerima notifikasi surat tugas; items = surat yang fotonya belum mencapai batas.
+async function suratPending(from, sender) {
+    const since = new Date(Date.now() - SURAT_LOOKBACK_DAYS * 86400000).toISOString();
+    const cols = 'wa_message_id, assignment_letter_id, teacher_id, staff_id, user_id, jid, phone, created_at';
+    const q1 = await supabase.from('wa_notice_messages').select(cols).eq('jid', from).not('assignment_letter_id', 'is', null).gte('created_at', since).order('created_at', { ascending: false }).limit(60);
+    let rows = q1.data || [];
+    if (sender) {
+        const q2 = await supabase.from('wa_notice_messages').select(cols).eq('phone', sender).not('assignment_letter_id', 'is', null).gte('created_at', since).order('created_at', { ascending: false }).limit(60);
+        rows = rows.concat(q2.data || []);
+    }
+    const byLetter = new Map();          // surat + pemilik -> baris notifikasi terbaru
+    rows.sort(function(a, b) { return String(b.created_at).localeCompare(String(a.created_at)); });
+    for (const r of rows) {
+        const key = r.assignment_letter_id + '|' + (r.teacher_id ? 't' + r.teacher_id : 's' + r.staff_id);
+        if (!byLetter.has(key)) byLetter.set(key, r);
+    }
+    const recs = Array.from(byLetter.values());
+    if (recs.length === 0) return { known: false, items: [] };
+    const letterIds = Array.from(new Set(recs.map(function(r) { return r.assignment_letter_id; })));
+    const prom = await Promise.all([
+        supabase.from('assignment_letters').select('id, letter_number, assignment_type').in('id', letterIds),
+        supabase.from('letter_attachments').select('assignment_letter_id, teacher_id, staff_id').in('assignment_letter_id', letterIds).eq('kind', 'photo')
+    ]);
+    const info = new Map((prom[0].data || []).map(function(l) { return [l.id, l]; }));
+    const have = new Map();
+    for (const a of (prom[1].data || [])) {
+        const k = a.assignment_letter_id + '|' + (a.teacher_id ? 't' + a.teacher_id : 's' + a.staff_id);
+        have.set(k, (have.get(k) || 0) + 1);
+    }
+    const items = [];
+    for (const [key, r] of byLetter) {
+        const l = info.get(r.assignment_letter_id);
+        if (!l) continue;
+        const n = have.get(key) || 0;
+        if (n >= NOTICE_MAX_PHOTOS) continue;
+        items.push({ rec: r, nomor: l.letter_number, jenis: l.assignment_type || 'Surat Tugas', have: n });
+    }
+    return { known: true, items: items.slice(0, 5) };
+}
+function suratEnd(from) { suratSessions.delete(from); }
+// Mengembalikan true bila pesan teks sudah ditangani.
+async function handleSuratMessage(msg, from, cleanText, senderPhone) {
+    const t = String(cleanText).replace(/\s+/g, ' ').trim();
+    let s = suratSessions.get(from);
+    if (s && Date.now() - s.at > SURAT_SESSION_TTL) { suratEnd(from); s = null; }
+    const cmd = suratCommand(t);
+    if (!s && !cmd) return false;
+    const cfg = await getBotSettings();
+    if (!cfg.assignment_wa_enabled) { suratEnd(from); return false; }
+    const reply = ekskulReplyFn(from, msg);
+    if (s && (t === 'batal' || t === 'batalkan' || t === 'selesai' || t === 'sudah')) {
+        const done = t === 'selesai' || t === 'sudah';
+        suratEnd(from);
+        reply(done ? '✅ Terima kasih. Foto bukti kunjungan yang terkirim sudah tersimpan di akun Pusaka Anda (menu *Surat Tugas & SPPD*).' : 'Dibatalkan.');
+        return true;
+    }
+    if (cmd) {
+        const p = await suratPending(from, senderPhone);
+        if (!p.known) { reply('Belum ada surat tugas yang tercatat untuk nomor WhatsApp ini dalam ' + SURAT_LOOKBACK_DAYS + ' hari terakhir.'); return true; }
+        if (p.items.length === 0) { reply('✅ Semua surat tugas Anda (' + SURAT_LOOKBACK_DAYS + ' hari terakhir) sudah memiliki bukti kunjungan lengkap.'); return true; }
+        suratSessions.set(from, { step: 'PICK', items: p.items, rec: null, at: Date.now() });
+        if (suratSessions.size > 2000) suratSessions.clear();
+        reply('📄 *SURAT TUGAS SAYA*\nBukti kunjungan yang masih bisa dilengkapi:\n\n' +
+            p.items.map(function(x, i) { return (i + 1) + '. No. ' + x.nomor + ' - ' + x.jenis + ' (foto ' + x.have + '/' + NOTICE_MAX_PHOTOS + ')'; }).join('\n') +
+            '\n\nBalas *nomor* surat untuk mengirim foto bukti, atau *BATAL*.');
+        return true;
+    }
+    if (s.step === 'PICK') {
+        const n = /^[1-9]$/.test(t) ? parseInt(t, 10) : 0;
+        const it = n ? s.items[n - 1] : null;
+        if (!it) { reply('Balas dengan *nomor* surat di daftar, atau *BATAL*.'); return true; }
+        s.step = 'PHOTOS'; s.rec = it.rec; s.at = Date.now();
+        reply('📷 Kirim foto bukti kunjungan untuk surat *No. ' + it.nomor + '* (sisa ' + (NOTICE_MAX_PHOTOS - it.have) + ' foto). Ketik *SELESAI* bila sudah.');
+        return true;
+    }
+    reply('Kirim *foto* bukti kunjungan, atau ketik *SELESAI* / *BATAL*.');
+    return true;
+}
+// Foto saat sesi PHOTOS: disimpan sebagai bukti surat yang dipilih (memakai logika "balas notifikasi dengan foto").
+async function handleSuratPhoto(msg, img, from) {
+    const s = suratSessions.get(from);
+    if (!s || s.step !== 'PHOTOS' || !s.rec) return false;
+    if (Date.now() - s.at > SURAT_SESSION_TTL) { suratEnd(from); return false; }
+    s.at = Date.now();
+    await handleNoticePhotoReply(msg, img, s.rec.wa_message_id, from);
+    return true;
 }
 
 // ===================== BALAS NOTIFIKASI DENGAN FOTO = UNGGAH BUKTI KUNJUNGAN =====================
