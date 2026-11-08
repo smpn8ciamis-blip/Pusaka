@@ -350,6 +350,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
       items: [
         { icon: Inbox, label: 'Surat Masuk', href: '/surat-masuk' },
         { icon: Send, label: 'Surat Keluar', href: '/surat-keluar' },
+        { icon: FileText, label: 'Surat Pengantar', href: '/surat-pengantar' },
         { icon: FileSignature, label: 'Surat Tugas', href: '/assignment-letters' },
         { icon: Plane, label: 'SPPD', href: '/official-travel' },
         { icon: FileCheck, label: 'Bukti Kunjungan Guru', href: '/my-letters' },
@@ -561,6 +562,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: Receipt, label: 'Kwitansi', href: '/payment-receipts' },
     { icon: Inbox, label: 'Surat Masuk', href: '/surat-masuk' },
     { icon: Send, label: 'Surat Keluar', href: '/surat-keluar' },
+    { icon: FileText, label: 'Surat Pengantar', href: '/surat-pengantar' },
 
     // --- ⭐ Penggajian & Honorarium (Full CRUD) ---
     { icon: Hammer, label: 'Upah Tukang', href: '/worker-payments' },
