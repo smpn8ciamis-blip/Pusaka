@@ -330,6 +330,7 @@ const DEFAULT_BOT_SETTINGS = {
     homeroom_att_reminder_times: '08:30', // jam pengecekan (WIB), boleh lebih dari satu dipisah koma
     parent_query_enabled: true,       // orang tua (nomor tertaut) bisa mengetik "cek poin" / "absen" ke bot
     wa_menu_enabled: true,            // ketik "menu" (atau salam) -> bot membalas menu perintah bernomor untuk ortu/guru
+    wa_contact_card_enabled: true,    // chat pertama yang memakai perintah bot dikirimi kartu kontak bot (untuk disimpan di HP)
     wa_buttons_enabled: false,        // kirim juga tombol asli WhatsApp (eksperimental; bisa tidak tampil di sebagian HP)
     assignment_followup_enabled: true, // pengingat WA H+1 bagi pelaksana SPPD yang belum mengunggah foto bukti kunjungan
     assignment_followup_time: '09:00', // jam kirim (WIB), sekali sehari
@@ -551,6 +552,10 @@ async function startBot() {
             if (!ekskulSessions.has(from) && !regSessions.has(from) && !suratSessions.has(from)) {
                 const picked = menuPick(from, cleanText);
                 if (picked) { text = picked; cleanText = picked; }
+            }
+            // Chat pertama yang memakai perintah bot: kirim kartu kontak agar nomor bot bisa disimpan pengirim.
+            if (menuCommand(cleanText) === 'explicit' || parentCommand(cleanText) || cleanText === 'daftar' || ekskulCommand(cleanText) || suratCommand(cleanText)) {
+                await maybeSendContactCard(from).catch(function(e) { console.error('[KONTAK WA]', e.message); });
             }
             // Pembina ekskul: JURNAL / FOTO dan seluruh jawaban selama sesi. Dicek paling awal agar jawaban bebas (mis. "cek ...") tidak tertukar perintah lain.
             if (ekskulSessions.has(from) || ekskulCommand(cleanText)) {
@@ -1434,6 +1439,34 @@ function buttonCommand(mc) {
     return Object.prototype.hasOwnProperty.call(MENU_ACTIONS, key) ? MENU_ACTIONS[key].cmd : null;
 }
 
+// ---- Kartu kontak bot: pada chat pertama yang memakai perintah bot, kirim kartu kontak supaya pengirim bisa menyimpan nomor bot ----
+// Bot tidak bisa tahu apakah nomornya sudah tersimpan di HP pengirim; "chat pertama" = JID belum tercatat di berkas ini.
+// Menyimpan nomor bot membuat pesan Pusaka tidak diperlakukan sebagai nomor asing (tautan/tombol lebih mungkin tampil).
+const CONTACT_CARD_FILE = '/srv/wa-bot/contact_card_sent.json';
+const CONTACT_CARD_MAX = 20000;
+let contactCardSent = new Set();
+try { if (fs.existsSync(CONTACT_CARD_FILE)) contactCardSent = new Set(JSON.parse(fs.readFileSync(CONTACT_CARD_FILE, 'utf-8'))); } catch (e) {}
+function saveContactCardSent() { try { fs.writeFileSync(CONTACT_CARD_FILE, JSON.stringify(Array.from(contactCardSent))); } catch (e) {} }
+function botVcard(phone) {
+    const pretty = '+' + phone;
+    return 'BEGIN:VCARD\nVERSION:3.0\nFN:Pusaka SMPN 8 Ciamis\nORG:SMP Negeri 8 Ciamis;\nTEL;type=CELL;type=VOICE;waid=' + phone + ':' + pretty + '\nEND:VCARD';
+}
+async function maybeSendContactCard(from) {
+    if (contactCardSent.has(from)) return;
+    const cfg = await getBotSettings();
+    if (!cfg.wa_contact_card_enabled) return;
+    const phone = String(botPhone() || '').replace(/\D/g, '');
+    if (phone.length < 10 || phone.length > 15) return;
+    contactCardSent.add(from);
+    if (contactCardSent.size > CONTACT_CARD_MAX) contactCardSent = new Set(Array.from(contactCardSent).slice(-Math.floor(CONTACT_CARD_MAX / 2)));
+    saveContactCardSent();
+    enqueueTask(function() {
+        return sendSafeMessage(from, { text: '💾 *Simpan nomor ini di kontak HP Anda* agar pesan dari Pusaka (poin, kehadiran, pengingat) tidak dianggap nomor asing.\nKetuk kartu kontak di bawah, lalu pilih *Simpan* / *Add to contacts*.' });
+    }, { to: from, kind: 'balasan' });
+    enqueueTask(function() {
+        return sendSafeMessage(from, { contacts: { displayName: 'Pusaka SMPN 8 Ciamis', contacts: [{ vcard: botVcard(phone) }] } });
+    }, { to: from, kind: 'balasan' });
+}
 // Peran pengirim yang dikenali dari nomor WA: ortu (tertaut ke siswa aktif), pembina ekskul, penerima surat tugas.
 async function menuRoles(from, sender, cfg) {
     const roles = { ortu: false, coach: false, surat: false };
