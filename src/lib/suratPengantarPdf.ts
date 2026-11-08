@@ -219,6 +219,14 @@ async function layoutSuratPengantar(
   }
   const sx = pw - mr - 66;
   setFont();
+  // titik-titik pengisi selebar w mm (untuk diisi tulisan tangan)
+  const dots = (w: number) => '.'.repeat(Math.max(3, Math.floor(w / Math.max(0.1, doc.getTextWidth('.')))));
+  // ---- Bukti diterima (kiri bawah, sejajar tanda tangan kepala sekolah) ----
+  const recvW = 58;
+  const recvLabel = 'Diterima tgl : ';
+  doc.text(`${recvLabel}${dots(recvW - doc.getTextWidth(recvLabel))}`, ml, y);
+  doc.text('Kepala/ketua', ml, y + lineH);
+  doc.text(dots(recvW), ml, y + lineH + 24 + lineH); // tempat nama penerima
   doc.text(place ? `${place}, ${dateLong}` : dateLong, sx, y);
   y += lineH;
   doc.text(position.endsWith(',') ? position : `${position},`, sx, y);
