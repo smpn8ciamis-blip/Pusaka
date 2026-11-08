@@ -543,6 +543,7 @@ function ReminderTab() {
   const [parentQuery, setParentQuery] = useState(true);
   const [waMenu, setWaMenu] = useState(true);
   const [waButtons, setWaButtons] = useState(false);
+  const [waCard, setWaCard] = useState(true);
   const [violationWa, setViolationWa] = useState(true);
   const [ekskulWa, setEkskulWa] = useState(true);
   const [assignFuTime, setAssignFuTime] = useState('09:00');
@@ -582,6 +583,7 @@ function ReminderTab() {
       setParentQuery(data.parent_query_enabled !== false);
       setWaMenu(data.wa_menu_enabled !== false);
       setWaButtons(data.wa_buttons_enabled === true);
+      setWaCard(data.wa_contact_card_enabled !== false);
       setViolationWa(data.violation_wa_enabled !== false);
       setEkskulWa(data.ekskul_journal_wa_enabled !== false);
       setAssignFuTime(String(data.assignment_followup_time || '09:00').slice(0, 5));
@@ -615,6 +617,7 @@ function ReminderTab() {
         parent_query_enabled: parentQuery,
         wa_menu_enabled: waMenu,
         wa_buttons_enabled: waButtons,
+        wa_contact_card_enabled: waCard,
         violation_wa_enabled: violationWa,
         ekskul_journal_wa_enabled: ekskulWa,
         assignment_followup_time: /^\d{2}:\d{2}$/.test(assignFuTime) ? assignFuTime : '09:00',
@@ -838,6 +841,13 @@ function ReminderTab() {
           </div>
           <p className="text-xs text-muted-foreground">
             Bila orang tua/guru mengetik <b>menu</b> (atau salam seperti <b>halo</b>), bot membalas daftar perintah bernomor sesuai perannya: orang tua (cek poin, absen), pembina ekskul (jurnal, foto), dan penerima surat tugas (<b>surat tugas</b>: pilih surat lalu kirim foto bukti kunjungan langsung di chat). Cukup balas nomornya. Nomor yang belum dikenal hanya dibalas bila mengetik <b>menu</b> (isinya petunjuk <b>DAFTAR</b>); salam biasa dari nomor asing tidak dibalas.
+          </p>
+          <div className="flex items-center justify-between border-t pt-2">
+            <Label htmlFor="card-en">Kirim kartu kontak bot pada chat pertama (agar nomor bot disimpan)</Label>
+            <Switch id="card-en" checked={waCard} onCheckedChange={setWaCard} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Saat sebuah nomor pertama kali memakai perintah bot (menu, cek poin, absen, daftar, jurnal, surat tugas), bot mengirim pesan ajakan dan <b>kartu kontak</b> nomor bot; pengirim tinggal mengetuk <b>Simpan</b>. Dikirim sekali per nomor. Bot tidak bisa mengetahui apakah nomornya sudah tersimpan di HP pengirim, jadi kartu dikirim pada chat pertama saja.
           </p>
           <div className="flex items-center justify-between border-t pt-2">
             <Label htmlFor="btn-en">Kirim juga tombol asli WhatsApp (eksperimental)</Label>
