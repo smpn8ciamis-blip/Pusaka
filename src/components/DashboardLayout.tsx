@@ -13,7 +13,7 @@ import {
   Award, FileSignature, Plane, Receipt, FileSpreadsheet, Wallet, FileBarChart,
   Inbox, Send, Hammer, Vote, Upload, Bell, Lock, Landmark, Server, UserMinus,
   Sparkles, CreditCard, ScanLine, LayoutDashboard, Search, Star, Moon, CalendarDays, KeyRound, Fingerprint, Briefcase, HeartHandshake,
-  Gauge, Images, Phone, UserPlus,
+  Gauge, Images, Phone, UserPlus, Printer,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -279,6 +279,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         { icon: UserMinus, label: 'Mutasi Keluar', href: '/student-mutations' },
         { icon: Images, label: 'Galeri Foto Siswa', href: '/galeri-siswa' },
         { icon: Phone, label: 'Buku Kontak Siswa', href: '/buku-kontak-siswa' },
+        { icon: Printer, label: 'Cetak Daftar Siswa', href: '/cetak-daftar-siswa' },
         { icon: Award, label: 'Alumni', href: '/alumni' },
         { icon: CalendarClock, label: 'Tahun Pelajaran', href: '/academic-year-settings' },
       ],
@@ -462,6 +463,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: GraduationCap, label: 'Nilai', href: '/grades' },
     { icon: TrendingUp, label: 'Analytics Nilai', href: '/grade-analytics' },
     { icon: FileText, label: 'Rekap Absensi Siswa', href: '/student-attendance-report' },
+    { icon: Printer, label: 'Cetak Daftar Siswa', href: '/cetak-daftar-siswa' },
     { icon: AlertTriangle, label: 'Poin Pelanggaran', href: '/violations' },
     { icon: FileText, label: 'Catatan Kejadian Penting', href: '/important-event-notes' },
     { icon: FileSignature, label: 'Surat Tugas & SPPD', href: '/my-letters' },
@@ -552,6 +554,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: UserMinus, label: 'Mutasi Keluar', href: '/student-mutations' },
     { icon: Images, label: 'Galeri Foto Siswa', href: '/galeri-siswa' },
     { icon: Phone, label: 'Buku Kontak Siswa', href: '/buku-kontak-siswa' },
+    { icon: Printer, label: 'Cetak Daftar Siswa', href: '/cetak-daftar-siswa' },
     { icon: Award, label: 'Alumni', href: '/alumni' },
     { icon: CalendarClock, label: 'Tahun Pelajaran', href: '/academic-year-settings' },
 

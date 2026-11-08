@@ -73,6 +73,7 @@ const NarasumberHonorarium = lazy(() => import("./pages/NarasumberHonorarium"));
 const StaffAccounts = lazy(() => import("./pages/StaffAccounts"));
 const SuratMasuk = lazy(() => import("./pages/SuratMasuk"));
 const SuratPengantar = lazy(() => import("./pages/SuratPengantar"));
+const CetakDaftarSiswa = lazy(() => import("./pages/CetakDaftarSiswa"));
 const DisposisiSaya = lazy(() => import("./pages/DisposisiSaya"));
 const SuratKeluar = lazy(() => import("./pages/SuratKeluar"));
 const Staff = lazy(() => import("./pages/Staff"));
@@ -340,6 +341,7 @@ const App = () => (
               <Route path="/changelog" element={<ProtectedRoute><Changelog /></ProtectedRoute>} />
               <Route path="/surat-masuk" element={<ProtectedRoute><SuratMasuk /></ProtectedRoute>} />
               <Route path="/disposisi-saya" element={<ProtectedRoute><DisposisiSaya /></ProtectedRoute>} />
+              <Route path="/cetak-daftar-siswa" element={<ProtectedRoute allowedRoles={['admin', 'tata_usaha', 'teacher', 'super_admin']}><CetakDaftarSiswa /></ProtectedRoute>} />
               <Route path="/surat-pengantar" element={<ProtectedRoute allowedRoles={['admin', 'tata_usaha', 'super_admin']}><SuratPengantar /></ProtectedRoute>} />
               <Route path="/surat-keluar" element={<ProtectedRoute><SuratKeluar /></ProtectedRoute>} />
               <Route path="/tata-usaha-dashboard" element={<ProtectedRoute><TataUsahaDashboard /></ProtectedRoute>} />
