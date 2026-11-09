@@ -3,6 +3,7 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
+import { ACTIVITY_KEY, effectiveLastActivity, idleMinutesLeft, idleState, isIdleRole } from '@/lib/idleSession';
 
 interface AuthContextType {
   user: User | null;
@@ -44,20 +45,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // Sesi login berlaku 1 jam sejak login (semua akun). Dihitung dari waktu login di server (last_sign_in_at),
-  // sehingga tetap akurat setelah halaman dimuat ulang atau tab tertidur.
+  // Batas sesi: super_admin, admin, dan tata_usaha keluar otomatis setelah 1 jam tanpa aktivitas (sliding).
+  // Peran lain tidak pernah dikeluarkan oleh aplikasi; token diperbarui otomatis oleh Supabase (autoRefreshToken).
+  // Aktivitas = interaksi pengguna (klik, ketik, geser, sentuh), dibagikan antar tab lewat localStorage;
+  // permintaan latar belakang tidak dihitung. Dicek juga saat halaman dibuka lagi setelah lama ditutup.
   useEffect(() => {
-    if (!user) return;
+    if (!user || !userRole) return;
+    try { localStorage.removeItem('pusaka_login_at'); } catch { /* sisa versi lama */ }
+    if (!isIdleRole(userRole)) return;
 
-    const SESSION_MS = 60 * 60 * 1000;   // 1 jam
-    const WARN_MS = 5 * 60 * 1000;       // peringatan 5 menit sebelum berakhir
-    const STORE_KEY = 'pusaka_login_at';
     const signedAt = user.last_sign_in_at ? new Date(user.last_sign_in_at).getTime() : NaN;
-    let loginAt = Number.isFinite(signedAt) ? signedAt : NaN;
-    if (!Number.isFinite(loginAt)) {
-      try { loginAt = Number(localStorage.getItem(STORE_KEY)) || Date.now(); } catch { loginAt = Date.now(); }
-    }
-    try { localStorage.setItem(STORE_KEY, String(loginAt)); } catch { /* abaikan */ }
+    const readStored = () => {
+      try { return Number(localStorage.getItem(ACTIVITY_KEY)); } catch { return NaN; }
+    };
+    // Belum ada catatan aktivitas (mis. pertama kali setelah pembaruan) -> anggap aktif sekarang.
+    const stored0 = readStored();
+    let memLast = Number.isFinite(stored0) && stored0 > 0
+      ? effectiveLastActivity(Date.now(), stored0, signedAt)
+      : Date.now();
+    let lastWrite = 0;
+    const writeStored = (t: number) => {
+      try { localStorage.setItem(ACTIVITY_KEY, String(t)); } catch { /* abaikan */ }
+    };
+    writeStored(memLast);
 
     let warned = false;
     let ended = false;
@@ -66,43 +76,59 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ended = true;
       toast({
         title: "Sesi Berakhir",
-        description: "Masa login 1 jam telah habis. Silakan login kembali.",
+        description: "Anda keluar otomatis karena tidak ada aktivitas selama 1 jam. Silakan login kembali.",
       });
-      try { localStorage.removeItem(STORE_KEY); } catch { /* abaikan */ }
+      try { localStorage.removeItem(ACTIVITY_KEY); } catch { /* abaikan */ }
       await supabase.auth.signOut();
       setUser(null);
       setSession(null);
       setUserRole(null);
+      setSchoolId(null);
       navigate('/auth');
     };
     const check = () => {
-      const left = loginAt + SESSION_MS - Date.now();
-      if (left <= 0) { endSession(); return; }
-      if (left <= WARN_MS && !warned) {
+      const now = Date.now();
+      // aktivitas di tab lain ikut dihitung
+      const last = effectiveLastActivity(now, memLast, readStored(), signedAt);
+      const st = idleState(now, last);
+      if (st === 'expired') { endSession(); return; }
+      if (st === 'warn' && !warned) {
         warned = true;
         toast({
           title: "Sesi hampir berakhir",
-          description: `Sesi login berakhir dalam ${Math.max(1, Math.ceil(left / 60000))} menit. Simpan pekerjaan Anda.`,
+          description: `Tidak ada aktivitas. Anda akan keluar otomatis dalam ${idleMinutesLeft(now, last)} menit; gerakkan mouse atau ketuk layar untuk tetap masuk.`,
           variant: "destructive",
         });
+      } else if (st === 'active') {
+        warned = false;
       }
+    };
+    const onActivity = () => {
+      if (ended) return;
+      const now = Date.now();
+      memLast = now;
+      if (now - lastWrite > 10000) { lastWrite = now; writeStored(now); } // batasi tulis ke localStorage
     };
 
     check();
     const timer = setInterval(check, 15 * 1000);
+    const evts: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll', 'mousemove'];
+    evts.forEach((e) => window.addEventListener(e, onActivity, { passive: true, capture: true }));
     document.addEventListener('visibilitychange', check);
     window.addEventListener('focus', check);
     return () => {
       clearInterval(timer);
+      evts.forEach((e) => window.removeEventListener(e, onActivity, { capture: true } as EventListenerOptions));
       document.removeEventListener('visibilitychange', check);
       window.removeEventListener('focus', check);
     };
-  }, [user, toast, navigate]);
+  }, [user, userRole, toast, navigate]);
 
   useEffect(() => {
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
+        if (event === 'SIGNED_OUT') { try { localStorage.removeItem(ACTIVITY_KEY); } catch { /* abaikan */ } }
         setSession(session);
         setUser(session?.user ?? null);
         
