@@ -213,7 +213,7 @@ export async function buildPiketPdf(opts: {
       r.person_name + (r.position ? `\n${r.position}` : ""),
       jamWIB(r.check_in_at),
       jamWIB(r.check_out_at),
-      [STATUS_LABEL[r.status], keteranganText(r, punches?.get(r.id), cfg), punchText(r, punches?.get(r.id))].filter(Boolean).join("\n"),
+      STATUS_LABEL[r.status], // Keterangan di cetak/pratinjau: cukup status (Hadir / Tidak Hadir / Izin); detail ketukan ada di Excel & layar pengelolaan
     ]),
     styles: { fontSize: 8.5, cellPadding: 1.8, valign: "middle" },
     headStyles: { fillColor: [230, 230, 230], textColor: 0, halign: "center" },
