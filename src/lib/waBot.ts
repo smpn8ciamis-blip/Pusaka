@@ -127,6 +127,19 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     defaultBody: `🌿 *SELAMAT AKHIR PEKAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\n\nTerima kasih atas dedikasi dan kerja keras Bapak/Ibu dalam mendidik anak-anak kita sepanjang pekan ini.\n\nHari {{hari}} adalah waktu untuk berhenti sejenak. Nikmatilah akhir pekan bersama keluarga, karena keluarga adalah sumber kekuatan terbesar seorang pendidik. Istirahatlah yang cukup dan siapkan energi terbaik untuk mengajar kembali di hari Senin.\n\nSemoga sehat dan bahagia selalu. 🙏\n_Pusaka - SMP Negeri 8 Ciamis_`,
   },
   {
+    key: 'unfilled_attendance_group',
+    title: 'Pemberitahuan ke Grup: Kelas Belum Mengisi Absensi',
+    description: 'Dikirim ke grup tujuan (tab Rekap Grup) pada jam pengecekan bila ada kelas yang absensi jam pertamanya belum terisi; memuat daftar kelas, wali kelas, dan guru pengajar jam pertama (aturan di tab Pengingat Guru).',
+    variables: [
+      { name: 'hari', sample: 'Selasa', hint: 'Nama hari' },
+      { name: 'tanggal', sample: '10/11/2026', hint: 'Tanggal' },
+      { name: 'waktu', sample: '08:30', hint: 'Jam pengecekan (WIB)' },
+      { name: 'jumlah', sample: '3', hint: 'Jumlah kelas yang belum mengisi' },
+      { name: 'daftar', sample: '1. *VII A*\n   • Wali kelas: Siti Aminah, S.Pd (08123456789)\n   • Jam ke-1: 07:00-07:40 (Matematika)\n   • Guru pengajar: Budi Santoso, S.Pd (08129876543)', hint: 'Daftar kelas beserta wali kelas dan guru jam pertama (dibuat otomatis)' },
+    ],
+    defaultBody: `⚠️ *KELAS BELUM MENGISI ABSENSI*\n{{hari}}, {{tanggal}} pukul {{waktu}} WIB\n\nAbsensi jam pertama *{{jumlah}} kelas* berikut belum terisi:\n\n{{daftar}}\n\nMohon guru pengajar jam pertama segera mengisi absensi di aplikasi Pusaka, dibantu wali kelas masing-masing.\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
+  },
+  {
     key: 'homeroom_attendance_reminder',
     title: 'Pengingat Absensi ke Wali Kelas',
     description: 'Dikirim ke wali kelas bila pada jam pengecekan absensi jam pertama kelasnya belum diisi (aturan di tab Pengingat Guru).',
