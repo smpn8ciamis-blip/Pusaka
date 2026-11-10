@@ -14,8 +14,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, Trash2, Search, FileDown, Calendar as CalendarIcon, X, ExternalLink, Eye, Download, Pencil } from "lucide-react";
+import { Plus, Trash2, Search, FileDown, Calendar as CalendarIcon, X, ExternalLink, Eye, Download, Pencil, Lock } from "lucide-react";
 import { toast } from "sonner";
+import { useSpjGuard, SPJ_LOCK_QUERY_KEY } from "@/hooks/useSpjLock";
 import { cn, toTitleCase } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -64,6 +65,7 @@ const assignmentSchema = z.object({
 export default function AssignmentLetters() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const { guard: spjGuard, dialog: spjDialog, isLetterLocked } = useSpjGuard();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -379,6 +381,7 @@ export default function AssignmentLetters() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["assignment-letters"] });
+      queryClient.invalidateQueries({ queryKey: SPJ_LOCK_QUERY_KEY });
       toast.success("Surat tugas berhasil dihapus");
     },
     onError: (error: any) => {
@@ -413,7 +416,11 @@ export default function AssignmentLetters() {
     }
   };
 
-  const handleEdit = (assignment: any) => {
+  // Surat tugas yang dipakai SPD berstatus SPJ terkunci: perlu kode hapus dari admin (ditegakkan juga oleh trigger database).
+  const handleEdit = (assignment: any) =>
+    spjGuard("letter", assignment.id, isLetterLocked(assignment.id), () => openEditAssignment(assignment));
+
+  const openEditAssignment = (assignment: any) => {
     setIsEditMode(true);
     setEditingId(assignment.id);
     setFormData({
@@ -431,11 +438,12 @@ export default function AssignmentLetters() {
     setIsDialogOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    if (confirm("Yakin ingin menghapus surat tugas ini?")) {
-      deleteMutation.mutate(id);
-    }
-  };
+  const handleDelete = (id: string) =>
+    spjGuard("letter", id, isLetterLocked(id), () => {
+      if (confirm("Yakin ingin menghapus surat tugas ini?")) {
+        deleteMutation.mutate(id);
+      }
+    });
 
   const toggleTeacher = (teacherId: string) => {
     setExecutorOrder((prev) => {
@@ -1186,13 +1194,16 @@ export default function AssignmentLetters() {
                               <TableCell className="text-right">
                                 <TooltipProvider>
                                   <div className="flex justify-end gap-2">
+                                    {isLetterLocked(assignment.id) && (
+                                      <Lock className="h-4 w-4 self-center text-amber-600" aria-label="Terkunci (SPJ)" />
+                                    )}
                                     <Tooltip>
                                       <TooltipTrigger asChild>
                                         <Button variant="outline" size="icon" onClick={() => handleEdit(assignment)}>
                                           <Pencil className="h-4 w-4" />
                                         </Button>
                                       </TooltipTrigger>
-                                      <TooltipContent><p>Edit surat tugas</p></TooltipContent>
+                                      <TooltipContent><p>{isLetterLocked(assignment.id) ? "Edit surat tugas (terkunci SPJ, perlu kode hapus)" : "Edit surat tugas"}</p></TooltipContent>
                                     </Tooltip>
                                     <Tooltip>
                                       <TooltipTrigger asChild>
@@ -1216,7 +1227,7 @@ export default function AssignmentLetters() {
                                           <Trash2 className="h-4 w-4" />
                                         </Button>
                                       </TooltipTrigger>
-                                      <TooltipContent><p>Hapus surat tugas</p></TooltipContent>
+                                      <TooltipContent><p>{isLetterLocked(assignment.id) ? "Hapus surat tugas (terkunci SPJ, perlu kode hapus)" : "Hapus surat tugas"}</p></TooltipContent>
                                     </Tooltip>
                                   </div>
                                 </TooltipProvider>
@@ -1275,6 +1286,7 @@ export default function AssignmentLetters() {
             </div>
           </SheetContent>
         </Sheet>
+        {spjDialog}
       </DashboardLayout>
     </ProtectedRoute>
   );

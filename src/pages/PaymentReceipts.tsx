@@ -14,9 +14,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, Receipt, Trash2, Search, FileDown, Download, Pencil, Settings, Save, Eye, Calendar as CalendarIcon, X, Wallet, TrendingUp, TrendingDown, CheckCircle2 } from "lucide-react";
+import { Plus, Receipt, Trash2, Search, FileDown, Download, Pencil, Settings, Save, Eye, Calendar as CalendarIcon, X, Wallet, TrendingUp, TrendingDown, CheckCircle2, Lock } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
+import { useSpjGuard, SPJ_LOCK_QUERY_KEY } from "@/hooks/useSpjLock";
+import { SpjUnlockCodeCard } from "@/components/spj/SpjUnlockCodeCard";
 import { cn, toTitleCase } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { format } from "date-fns";
@@ -68,8 +70,10 @@ interface TravelRate {
 }
 
 export default function PaymentReceipts() {
-  const { user } = useAuth();
+  const { user, userRole } = useAuth();
   const queryClient = useQueryClient();
+  const { guard: spjGuard, dialog: spjDialog, isTravelLocked } = useSpjGuard();
+  const isAdminRole = userRole === "admin" || userRole === "super_admin";
   const [searchQuery, setSearchQuery] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
@@ -183,6 +187,7 @@ export default function PaymentReceipts() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["payment-receipts"] });
+      queryClient.invalidateQueries({ queryKey: SPJ_LOCK_QUERY_KEY });
       toast.success("Status SPJ berhasil diperbarui");
     },
     onError: (error: any) => toast.error(error.message || "Gagal memperbarui status SPJ"),
@@ -581,6 +586,7 @@ export default function PaymentReceipts() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["payment-receipts"] });
+      queryClient.invalidateQueries({ queryKey: SPJ_LOCK_QUERY_KEY });
       toast.success("Kwitansi berhasil dihapus");
     },
     onError: (error: any) => toast.error(error.message || "Gagal menghapus kwitansi"),
@@ -606,7 +612,13 @@ export default function PaymentReceipts() {
     else createMutation.mutate(formData);
   };
 
-  const handleEdit = async (receipt: any) => {
+  // Kwitansi berstatus SPJ terkunci: perlu kode hapus dari admin (penegakan sebenarnya di trigger database).
+  const isReceiptLocked = (receipt: any) => !!receipt?.is_spj && isTravelLocked(receipt.official_travel_id);
+
+  const handleEdit = (receipt: any) =>
+    spjGuard("receipt", receipt.id, isReceiptLocked(receipt), () => { void openEditReceipt(receipt); });
+
+  const openEditReceipt = async (receipt: any) => {
     setIsEditMode(true);
     setEditingId(receipt.id);
     setEditingOriginal({ official_travel_id: receipt.official_travel_id, payment_type: receipt.payment_type });
@@ -629,8 +641,19 @@ export default function PaymentReceipts() {
     setIsDialogOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    if (confirm("Yakin ingin menghapus kwitansi ini?")) deleteMutation.mutate(id);
+  const handleDelete = (receipt: any) =>
+    spjGuard("receipt", receipt.id, isReceiptLocked(receipt), () => {
+      if (confirm("Yakin ingin menghapus kwitansi ini?")) deleteMutation.mutate(receipt.id);
+    });
+
+  // Mencentang SPJ mengunci data; melepas ceklis pada data terkunci butuh kode hapus.
+  const handleToggleSpj = (receipt: any, checked: boolean) => {
+    if (checked) {
+      if (!confirm("Centang SPJ? Setelah dicentang, kwitansi ini beserta SPD dan surat tugasnya terkunci (tidak bisa diubah/dihapus tanpa kode hapus dari admin).")) return;
+      toggleSpjMutation.mutate({ id: receipt.id, is_spj: true });
+      return;
+    }
+    spjGuard("receipt", receipt.id, isReceiptLocked(receipt), () => toggleSpjMutation.mutate({ id: receipt.id, is_spj: false }));
   };
 
   const handleRateChange = (rateId: string, field: keyof TravelRate, value: string) => {
@@ -1299,17 +1322,20 @@ export default function PaymentReceipts() {
                                     <div className="flex items-center justify-center gap-2">
                                       <Switch
                                         checked={receipt.is_spj || false}
-                                        onCheckedChange={(checked) => toggleSpjMutation.mutate({ id: receipt.id, is_spj: checked })}
+                                        onCheckedChange={(checked) => handleToggleSpj(receipt, checked)}
                                         disabled={toggleSpjMutation.isPending}
                                       />
                                       {receipt.is_spj && (
                                         <CheckCircle2 className="h-4 w-4 text-green-600" />
                                       )}
+                                      {isReceiptLocked(receipt) && (
+                                        <Lock className="h-4 w-4 text-amber-600" aria-label="Terkunci (SPJ)" />
+                                      )}
                                     </div>
                                   </TableCell>
                                   <TableCell className="text-right">
                                     <div className="flex justify-end gap-2">
-                                      <Button variant="outline" size="icon" onClick={() => handleEdit(receipt)} title="Edit">
+                                      <Button variant="outline" size="icon" onClick={() => handleEdit(receipt)} title={isReceiptLocked(receipt) ? "Edit (terkunci, perlu kode)" : "Edit"}>
                                         <Pencil className="h-4 w-4" />
                                       </Button>
                                       <Button variant="secondary" size="icon" onClick={() => handlePreviewPDF(receipt)} title="Preview">
@@ -1318,7 +1344,7 @@ export default function PaymentReceipts() {
                                       <Button variant="default" size="icon" onClick={() => handleExportPDF(receipt)} title="Download">
                                         <FileDown className="h-4 w-4" />
                                       </Button>
-                                      <Button variant="destructive" size="icon" onClick={() => handleDelete(receipt.id)} title="Hapus">
+                                      <Button variant="destructive" size="icon" onClick={() => handleDelete(receipt)} title={isReceiptLocked(receipt) ? "Hapus (terkunci, perlu kode)" : "Hapus"}>
                                         <Trash2 className="h-4 w-4" />
                                       </Button>
                                     </div>
@@ -1348,7 +1374,8 @@ export default function PaymentReceipts() {
               </Card>
             </TabsContent>
 
-            <TabsContent value="rates" className="mt-4">
+            <TabsContent value="rates" className="mt-4 space-y-4">
+              {isAdminRole && <SpjUnlockCodeCard />}
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                   <div>
@@ -1550,6 +1577,7 @@ export default function PaymentReceipts() {
           travelRates={travelRates}
           travelDays={previewTravelDays}
         />
+        {spjDialog}
       </DashboardLayout>
     </ProtectedRoute>
   );
