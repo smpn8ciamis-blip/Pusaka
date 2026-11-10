@@ -303,6 +303,7 @@ const DEFAULT_TEMPLATES = {
     class_attendance_recap: `📊 *REKAP ABSENSI SISWA PER KELAS*\n{{hari}}, {{tanggal}}\n\n{{tabel_rekap}}\nKls=Kelas, Sis=Siswa, H=Hadir, S=Sakit, I=Izin, A=Alfa, Jml=Jumlah tidak sekolah\n\n*REKAP SEMUA KELAS* ({{jumlah_kelas}} kelas, {{total_siswa}} siswa)\n• Hadir: *{{total_hadir}}* ({{persen_hadir}}%)\n• Sakit: *{{total_sakit}}*\n• Izin: *{{total_izin}}*\n• Alfa: *{{total_alfa}}*\n• Jml tidak hadir: *{{total_tidak_hadir}}*\n\n_Pusaka - SMP Negeri 8 Ciamis_`
 };
 DEFAULT_TEMPLATES.class_group_recap = `📊 *ABSENSI KELAS {{kelas}}*\n{{hari}}, {{tanggal}}\n\nJumlah siswa: *{{total_siswa}}*\n✅ Hadir: *{{hadir}}*\n🤒 Sakit: *{{sakit}}*\n📝 Izin: *{{izin}}*\n❌ Alfa: *{{alpa}}*\n\n{{daftar_tidak_hadir}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.unfilled_attendance_group = `⚠️ *KELAS BELUM MENGISI ABSENSI*\n{{hari}}, {{tanggal}} pukul {{waktu}} WIB\n\nAbsensi jam pertama *{{jumlah}} kelas* berikut belum terisi:\n\n{{daftar}}\n\nMohon guru pengajar jam pertama segera mengisi absensi di aplikasi Pusaka, dibantu wali kelas masing-masing.\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.homeroom_attendance_reminder = `📋 *PENGINGAT ABSENSI KELAS*\n\nYth. Bapak/Ibu *{{nama_wali}}* (Wali Kelas {{kelas}}),\nPada pukul {{waktu}} WIB absensi kelas *{{kelas}}* hari {{hari}}, {{tanggal}} belum terisi.\n\nJadwal jam pertama:\n• Jam: *{{jam_pertama}}*\n• Mapel: *{{mapel}}*\n• Guru pengajar: *{{guru_pengajar}}* (belum mengisi absensi)\n\nMohon bantu mengisi absensi kelas Anda di aplikasi Pusaka.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.weekly_absence_wali = `📊 *REKAP KETIDAKHADIRAN MINGGUAN*\n\nYth. Bapak/Ibu *{{nama_wali}}* (Wali Kelas {{kelas}}),\nSiswa yang tidak hadir pada *{{periode}}* ({{jumlah_siswa}} siswa):\n\n{{rekap}}\n_S=Sakit, I=Izin, A=Alfa (jumlah hari)_\n\n{{sering}}\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.weekly_absence_group = `📊 *SISWA SERING TIDAK HADIR*\nPeriode *{{periode}}*\n\n{{rekap}}\n_S=Sakit, I=Izin, A=Alfa (jumlah hari)_\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
@@ -326,6 +327,8 @@ const DEFAULT_BOT_SETTINGS = {
     class_group_recap_enabled: false, // kirim rekap ke grup MASING-MASING kelas (tabel wa_class_groups)
     saturday_greeting_enabled: true,  // ucapan akhir pekan ke guru yang tidak mengajar hari Sabtu
     saturday_greeting_time: '07:00',  // jam kirim (WIB)
+    unfilled_att_group_enabled: false, // umumkan ke grup (grup tujuan = class_recap_group_jid) kelas yang absensinya belum terisi
+    unfilled_att_group_times: '08:30',  // jam pengecekan (WIB), boleh lebih dari satu dipisah koma
     homeroom_att_reminder_enabled: false, // ingatkan wali kelas bila absensi kelasnya belum diisi guru jam pertama
     homeroom_att_reminder_times: '08:30', // jam pengecekan (WIB), boleh lebih dari satu dipisah koma
     parent_query_enabled: true,       // orang tua (nomor tertaut) bisa mengetik "cek poin" / "absen" ke bot
@@ -886,6 +889,82 @@ async function runHomeroomAttendanceReminder() {
         }
     } catch (e) { console.error('[HOMEROOM REMINDER ERROR]:', e.message); }
     finally { homeroomRunning = false; }
+}
+// Pengumuman ke GRUP (grup tujuan = "Rekap Grup"): daftar kelas yang absensi jam pertamanya belum terisi pada jam pengecekan,
+// lengkap dengan wali kelas dan guru pengajar jam pertama. Satu pesan per jam pengecekan per hari (tidak ada pesan bila semua terisi).
+let unfilledGroupRunning = false;
+function natCmp(a, b) { return String(a).localeCompare(String(b), 'id', { numeric: true, sensitivity: 'base' }); }
+async function collectUnfilledAttendance(now) {
+    const comp = await supabase.rpc('get_class_attendance_completion', { p_date: now.date });
+    if (comp.error) throw comp.error;
+    const unfilled = (comp.data || []).filter(function(c) { return !c.filled && c.first_schedule_id; });
+    if (unfilled.length === 0) return [];
+    const schedRes = await supabase.from('schedules').select('id, teacher_id, subject, start_time, end_time').in('id', unfilled.map(function(c) { return c.first_schedule_id; }));
+    if (schedRes.error) throw schedRes.error;
+    const schedById = new Map((schedRes.data || []).map(function(x) { return [x.id, x]; }));
+    const clsRes = await supabase.from('classes').select('id, homeroom_teacher_id').in('id', unfilled.map(function(c) { return c.class_id; }));
+    if (clsRes.error) throw clsRes.error;
+    const homeroomOf = new Map((clsRes.data || []).map(function(x) { return [x.id, x.homeroom_teacher_id]; }));
+    const teacherIds = Array.from(new Set([].concat(
+        (schedRes.data || []).map(function(x) { return x.teacher_id; }),
+        (clsRes.data || []).map(function(x) { return x.homeroom_teacher_id; })
+    ).filter(Boolean)));
+    const tRes = teacherIds.length ? await supabase.from('teachers').select('id, user_id').in('id', teacherIds) : { data: [] };
+    if (tRes.error) throw tRes.error;
+    const uids = (tRes.data || []).map(function(t) { return t.user_id; }).filter(Boolean);
+    const pRes = uids.length ? await supabase.from('profiles').select('id, full_name, phone').in('id', uids) : { data: [] };
+    if (pRes.error) throw pRes.error;
+    const profById = new Map((pRes.data || []).map(function(x) { return [x.id, x]; }));
+    const profOfTeacher = new Map((tRes.data || []).map(function(t) { return [t.id, profById.get(t.user_id)]; }));
+    const out = [];
+    for (const c of unfilled) {
+        const sc = schedById.get(c.first_schedule_id);
+        if (!sc || hhmmToMin(sc.start_time) > now.minutes) continue; // jam pertama kelas ini belum mulai
+        out.push({ kelas: c.class_name, sc: sc, wali: profOfTeacher.get(homeroomOf.get(c.class_id)) || null, guru: profOfTeacher.get(sc.teacher_id) || null });
+    }
+    out.sort(function(a, b) { return natCmp(a.kelas, b.kelas); });
+    return out;
+}
+function personLine(label, p) {
+    if (!p || !p.full_name) return '   • ' + label + ': -';
+    return '   • ' + label + ': ' + p.full_name + (p.phone ? ' (' + p.phone + ')' : '');
+}
+async function runUnfilledAttendanceGroup() {
+    if (!isReady || unfilledGroupRunning) return;
+    unfilledGroupRunning = true;
+    try {
+        const cfg = await getBotSettings();
+        if (!cfg.unfilled_att_group_enabled || !cfg.class_recap_group_jid) return;
+        const now = wibNow();
+        if (now.dow > 6) return;
+        const times = String(cfg.unfilled_att_group_times || '08:30').split(/[,\s;]+/).filter(function(t) { return /^\d{1,2}:\d{2}$/.test(t); }).map(hhmmToMin);
+        const due = times.filter(function(t) { return now.minutes >= t && now.minutes < t + 90; }).sort(function(a, b) { return b - a; });
+        if (due.length === 0) return;
+        const slot = due[0];   // jam pengecekan terbaru yang sudah tiba
+        const key = 'ug:' + slot;
+        if (reminderSentDate !== now.date) loadReminderState(now.date);
+        if (reminderSent.has(key)) return;
+        const list = await collectUnfilledAttendance(now);
+        markReminderSent(key);   // sudah dievaluasi untuk jam ini (kosong pun dianggap selesai)
+        if (list.length === 0) return;
+        const MAX = 40;
+        const daftar = list.slice(0, MAX).map(function(x, i) {
+            return (i + 1) + '. *' + x.kelas + '*\n' + personLine('Wali kelas', x.wali) + '\n' +
+                '   • Jam ke-1: ' + String(x.sc.start_time).slice(0, 5) + '-' + String(x.sc.end_time).slice(0, 5) + (x.sc.subject ? ' (' + x.sc.subject + ')' : '') + '\n' +
+                personLine('Guru pengajar', x.guru);
+        }).join('\n\n') + (list.length > MAX ? '\n\n...dan ' + (list.length - MAX) + ' kelas lainnya' : '');
+        const vars = {
+            hari: DAY_NAMES[now.dow], tanggal: now.date.split('-').reverse().join('/'),
+            waktu: String(Math.floor(now.minutes / 60)).padStart(2, '0') + ':' + String(now.minutes % 60).padStart(2, '0'),
+            jumlah: list.length, daftar: daftar
+        };
+        const gjid = cfg.class_recap_group_jid;
+        const text = await renderMessage('unfilled_attendance_group', vars);
+        if (!text) return;
+        enqueueTask(async () => { await sendSafeMessage(gjid, { text: text }); }, { to: gjid, kind: 'unfilled_attendance_group' });
+        console.log('[ABSENSI BELUM TERISI] ' + list.length + ' kelas diumumkan ke grup');
+    } catch (e) { console.error('[ABSENSI BELUM TERISI ERROR]:', e.message); }
+    finally { unfilledGroupRunning = false; }
 }
 // Rekap mingguan siswa tidak hadir -> wali kelas (per kelas) + opsional ringkasan "sering" ke grup.
 function isoAddDays(iso, n) { return new Date(new Date(iso + 'T00:00:00Z').getTime() + n * 86400000).toISOString().slice(0, 10); }
@@ -3324,6 +3403,7 @@ app.listen(PORT, () => {
     setInterval(runTeacherReminders, 60 * 1000);
     setInterval(runSaturdayGreeting, 60 * 1000);
     setInterval(runHomeroomAttendanceReminder, 60 * 1000);
+    setInterval(runUnfilledAttendanceGroup, 60 * 1000);
     setInterval(runWeeklyAbsenceRecap, 60 * 1000);
     scheduleAssignmentFollowup().catch(function(e) { console.error('[BUKTI WA]', e.message); });
     setTimeout(function() { catchUpAssignmentFollowup().catch(function() {}); }, 90 * 1000);

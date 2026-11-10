@@ -537,6 +537,8 @@ function ReminderTab() {
   const [satTime, setSatTime] = useState('07:00');
   const [hrOn, setHrOn] = useState(false);
   const [hrTimes, setHrTimes] = useState('08:30');
+  const [ugOn, setUgOn] = useState(false);
+  const [ugTimes, setUgTimes] = useState('08:30');
   const [piketWa, setPiketWa] = useState(true);
   const [assignWa, setAssignWa] = useState(true);
   const [assignFu, setAssignFu] = useState(true);
@@ -577,6 +579,8 @@ function ReminderTab() {
       setSatTime(String(data.saturday_greeting_time || '07:00').slice(0, 5));
       setHrOn(!!data.homeroom_att_reminder_enabled);
       setHrTimes(String(data.homeroom_att_reminder_times || '08:30'));
+      setUgOn(!!data.unfilled_att_group_enabled);
+      setUgTimes(String(data.unfilled_att_group_times || '08:30'));
       setPiketWa(data.piket_wa_enabled !== false);
       setAssignWa(data.assignment_wa_enabled !== false);
       setAssignFu(data.assignment_followup_enabled !== false);
@@ -610,6 +614,8 @@ function ReminderTab() {
         saturday_greeting_enabled: satGreet,
         saturday_greeting_time: /^\d{2}:\d{2}$/.test(satTime) ? satTime : '07:00',
         homeroom_att_reminder_enabled: hrOn,
+        unfilled_att_group_enabled: ugOn,
+        unfilled_att_group_times: ugTimes.split(/[,\s;]+/).filter((x) => /^\d{1,2}:\d{2}$/.test(x)).map((x) => x.padStart(5, '0')).join(', ') || '08:30',
         homeroom_att_reminder_times: hrTimes.split(/[,\s;]+/).filter((t) => /^\d{1,2}:\d{2}$/.test(t)).map((t) => t.padStart(5, '0')).join(', ') || '08:30',
         piket_wa_enabled: piketWa,
         assignment_wa_enabled: assignWa,
@@ -739,6 +745,22 @@ function ReminderTab() {
               <Label>Jam pengecekan (WIB)</Label>
               <Input value={hrTimes} onChange={(e) => setHrTimes(e.target.value)} placeholder="08:30, 10:00" className="w-48" />
               <p className="text-xs text-muted-foreground">Boleh lebih dari satu, pisahkan dengan koma (format 24 jam).</p>
+            </div>
+          )}
+        </div>
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="ug-en">Umumkan ke grup: kelas yang belum mengisi absensi</Label>
+            <Switch id="ug-en" checked={ugOn} onCheckedChange={setUgOn} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Pada jam pengecekan, bot mengirim <b>satu pesan</b> ke grup berisi daftar kelas yang absensi jam pertamanya belum terisi, lengkap dengan wali kelas dan guru pengajar jam pertama (nama dan nomor). Bila semua sudah terisi, tidak ada pesan. Sekali per jam pengecekan per hari; hari Minggu tidak dikirim. Grup tujuan adalah grup yang dipilih di tab <b>Rekap Grup</b>; isi pesan bisa diubah di tab Template Pesan.
+          </p>
+          {ugOn && (
+            <div className="space-y-1">
+              <Label>Jam pengecekan (WIB)</Label>
+              <Input value={ugTimes} onChange={(e) => setUgTimes(e.target.value)} placeholder="08:30, 10:00" className="w-48" />
+              <p className="text-xs text-muted-foreground">Boleh lebih dari satu, pisahkan dengan koma (format 24 jam). Bot harus sudah menjadi anggota grup tujuan.</p>
             </div>
           )}
         </div>
