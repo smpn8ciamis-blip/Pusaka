@@ -925,9 +925,14 @@ async function collectUnfilledAttendance(now) {
     out.sort(function(a, b) { return natCmp(a.kelas, b.kelas); });
     return out;
 }
-function personLine(label, p) {
+// Baris orang pada pengumuman. Bila punya nomor HP, ditulis "@628xxx" dan JID-nya dikumpulkan ke `mentions`
+// sehingga WhatsApp me-mention orang itu (notifikasi masuk walau grup di-mute biasa; hanya bila ia anggota grup).
+function personLine(label, p, mentions) {
     if (!p || !p.full_name) return '   • ' + label + ': -';
-    return '   • ' + label + ': ' + p.full_name + (p.phone ? ' (' + p.phone + ')' : '');
+    const num = p.phone ? formatToInternational(p.phone) : '';
+    if (num.length < 8) return '   • ' + label + ': ' + p.full_name;
+    if (mentions && mentions.indexOf(num + '@s.whatsapp.net') < 0) mentions.push(num + '@s.whatsapp.net');
+    return '   • ' + label + ': ' + p.full_name + ' @' + num;
 }
 async function runUnfilledAttendanceGroup() {
     if (!isReady || unfilledGroupRunning) return;
@@ -948,10 +953,11 @@ async function runUnfilledAttendanceGroup() {
         markReminderSent(key);   // sudah dievaluasi untuk jam ini (kosong pun dianggap selesai)
         if (list.length === 0) return;
         const MAX = 40;
+        const mentions = [];
         const daftar = list.slice(0, MAX).map(function(x, i) {
-            return (i + 1) + '. *' + x.kelas + '*\n' + personLine('Wali kelas', x.wali) + '\n' +
+            return (i + 1) + '. *' + x.kelas + '*\n' + personLine('Wali kelas', x.wali, mentions) + '\n' +
                 '   • Jam ke-1: ' + String(x.sc.start_time).slice(0, 5) + '-' + String(x.sc.end_time).slice(0, 5) + (x.sc.subject ? ' (' + x.sc.subject + ')' : '') + '\n' +
-                personLine('Guru pengajar', x.guru);
+                personLine('Guru pengajar', x.guru, mentions);
         }).join('\n\n') + (list.length > MAX ? '\n\n...dan ' + (list.length - MAX) + ' kelas lainnya' : '');
         const vars = {
             hari: DAY_NAMES[now.dow], tanggal: now.date.split('-').reverse().join('/'),
@@ -961,7 +967,7 @@ async function runUnfilledAttendanceGroup() {
         const gjid = cfg.class_recap_group_jid;
         const text = await renderMessage('unfilled_attendance_group', vars);
         if (!text) return;
-        enqueueTask(async () => { await sendSafeMessage(gjid, { text: text }); }, { to: gjid, kind: 'unfilled_attendance_group' });
+        enqueueTask(async () => { await sendSafeMessage(gjid, mentions.length ? { text: text, mentions: mentions } : { text: text }); }, { to: gjid, kind: 'unfilled_attendance_group' });
         console.log('[ABSENSI BELUM TERISI] ' + list.length + ' kelas diumumkan ke grup');
     } catch (e) { console.error('[ABSENSI BELUM TERISI ERROR]:', e.message); }
     finally { unfilledGroupRunning = false; }
