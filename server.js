@@ -898,7 +898,7 @@ async function collectUnfilledAttendance(now) {
     const comp = await supabase.rpc('get_class_attendance_completion', { p_date: now.date });
     if (comp.error) throw comp.error;
     const unfilled = (comp.data || []).filter(function(c) { return !c.filled && c.first_schedule_id; });
-    if (unfilled.length === 0) return [];
+    if (unfilled.length === 0) { const none = []; none.allFilled = true; return none; }   // semua kelas ber-jadwal sudah terisi
     const schedRes = await supabase.from('schedules').select('id, teacher_id, subject, start_time, end_time').in('id', unfilled.map(function(c) { return c.first_schedule_id; }));
     if (schedRes.error) throw schedRes.error;
     const schedById = new Map((schedRes.data || []).map(function(x) { return [x.id, x]; }));
@@ -923,6 +923,7 @@ async function collectUnfilledAttendance(now) {
         out.push({ kelas: c.class_name, sc: sc, wali: profOfTeacher.get(homeroomOf.get(c.class_id)) || null, guru: profOfTeacher.get(sc.teacher_id) || null });
     }
     out.sort(function(a, b) { return natCmp(a.kelas, b.kelas); });
+    out.allFilled = false;
     return out;
 }
 // Baris orang pada pengumuman. Bila punya nomor HP, ditulis "@628xxx" dan JID-nya dikumpulkan ke `mentions`
@@ -948,9 +949,10 @@ async function runUnfilledAttendanceGroup() {
         const slot = due[0];   // jam pengecekan terbaru yang sudah tiba
         const key = 'ug:' + slot;
         if (reminderSentDate !== now.date) loadReminderState(now.date);
-        if (reminderSent.has(key)) return;
+        if (reminderSent.has(key) || reminderSent.has('ug:done')) return;   // 'ug:done' = semua kelas sudah terisi hari ini: tidak ada pengumuman lagi
         const list = await collectUnfilledAttendance(now);
         markReminderSent(key);   // sudah dievaluasi untuk jam ini (kosong pun dianggap selesai)
+        if (list.allFilled) markReminderSent('ug:done');   // semua terisi -> jam pengecekan berikutnya hari ini dilewati
         if (list.length === 0) return;
         const MAX = 40;
         const mentions = [];
