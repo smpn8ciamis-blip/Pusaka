@@ -13,8 +13,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, Trash2, Search, FileDown, Plane, Eye, Pencil, Calendar as CalendarIcon, X, FileText, Wrench, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Search, FileDown, Plane, Eye, Pencil, Calendar as CalendarIcon, X, FileText, Wrench, RefreshCw, Lock } from "lucide-react";
 import { toast } from "sonner";
+import { useSpjGuard, SPJ_LOCK_QUERY_KEY } from "@/hooks/useSpjLock";
 import { cn, toTitleCase } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { format, parseISO, differenceInCalendarDays } from "date-fns";
@@ -144,6 +145,7 @@ type MutationInput = FormData & {
 export default function OfficialTravel() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const { guard: spjGuard, dialog: spjDialog, isTravelLocked } = useSpjGuard();
   const [searchQuery, setSearchQuery] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -413,6 +415,7 @@ export default function OfficialTravel() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["official-travel-letters"] });
+      queryClient.invalidateQueries({ queryKey: SPJ_LOCK_QUERY_KEY });
       toast.success("SPD berhasil dihapus");
     },
     onError: (error: any) => {
@@ -649,6 +652,17 @@ export default function OfficialTravel() {
 
   const handleDeleteAndCreateNew = async () => {
     if (!duplicateSPD) return;
+    // SPD yang kwitansinya sudah SPJ terkunci: minta kode hapus dulu
+    if (isTravelLocked(duplicateSPD.id)) {
+      const id = duplicateSPD.id;
+      setDuplicateDialogOpen(false);
+      spjGuard("travel", id, true, () => {
+        deleteMutation.mutate(id);
+        setDuplicateSPD(null);
+        toast.success("SPD lama dihapus. Silakan simpan ulang untuk membuat SPD baru.");
+      });
+      return;
+    }
     try {
       await deleteMutation.mutateAsync(duplicateSPD.id);
       setDuplicateDialogOpen(false);
@@ -780,7 +794,11 @@ export default function OfficialTravel() {
     }
   };
 
-  const handleEdit = (travel: any) => {
+  // SPD yang kwitansinya sudah berstatus SPJ terkunci: perlu kode hapus dari admin (ditegakkan juga oleh trigger database).
+  const handleEdit = (travel: any) =>
+    spjGuard("travel", travel.id, isTravelLocked(travel.id), () => openEditTravel(travel));
+
+  const openEditTravel = (travel: any) => {
     setIsEditMode(true);
     setEditingId(travel.id);
 
@@ -819,11 +837,12 @@ export default function OfficialTravel() {
     setIsDialogOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    if (confirm("Yakin ingin menghapus SPD ini?")) {
-      deleteMutation.mutate(id);
-    }
-  };
+  const handleDelete = (id: string) =>
+    spjGuard("travel", id, isTravelLocked(id), () => {
+      if (confirm("Yakin ingin menghapus SPD ini?")) {
+        deleteMutation.mutate(id);
+      }
+    });
 
   const toggleTeacher = (teacherId: string) => {
     setSelectedTeachers((prev) =>
@@ -1927,7 +1946,10 @@ export default function OfficialTravel() {
                               </TableCell>
                               <TableCell className="text-right">
                                 <div className="flex justify-end gap-2">
-                                  <Button variant="outline" size="icon" onClick={() => handleEdit(travel)} title="Edit">
+                                  {isTravelLocked(travel.id) && (
+                                    <Lock className="h-4 w-4 self-center text-amber-600" aria-label="Terkunci (SPJ)" />
+                                  )}
+                                  <Button variant="outline" size="icon" onClick={() => handleEdit(travel)} title={isTravelLocked(travel.id) ? "Edit (terkunci SPJ, perlu kode)" : "Edit"}>
                                     <Pencil className="h-4 w-4" />
                                   </Button>
                                   <Button variant="outline" size="icon" onClick={() => previewPDF(travel)} title="Preview PDF">
@@ -1936,7 +1958,7 @@ export default function OfficialTravel() {
                                   <Button variant="outline" size="icon" onClick={() => exportPDF(travel)} title="Download PDF">
                                     <FileDown className="h-4 w-4" />
                                   </Button>
-                                  <Button variant="destructive" size="icon" onClick={() => handleDelete(travel.id)} title="Hapus">
+                                  <Button variant="destructive" size="icon" onClick={() => handleDelete(travel.id)} title={isTravelLocked(travel.id) ? "Hapus (terkunci SPJ, perlu kode)" : "Hapus"}>
                                     <Trash2 className="h-4 w-4" />
                                   </Button>
                                 </div>
@@ -2084,6 +2106,7 @@ export default function OfficialTravel() {
             </DialogContent>
           </Dialog>
         </div>
+        {spjDialog}
       </DashboardLayout>
     </ProtectedRoute>
   );
