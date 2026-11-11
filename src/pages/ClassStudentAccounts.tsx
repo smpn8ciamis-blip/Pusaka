@@ -6,6 +6,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import HomeroomStudentTab from '@/components/homeroom/HomeroomStudentTab';
 import SchoolStudentTab from '@/components/homeroom/SchoolStudentTab';
+import AbsenceNoticesCard from '@/components/homeroom/AbsenceNoticesCard';
 
 /**
  * Akun Siswa: data siswa & akun login, plus cetak PDF daftar akun.
@@ -52,6 +53,7 @@ export default function ClassStudentAccounts() {
               Data siswa dan akun login seluruh kelas di sekolah — akses penuh seperti wali kelas, dengan cakupan satu sekolah.
             </p>
           </div>
+          <AbsenceNoticesCard />
           <SchoolStudentTab />
         </div>
       </DashboardLayout>
@@ -70,6 +72,8 @@ export default function ClassStudentAccounts() {
             Data siswa dan akun login per kelas{cls ? ` — ${cls.name} (${cls.academic_year})` : ''}.
           </p>
         </div>
+
+        {cls?.id && <AbsenceNoticesCard />}
 
         {cls?.id && schoolId ? (
           <HomeroomStudentTab
