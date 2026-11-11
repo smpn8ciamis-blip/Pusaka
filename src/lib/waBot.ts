@@ -140,6 +140,44 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     defaultBody: `⚠️ *KELAS BELUM MENGISI ABSENSI*\n{{hari}}, {{tanggal}} pukul {{waktu}} WIB\n\nAbsensi jam pertama *{{jumlah}} kelas* berikut belum terisi:\n\n{{daftar}}\n\nMohon guru pengajar jam pertama segera mengisi absensi di aplikasi Pusaka, dibantu wali kelas masing-masing.\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
   },
   {
+    key: 'absence_notice_homeroom',
+    title: 'Wali Kelas: Pemberitahuan Izin/Sakit dari Orang Tua',
+    description: 'Dikirim ke wali kelas (bersama foto surat) saat orang tua melapor anak sakit/izin lewat bot. Wali kelas membalas ACC atau TOLAK. Saklar: pengaturan bot, "Orang tua melapor anak sakit/izin lewat WA".',
+    variables: [
+      { name: 'kelas', sample: 'VII A', hint: 'Kelas siswa' },
+      { name: 'nama_siswa', sample: 'Ani Lestari', hint: 'Nama siswa' },
+      { name: 'jenis', sample: 'Sakit', hint: 'Sakit atau Izin' },
+      { name: 'tanggal', sample: 'Kamis, 12/11/2026', hint: 'Tanggal siswa tidak masuk' },
+      { name: 'kode', sample: 'K7M2', hint: 'Kode pemberitahuan untuk balasan (ACC K7M2)' },
+    ],
+    defaultBody: `📩 *PEMBERITAHUAN IZIN/SAKIT SISWA*\n\nKelas: *{{kelas}}*\nNama: *{{nama_siswa}}*\nJenis: *{{jenis}}*\nTanggal: *{{tanggal}}*\nDilaporkan oleh orang tua lewat WhatsApp. Surat terlampir pada gambar ini.\n\nBalas pesan ini dengan:\n✅ *ACC* untuk menyetujui (absensi siswa pada tanggal itu otomatis tersimpan sebagai {{jenis}})\n❌ *TOLAK alasan* untuk menolak\n\n_Kode: {{kode}}. Bila ada beberapa pemberitahuan, sebutkan kodenya, mis. *ACC {{kode}}*. Bisa juga diputuskan di aplikasi Pusaka (menu Akun Siswa)._\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
+  },
+  {
+    key: 'absence_notice_approved',
+    title: 'Orang Tua: Izin/Sakit Disetujui Wali Kelas',
+    description: 'Dikirim ke orang tua setelah wali kelas menyetujui pemberitahuan izin/sakit; absensi tanggal itu sudah tersimpan.',
+    variables: [
+      { name: 'nama_siswa', sample: 'Ani Lestari', hint: 'Nama siswa' },
+      { name: 'kelas', sample: 'VII A', hint: 'Kelas siswa' },
+      { name: 'jenis', sample: 'Sakit', hint: 'Sakit atau Izin' },
+      { name: 'tanggal', sample: 'Kamis, 12/11/2026', hint: 'Tanggal siswa tidak masuk' },
+    ],
+    defaultBody: `✅ *Pemberitahuan {{jenis}} disetujui*\n\nPemberitahuan {{jenis}} untuk *{{nama_siswa}}* ({{kelas}}) pada {{tanggal}} telah *disetujui* wali kelas. Absensi pada tanggal tersebut sudah tersimpan sebagai *{{jenis}}*.\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
+  },
+  {
+    key: 'absence_notice_rejected',
+    title: 'Orang Tua: Izin/Sakit Ditolak Wali Kelas',
+    description: 'Dikirim ke orang tua bila wali kelas menolak pemberitahuan izin/sakit; absensi tidak diubah dan orang tua perlu mengetik sakit/izin dari awal.',
+    variables: [
+      { name: 'nama_siswa', sample: 'Ani Lestari', hint: 'Nama siswa' },
+      { name: 'kelas', sample: 'VII A', hint: 'Kelas siswa' },
+      { name: 'jenis', sample: 'Sakit', hint: 'Sakit atau Izin' },
+      { name: 'tanggal', sample: 'Kamis, 12/11/2026', hint: 'Tanggal siswa tidak masuk' },
+      { name: 'alasan', sample: '\nAlasan: surat tidak terbaca', hint: 'Alasan penolakan (kosong bila wali kelas tidak menuliskan)' },
+    ],
+    defaultBody: `❌ *Pemberitahuan {{jenis}} ditolak*\n\nPemberitahuan {{jenis}} untuk *{{nama_siswa}}* ({{kelas}}) pada {{tanggal}} *tidak disetujui* wali kelas.{{alasan}}\n\nAbsensi tidak diubah. Bila ingin mengajukan ulang, ketik *sakit* atau *izin* dari awal. Untuk keterangan lebih lanjut, hubungi wali kelas.\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
+  },
+  {
     key: 'homeroom_attendance_reminder',
     title: 'Pengingat Absensi ke Wali Kelas',
     description: 'Dikirim ke wali kelas bila pada jam pengecekan absensi jam pertama kelasnya belum diisi (aturan di tab Pengingat Guru).',
@@ -388,6 +426,20 @@ export async function notifyBotTravelCreated(travelId: string): Promise<void> {
     console.info('[WA SPPD] bot menjawab:', res.status, res.queued ?? '', res.no_phone ? `(tanpa nomor HP: ${res.no_phone})` : '');
   } catch (e) {
     console.warn('[WA SPPD] tidak dapat memberi tahu bot:', (e as Error)?.message);
+  }
+}
+
+/**
+ * Dipanggil setelah wali kelas/admin/kesiswaan memutuskan pemberitahuan izin/sakit di aplikasi: bot mengirim hasilnya ke
+ * orang tua (sekali saja). Gagal diam-diam; keputusan sudah tersimpan di database.
+ */
+export async function notifyBotAbsenceDecided(noticeId: string): Promise<boolean> {
+  try {
+    const res = await waAdminFetch<{ status: string; sent?: boolean }>('/absence-notice-decided', { method: 'POST', body: { notice_id: noticeId } });
+    return !!res.sent;
+  } catch (e) {
+    console.warn('[WA Izin/Sakit] tidak dapat memberi tahu bot:', (e as Error)?.message);
+    return false;
   }
 }
 

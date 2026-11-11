@@ -543,6 +543,7 @@ function ReminderTab() {
   const [assignWa, setAssignWa] = useState(true);
   const [assignFu, setAssignFu] = useState(true);
   const [parentQuery, setParentQuery] = useState(true);
+  const [parentAbsence, setParentAbsence] = useState(true);
   const [waMenu, setWaMenu] = useState(true);
   const [waButtons, setWaButtons] = useState(false);
   const [waCard, setWaCard] = useState(true);
@@ -585,6 +586,7 @@ function ReminderTab() {
       setAssignWa(data.assignment_wa_enabled !== false);
       setAssignFu(data.assignment_followup_enabled !== false);
       setParentQuery(data.parent_query_enabled !== false);
+      setParentAbsence(data.parent_absence_wa_enabled !== false);
       setWaMenu(data.wa_menu_enabled !== false);
       setWaButtons(data.wa_buttons_enabled === true);
       setWaCard(data.wa_contact_card_enabled !== false);
@@ -621,6 +623,7 @@ function ReminderTab() {
         assignment_wa_enabled: assignWa,
         assignment_followup_enabled: assignFu,
         parent_query_enabled: parentQuery,
+        parent_absence_wa_enabled: parentAbsence,
         wa_menu_enabled: waMenu,
         wa_buttons_enabled: waButtons,
         wa_contact_card_enabled: waCard,
@@ -858,11 +861,20 @@ function ReminderTab() {
         </div>
         <div className="space-y-2 rounded-lg border p-3">
           <div className="flex items-center justify-between">
+            <Label htmlFor="pa-en">Orang tua melapor anak sakit/izin lewat WA (wali kelas ACC/TOLAK)</Label>
+            <Switch id="pa-en" checked={parentAbsence} onCheckedChange={setParentAbsence} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Orang tua yang nomornya sudah tertaut mengetik <b>sakit</b> atau <b>izin</b>, bot menanyakan tanggal lalu meminta foto surat (dokter/orang tua). Pemberitahuan beserta foto dikirim ke WhatsApp wali kelas, yang membalas <b>ACC</b> atau <b>TOLAK alasan</b> (atau memutuskan di aplikasi, menu <b>Akun Siswa</b>). ACC otomatis menyimpan absensi siswa pada tanggal itu (semua jam pelajaran) sebagai sakit/izin; TOLAK tidak mengubah absensi dan orang tua mengetik ulang dari awal. Foto surat tersimpan di server dan terlihat oleh wali kelas siswa, admin, dan kesiswaan. Nomor WA wali kelas diambil dari profil akunnya. Isi pesan bisa diubah di tab Template.
+          </p>
+        </div>
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
             <Label htmlFor="menu-en">Menu perintah WA untuk orang tua &amp; guru (ketik <b>menu</b>)</Label>
             <Switch id="menu-en" checked={waMenu} onCheckedChange={setWaMenu} />
           </div>
           <p className="text-xs text-muted-foreground">
-            Bila orang tua/guru mengetik <b>menu</b> (atau salam seperti <b>halo</b>), bot membalas daftar perintah bernomor sesuai perannya: orang tua (cek poin, absen), pembina ekskul (jurnal, foto), dan penerima surat tugas (<b>surat tugas</b>: pilih surat lalu kirim foto bukti kunjungan langsung di chat). Cukup balas nomornya. Nomor yang belum dikenal hanya dibalas bila mengetik <b>menu</b> (isinya petunjuk <b>DAFTAR</b>); salam biasa dari nomor asing tidak dibalas.
+            Bila orang tua/guru mengetik <b>menu</b> (atau salam seperti <b>halo</b>), bot membalas daftar perintah bernomor sesuai perannya: orang tua (cek poin, absen, anak sakit, anak izin), pembina ekskul (jurnal, foto), dan penerima surat tugas (<b>surat tugas</b>: pilih surat lalu kirim foto bukti kunjungan langsung di chat). Cukup balas nomornya. Nomor yang belum dikenal hanya dibalas bila mengetik <b>menu</b> (isinya petunjuk <b>DAFTAR</b>); salam biasa dari nomor asing tidak dibalas.
           </p>
           <div className="flex items-center justify-between border-t pt-2">
             <Label htmlFor="card-en">Kirim kartu kontak bot pada chat pertama (agar nomor bot disimpan)</Label>

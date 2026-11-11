@@ -285,7 +285,7 @@ export const useTeacherTasks = (userId: string | null, userRole: string | null, 
       const today = toLocalDateStr(new Date());
       const todayScheduleIds = todaySchedules?.map((s: any) => s.id) || [];
       if (todayScheduleIds.length === 0) return { pendingAttendance: 0, pendingJournals: 0 };
-      const { data: attendanceData } = await supabase.from('attendance').select('schedule_id').in('schedule_id', todayScheduleIds).eq('date', today);
+      const { data: attendanceData } = await supabase.from('attendance').select('schedule_id').in('schedule_id', todayScheduleIds).eq('date', today).is('parent_notice_id', null);
       const schedulesWithAttendance = new Set(attendanceData?.map(a => a.schedule_id) || []);
       const pendingAttendance = todayScheduleIds.filter((id: string) => !schedulesWithAttendance.has(id)).length;
       const { data: journalData } = await supabase.from('teaching_journals').select('schedule_id').in('schedule_id', todayScheduleIds).eq('date', today);

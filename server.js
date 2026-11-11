@@ -303,6 +303,9 @@ const DEFAULT_TEMPLATES = {
     class_attendance_recap: `📊 *REKAP ABSENSI SISWA PER KELAS*\n{{hari}}, {{tanggal}}\n\n{{tabel_rekap}}\nKls=Kelas, Sis=Siswa, H=Hadir, S=Sakit, I=Izin, A=Alfa, Jml=Jumlah tidak sekolah\n\n*REKAP SEMUA KELAS* ({{jumlah_kelas}} kelas, {{total_siswa}} siswa)\n• Hadir: *{{total_hadir}}* ({{persen_hadir}}%)\n• Sakit: *{{total_sakit}}*\n• Izin: *{{total_izin}}*\n• Alfa: *{{total_alfa}}*\n• Jml tidak hadir: *{{total_tidak_hadir}}*\n\n_Pusaka - SMP Negeri 8 Ciamis_`
 };
 DEFAULT_TEMPLATES.class_group_recap = `📊 *ABSENSI KELAS {{kelas}}*\n{{hari}}, {{tanggal}}\n\nJumlah siswa: *{{total_siswa}}*\n✅ Hadir: *{{hadir}}*\n🤒 Sakit: *{{sakit}}*\n📝 Izin: *{{izin}}*\n❌ Alfa: *{{alpa}}*\n\n{{daftar_tidak_hadir}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.absence_notice_homeroom = `📩 *PEMBERITAHUAN IZIN/SAKIT SISWA*\n\nKelas: *{{kelas}}*\nNama: *{{nama_siswa}}*\nJenis: *{{jenis}}*\nTanggal: *{{tanggal}}*\nDilaporkan oleh orang tua lewat WhatsApp. Surat terlampir pada gambar ini.\n\nBalas pesan ini dengan:\n✅ *ACC* untuk menyetujui (absensi siswa pada tanggal itu otomatis tersimpan sebagai {{jenis}})\n❌ *TOLAK alasan* untuk menolak\n\n_Kode: {{kode}}. Bila ada beberapa pemberitahuan, sebutkan kodenya, mis. *ACC {{kode}}*. Bisa juga diputuskan di aplikasi Pusaka (menu Akun Siswa)._\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.absence_notice_approved = `✅ *Pemberitahuan {{jenis}} disetujui*\n\nPemberitahuan {{jenis}} untuk *{{nama_siswa}}* ({{kelas}}) pada {{tanggal}} telah *disetujui* wali kelas. Absensi pada tanggal tersebut sudah tersimpan sebagai *{{jenis}}*.\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.absence_notice_rejected = `❌ *Pemberitahuan {{jenis}} ditolak*\n\nPemberitahuan {{jenis}} untuk *{{nama_siswa}}* ({{kelas}}) pada {{tanggal}} *tidak disetujui* wali kelas.{{alasan}}\n\nAbsensi tidak diubah. Bila ingin mengajukan ulang, ketik *sakit* atau *izin* dari awal. Untuk keterangan lebih lanjut, hubungi wali kelas.\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.unfilled_attendance_group = `⚠️ *KELAS BELUM MENGISI ABSENSI*\n{{hari}}, {{tanggal}} pukul {{waktu}} WIB\n\nAbsensi jam pertama *{{jumlah}} kelas* berikut belum terisi:\n\n{{daftar}}\n\nMohon guru pengajar jam pertama segera mengisi absensi di aplikasi Pusaka, dibantu wali kelas masing-masing.\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.homeroom_attendance_reminder = `📋 *PENGINGAT ABSENSI KELAS*\n\nYth. Bapak/Ibu *{{nama_wali}}* (Wali Kelas {{kelas}}),\nPada pukul {{waktu}} WIB absensi kelas *{{kelas}}* hari {{hari}}, {{tanggal}} belum terisi.\n\nJadwal jam pertama:\n• Jam: *{{jam_pertama}}*\n• Mapel: *{{mapel}}*\n• Guru pengajar: *{{guru_pengajar}}* (belum mengisi absensi)\n\nMohon bantu mengisi absensi kelas Anda di aplikasi Pusaka.\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.weekly_absence_wali = `📊 *REKAP KETIDAKHADIRAN MINGGUAN*\n\nYth. Bapak/Ibu *{{nama_wali}}* (Wali Kelas {{kelas}}),\nSiswa yang tidak hadir pada *{{periode}}* ({{jumlah_siswa}} siswa):\n\n{{rekap}}\n_S=Sakit, I=Izin, A=Alfa (jumlah hari)_\n\n{{sering}}\n_Pusaka - SMP Negeri 8 Ciamis_`;
@@ -332,6 +335,7 @@ const DEFAULT_BOT_SETTINGS = {
     homeroom_att_reminder_enabled: false, // ingatkan wali kelas bila absensi kelasnya belum diisi guru jam pertama
     homeroom_att_reminder_times: '08:30', // jam pengecekan (WIB), boleh lebih dari satu dipisah koma
     parent_query_enabled: true,       // orang tua (nomor tertaut) bisa mengetik "cek poin" / "absen" ke bot
+    parent_absence_wa_enabled: true,  // orang tua melapor anak sakit/izin lewat bot (tanggal + foto surat), wali kelas ACC/TOLAK
     wa_menu_enabled: true,            // ketik "menu" (atau salam) -> bot membalas menu perintah bernomor untuk ortu/guru
     wa_contact_card_enabled: true,    // chat pertama yang memakai perintah bot dikirimi kartu kontak bot (untuk disimpan di HP)
     wa_buttons_enabled: false,        // kirim juga tombol asli WhatsApp (eksperimental; bisa tidak tampil di sebagian HP)
@@ -536,6 +540,11 @@ async function startBot() {
                     const took = await handleEkskulPhoto(msg, imgMsg, from).catch(function(e) { console.error('[EKSKUL WA]', e.message); return true; });
                     if (took) continue;
                 }
+                // Ortu melapor sakit/izin: foto surat pada langkah terakhir.
+                if (absenceSessions.has(from)) {
+                    const tookA = await handleAbsencePhoto(msg, imgMsg, from, getSenderPhoneNumber(msg)).catch(function(e) { console.error('[IZIN WA]', e.message); return true; });
+                    if (tookA) continue;
+                }
                 // Sesi "surat tugas": foto langsung jadi bukti kunjungan surat yang dipilih (tanpa perlu membalas notifikasi).
                 if (suratSessions.has(from)) {
                     const tookS = await handleSuratPhoto(msg, imgMsg, from).catch(function(e) { console.error('[SURAT WA]', e.message); return true; });
@@ -545,6 +554,11 @@ async function startBot() {
                 if (stanzaId) await handleNoticePhotoReply(msg, imgMsg, stanzaId, from);
                 continue;
             }
+            // Surat dikirim sebagai file/PDF saat diminta foto: minta kirim ulang sebagai foto.
+            if (messageContent.documentMessage && absenceSessions.has(from) && (absenceSessions.get(from) || {}).step === 'PHOTO') {
+                ekskulReplyFn(from, msg)('Mohon kirim suratnya sebagai *foto* (bukan file/PDF), atau ketik *BATAL*.');
+                continue;
+            }
             // Jawaban tombol asli WhatsApp diperlakukan seperti perintah teks (hanya id "pusaka:..." yang dikenal).
             let text = (buttonCommand(messageContent) || messageContent.conversation || (messageContent.extendedTextMessage && messageContent.extendedTextMessage.text) || '').trim();
             if (!text) continue;
@@ -552,12 +566,12 @@ async function startBot() {
             const senderPhone = getSenderPhoneNumber(msg);
             await sock.readMessages([msg.key]).catch(() => {});
             // Balasan angka setelah menu ("1", "2", ...) diubah menjadi perintahnya. Tidak berlaku saat sesi lain sedang berjalan.
-            if (!ekskulSessions.has(from) && !regSessions.has(from) && !suratSessions.has(from)) {
+            if (!ekskulSessions.has(from) && !regSessions.has(from) && !suratSessions.has(from) && !absenceSessions.has(from)) {
                 const picked = menuPick(from, cleanText);
                 if (picked) { text = picked; cleanText = picked; }
             }
             // Chat pertama yang memakai perintah bot: kirim kartu kontak agar nomor bot bisa disimpan pengirim.
-            if (menuCommand(cleanText) === 'explicit' || parentCommand(cleanText) || cleanText === 'daftar' || ekskulCommand(cleanText) || suratCommand(cleanText)) {
+            if (menuCommand(cleanText) === 'explicit' || parentCommand(cleanText) || cleanText === 'daftar' || ekskulCommand(cleanText) || suratCommand(cleanText) || absenceCommand(cleanText)) {
                 await maybeSendContactCard(from).catch(function(e) { console.error('[KONTAK WA]', e.message); });
             }
             // Pembina ekskul: JURNAL / FOTO dan seluruh jawaban selama sesi. Dicek paling awal agar jawaban bebas (mis. "cek ...") tidak tertukar perintah lain.
@@ -565,13 +579,20 @@ async function startBot() {
                 const handled = await handleEkskulMessage(msg, from, text, cleanText, senderPhone).catch(function(e) { console.error('[EKSKUL WA]', e.message); try { ekskulReplyFn(from, msg)('⚠️ Terjadi gangguan. Coba lagi nanti.'); } catch (x) {} return true; });
                 if (handled) continue;
             }
+            // Ortu melapor anak sakit/izin; wali kelas membalas ACC/TOLAK.
+            const ctxInfo = messageContent.extendedTextMessage && messageContent.extendedTextMessage.contextInfo;
+            const quotedId = (ctxInfo && ctxInfo.stanzaId) || null;
+            if (absenceSessions.has(from) || absenceCommand(cleanText) || absenceDecisionParse(text)) {
+                const handledA = await handleAbsenceMessage(msg, from, text, cleanText, senderPhone, quotedId).catch(function(e) { console.error('[IZIN WA]', e.message); return false; });
+                if (handledA) continue;
+            }
             // Surat tugas saya (bukti kunjungan lewat chat) dan menu perintah.
             if (suratSessions.has(from) || suratCommand(cleanText)) {
                 const handledS = await handleSuratMessage(msg, from, cleanText, senderPhone).catch(function(e) { console.error('[SURAT WA]', e.message); return false; });
                 if (handledS) continue;
             }
             const menuKind = menuCommand(cleanText);
-            if (menuKind && !regSessions.has(from) && !suratSessions.has(from)) {
+            if (menuKind && !regSessions.has(from) && !suratSessions.has(from) && !absenceSessions.has(from)) {
                 await sendMenu(from, msg, menuKind).catch(function(e) { console.error('[MENU WA]', e.message); });
                 continue;
             }
@@ -813,14 +834,14 @@ async function runTeacherReminders() {
                 const key = 'post:' + s.id; if (reminderSent.has(key)) continue;
                 let journalDone = true, attDone = true;
                 if (cfg.followup_journal) { const jrRes = await supabase.from('teaching_journals').select('id').eq('schedule_id', s.id).eq('date', now.date).limit(1); journalDone = !!(jrRes.data && jrRes.data.length > 0); }
-                if (cfg.followup_attendance) { const atRes = await supabase.from('attendance').select('id').eq('schedule_id', s.id).eq('date', now.date).limit(1); attDone = !!(atRes.data && atRes.data.length > 0); }
+                if (cfg.followup_attendance) { const atRes = await supabase.from('attendance').select('id').eq('schedule_id', s.id).eq('date', now.date).is('parent_notice_id', null).limit(1); attDone = !!(atRes.data && atRes.data.length > 0); }
                 if (cfg.followup_attendance && !attDone && cfg.followup_attendance_next_teachers === false) {
                     // Guru jam berikutnya: bila kelas ini sudah diabsen pada jam lain hari ini, tidak perlu diingatkan lagi.
                     const classScheds = schedules.filter(function(x) { return x.class_id === s.class_id; });
                     const firstOfClass = classScheds.reduce(function(a, b) { return hhmmToMin(b.start_time) < hhmmToMin(a.start_time) ? b : a; }, classScheds[0]);
                     if (firstOfClass && firstOfClass.id !== s.id) {
                         const ids = classScheds.map(function(x) { return x.id; }).join(',');
-                        const cr = await supabase.from('attendance').select('id').eq('date', now.date).or('sched_class_id.eq.' + s.class_id + ',schedule_id.in.(' + ids + ')').limit(1);
+                        const cr = await supabase.from('attendance').select('id').eq('date', now.date).is('parent_notice_id', null).or('sched_class_id.eq.' + s.class_id + ',schedule_id.in.(' + ids + ')').limit(1);
                         if (!cr.error && cr.data && cr.data.length > 0) attDone = true;
                     }
                 }
@@ -1491,6 +1512,8 @@ async function handleParentQuery(kind, msg, from) {
 const MENU_ACTIONS = {
     poin:   { label: 'Cek Poin',          cmd: 'cek poin',    hint: 'poin pelanggaran anak' },
     absen:  { label: 'Absen Anak',        cmd: 'absen',       hint: 'rekap kehadiran 30 hari' },
+    sakit:  { label: 'Anak Sakit',        cmd: 'sakit',       hint: 'beri tahu wali kelas (sertakan surat dokter)' },
+    izin:   { label: 'Anak Izin',         cmd: 'izin',        hint: 'beri tahu wali kelas (sertakan surat orang tua)' },
     daftar: { label: 'Tautkan Nomor',     cmd: 'daftar',      hint: 'hubungkan nomor ini dengan NISN anak' },
     jurnal: { label: 'Isi Jurnal Ekskul', cmd: 'jurnal',      hint: 'buat jurnal kegiatan ekskul' },
     foto:   { label: 'Foto Ekskul',       cmd: 'foto',        hint: 'tambah foto ke jurnal ekskul' },
@@ -1577,7 +1600,7 @@ async function sendMenu(from, msg, kind) {
     if (menuLast.size > 2000) menuLast.clear();
     const roles = await menuRoles(from, sender, cfg);
     const keys = [];
-    if (roles.ortu) keys.push('poin', 'absen');
+    if (roles.ortu) { keys.push('poin', 'absen'); if (cfg.parent_absence_wa_enabled) keys.push('sakit', 'izin'); }
     if (roles.coach) keys.push('jurnal', 'foto');
     if (roles.surat) keys.push('surat');
     if (keys.length === 0) {
@@ -1615,6 +1638,330 @@ function menuPick(from, cleanText) {
     menuSessions.delete(from);
     return MENU_ACTIONS[key].cmd;
 }
+
+// ===== IZIN/SAKIT ORTU (WhatsApp) =====
+// Alur ortu: "sakit"/"izin" -> (pilih anak bila lebih dari satu) -> tanggal -> foto surat -> pemberitahuan ke wali kelas.
+// Wali kelas membalas ACC / TOLAK (WhatsApp atau aplikasi). ACC menyimpan absensi siswa pada tanggal itu (RPC absence_notice_apply).
+const ABSENCE_SESSION_TTL = 30 * 60 * 1000;
+const ABSENCE_PAST_DAYS = 7;          // tanggal paling lampau yang boleh dilaporkan
+const ABSENCE_FUTURE_DAYS = 14;       // tanggal paling jauh ke depan
+const ABSENCE_MAX_BYTES = 10 * 1024 * 1024;
+const ABSENCE_BUCKET = 'absence-notices';
+const ABSENCE_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const absenceSessions = new Map();    // chat JID -> { step: 'CHILD' | 'DATE' | 'PHOTO', kind, students, student, date, busy, at }
+const BULAN_ID = { januari: 1, jan: 1, februari: 2, feb: 2, pebruari: 2, maret: 3, mar: 3, april: 4, apr: 4, mei: 5, juni: 6, jun: 6, juli: 7, jul: 7,
+    agustus: 8, agu: 8, agt: 8, ags: 8, agus: 8, september: 9, sep: 9, sept: 9, oktober: 10, okt: 10, november: 11, nov: 11, nop: 11, desember: 12, des: 12 };
+const ABSENCE_WORDS = {
+    sakit: ['sakit', 'anak sakit', 'sakit anak', 'lapor sakit', 'lapor sakit anak', 'izin sakit', 'sakit.'],
+    izin: ['izin', 'anak izin', 'izin anak', 'lapor izin', 'lapor izin anak', 'izin tidak masuk', 'izin.']
+};
+function absenceCommand(cleanText) {
+    const t = String(cleanText).replace(/\s+/g, ' ').trim();
+    if (ABSENCE_WORDS.sakit.indexOf(t) !== -1) return 'sakit';
+    if (ABSENCE_WORDS.izin.indexOf(t) !== -1) return 'izin';
+    return null;
+}
+function isoValid(y, m, d) { const dt = new Date(Date.UTC(y, m - 1, d)); return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d; }
+function isoOf(y, m, d) { return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0'); }
+// "hari ini", "besok", "kemarin", "12/11/2026", "12-11", "12 november (2026)" -> yyyy-mm-dd, atau null bila tidak dikenali.
+function parseAbsenceDate(text, todayIso) {
+    let t = String(text || '').toLowerCase().replace(/[,;]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!t) return null;
+    if (['hari ini', 'hr ini', 'sekarang', 'ini hari'].indexOf(t) !== -1) return todayIso;
+    if (t === 'besok' || t === 'besuk') return isoAddDays(todayIso, 1);
+    if (t === 'lusa') return isoAddDays(todayIso, 2);
+    if (t === 'kemarin') return isoAddDays(todayIso, -1);
+    t = t.replace(/\b(tanggal|tgl)\b\.?/g, ' ').replace(/\s+/g, ' ').trim();
+    const ty = parseInt(todayIso.slice(0, 4), 10);
+    let d, m, y = null, mm;
+    if ((mm = t.match(/^(\d{1,2})[\/\-.](\d{1,2})(?:[\/\-.](\d{2,4}))?$/))) { d = +mm[1]; m = +mm[2]; if (mm[3]) y = +mm[3]; }
+    else if ((mm = t.match(/^(\d{1,2}) ([a-z]+)(?: (\d{2,4}))?$/)) && BULAN_ID[mm[2]]) { d = +mm[1]; m = BULAN_ID[mm[2]]; if (mm[3]) y = +mm[3]; }
+    else return null;
+    if (y !== null && y < 100) y += 2000;
+    if (y === null) {
+        y = ty;
+        // tanpa tahun: bila hasilnya sudah terlalu lampau, anggap tahun depan (mis. mengetik "2/1" pada akhir Desember)
+        if (isoValid(y, m, d) && isoOf(y, m, d) < isoAddDays(todayIso, -ABSENCE_PAST_DAYS) && isoValid(y + 1, m, d)) y += 1;
+    }
+    if (!isoValid(y, m, d)) return null;
+    return isoOf(y, m, d);
+}
+function absenceDateWindow(iso, todayIso) {
+    if (iso < isoAddDays(todayIso, -ABSENCE_PAST_DAYS)) return 'lampau';
+    if (iso > isoAddDays(todayIso, ABSENCE_FUTURE_DAYS)) return 'jauh';
+    return 'ok';
+}
+function absenceKindLabel(kind) { return kind === 'sakit' ? 'Sakit' : 'Izin'; }
+function absenceCode() { let s = ''; for (let i = 0; i < 4; i++) s += ABSENCE_CODE_ALPHABET[crypto.randomInt(ABSENCE_CODE_ALPHABET.length)]; return s; }
+function absenceEnd(from) { absenceSessions.delete(from); }
+
+async function absenceParentStudents(sender) {
+    if (!sender) return [];
+    const r = await supabase.from('students').select('id, full_name, nisn, class_id, school_id, classes(name)')
+        .in('parent_phone', phoneVariants(sender)).eq('status', 'aktif').eq('is_alumni', false).order('full_name').limit(5);
+    if (r.error) throw new Error(r.error.message);
+    return r.data || [];
+}
+// Wali kelas suatu kelas: { user_id, name, phone, jid } atau null (belum ada wali / nomor belum terdaftar).
+async function absenceHomeroom(classId) {
+    if (!classId) return null;
+    const c = await supabase.from('classes').select('homeroom_teacher_id').eq('id', classId).maybeSingle();
+    if (!c.data || !c.data.homeroom_teacher_id) return null;
+    const t = await supabase.from('teachers').select('user_id').eq('id', c.data.homeroom_teacher_id).maybeSingle();
+    if (!t.data || !t.data.user_id) return null;
+    const p = await supabase.from('profiles').select('full_name, phone').eq('id', t.data.user_id).maybeSingle();
+    const phone = p.data && p.data.phone ? formatToInternational(p.data.phone) : '';
+    return { user_id: t.data.user_id, name: (p.data && p.data.full_name) || '', phone: phone, jid: phone.length >= 10 ? phone + '@s.whatsapp.net' : null };
+}
+// Pengirim ini wali kelas? -> { userId, classIds } atau null.
+async function absenceSenderAsHomeroom(sender) {
+    if (!sender) return null;
+    const p = await supabase.from('profiles').select('id').in('phone', phoneVariants(sender)).limit(10);
+    const userIds = (p.data || []).map(function(x) { return x.id; });
+    if (userIds.length === 0) return null;
+    const t = await supabase.from('teachers').select('id, user_id').in('user_id', userIds);
+    const teachers = t.data || [];
+    if (teachers.length === 0) return null;
+    const c = await supabase.from('classes').select('id, homeroom_teacher_id').in('homeroom_teacher_id', teachers.map(function(x) { return x.id; }));
+    const classes = c.data || [];
+    if (classes.length === 0) return null;
+    const owner = teachers.find(function(x) { return x.id === classes[0].homeroom_teacher_id; });
+    return { userId: owner ? owner.user_id : teachers[0].user_id, classIds: classes.map(function(x) { return x.id; }), teacherByClass: new Map(classes.map(function(x) { const o = teachers.find(function(y) { return y.id === x.homeroom_teacher_id; }); return [x.id, o ? o.user_id : null]; })) };
+}
+
+function absenceAskDate(s) {
+    return '📝 *LAPOR ' + absenceKindLabel(s.kind).toUpperCase() + '*\nAnak: *' + s.student.full_name + '* (' + ((s.student.classes && s.student.classes.name) || '-') + ')\n\n' +
+        'Tanggal berapa anak tidak masuk sekolah? Balas dengan:\n• *hari ini*, *besok*, atau *kemarin*\n• atau tanggalnya, mis. *12/11/2026* atau *12 November*\n\nKetik *BATAL* untuk membatalkan.';
+}
+function absenceAskPhoto(s) {
+    return '📷 Sekarang kirim *foto ' + (s.kind === 'sakit' ? 'surat keterangan dokter' : 'surat izin dari orang tua') + '* untuk *' + s.student.full_name + '* tanggal *' + fmtTanggalHari(s.date) + '*.\n\n' +
+        'Pastikan tulisan terbaca jelas. Kirim sebagai *foto* (bukan file/PDF). Ketik *BATAL* untuk membatalkan.';
+}
+async function startAbsenceFlow(kind, msg, from, sender) {
+    const cfg = await getBotSettings();
+    if (!cfg.parent_absence_wa_enabled) return false;
+    const students = await absenceParentStudents(sender);
+    if (students.length === 0) return false;                       // bukan nomor ortu tertaut: abaikan seperti perintah lain
+    const reply = ekskulReplyFn(from, msg);
+    const s = { step: 'DATE', kind: kind, students: students, student: students[0], date: null, busy: false, at: Date.now() };
+    absenceSessions.set(from, s);
+    if (absenceSessions.size > 2000) absenceSessions.clear();
+    if (students.length > 1) {
+        s.step = 'CHILD';
+        reply('📝 *LAPOR ' + absenceKindLabel(kind).toUpperCase() + '*\nAnak yang mana?\n\n' +
+            students.map(function(x, i) { return (i + 1) + '. ' + x.full_name + ' (' + ((x.classes && x.classes.name) || '-') + ')'; }).join('\n') +
+            '\n\nBalas dengan *nomor* anak, atau *BATAL*.');
+        return true;
+    }
+    reply(absenceAskDate(s));
+    return true;
+}
+
+// Jawaban teks. Mengembalikan true bila pesan sudah ditangani.
+async function handleAbsenceMessage(msg, from, text, cleanText, senderPhone, stanzaId) {
+    const t = String(cleanText).replace(/\s+/g, ' ').trim();
+    let s = absenceSessions.get(from);
+    if (s && Date.now() - s.at > ABSENCE_SESSION_TTL) { absenceEnd(from); s = null; }
+    const cmd = absenceCommand(t);
+
+    // Perintah baru ("sakit"/"izin") selalu memulai ulang dari awal
+    if (cmd) {
+        absenceEnd(from);
+        return await startAbsenceFlow(cmd, msg, from, senderPhone);
+    }
+    if (s) {
+        const reply = ekskulReplyFn(from, msg);
+        if (menuCommand(t) === 'explicit') { absenceEnd(from); return false; }       // minta menu: tutup sesi, tampilkan menu
+        if (t === 'batal' || t === 'batalkan' || t === 'cancel') { absenceEnd(from); reply('Dibatalkan. Ketik *sakit* atau *izin* bila ingin melapor lagi.'); return true; }
+        s.at = Date.now();
+        if (s.step === 'CHILD') {
+            const n = /^[1-9]$/.test(t) ? parseInt(t, 10) : 0;
+            const st = n ? s.students[n - 1] : null;
+            if (!st) { reply('Balas dengan *nomor* anak di daftar, atau *BATAL*.'); return true; }
+            s.student = st; s.step = 'DATE';
+            reply(absenceAskDate(s));
+            return true;
+        }
+        if (s.step === 'DATE') {
+            const today = wibNow().date;
+            const iso = parseAbsenceDate(text, today);
+            if (!iso) { reply('Tanggal belum terbaca. Tulis seperti *hari ini*, *besok*, *12/11/2026*, atau *12 November*. Ketik *BATAL* untuk membatalkan.'); return true; }
+            const win = absenceDateWindow(iso, today);
+            if (win === 'lampau') { reply('Tanggal ' + ddmmyyyy(iso) + ' sudah terlalu lampau (maksimal ' + ABSENCE_PAST_DAYS + ' hari ke belakang). Hubungi wali kelas langsung, atau tulis tanggal lain.'); return true; }
+            if (win === 'jauh') { reply('Tanggal ' + ddmmyyyy(iso) + ' terlalu jauh (maksimal ' + ABSENCE_FUTURE_DAYS + ' hari ke depan). Tulis tanggal lain.'); return true; }
+            const sc = await supabase.rpc('absence_notice_schedule_count', { p_class: s.student.class_id, p_date: iso });
+            if (sc.error) { console.error('[IZIN WA]', sc.error.message); reply('⚠️ Terjadi gangguan saat memeriksa tanggal. Coba lagi nanti.'); return true; }
+            if (!sc.data) { reply('Pada ' + fmtTanggalHari(iso) + ' tidak ada jadwal pelajaran untuk kelas ' + ((s.student.classes && s.student.classes.name) || '-') + ' (mungkin hari libur). Tulis tanggal lain, atau *BATAL*.'); return true; }
+            const ex = await supabase.from('student_absence_notices').select('kind, status').eq('student_id', s.student.id).eq('absence_date', iso).in('status', ['menunggu', 'disetujui']).limit(1);
+            if (ex.data && ex.data.length) {
+                absenceEnd(from);
+                reply('Pemberitahuan *' + ex.data[0].kind + '* untuk ' + s.student.full_name + ' tanggal ' + fmtTanggalHari(iso) + ' sudah ada dan statusnya *' + ex.data[0].status + '*. Tidak perlu mengirim lagi.');
+                return true;
+            }
+            s.date = iso; s.step = 'PHOTO';
+            reply(absenceAskPhoto(s));
+            return true;
+        }
+        // PHOTO
+        reply('Kirim *foto* suratnya (bukan teks), atau ketik *BATAL* untuk membatalkan.');
+        return true;
+    }
+    // Tidak ada sesi: kemungkinan wali kelas menjawab ACC / TOLAK
+    return await handleAbsenceDecision(msg, from, text, senderPhone, stanzaId);
+}
+
+// Foto saat langkah PHOTO. true = foto ditangani (termasuk gagal), false = bukan untuk alur ini.
+async function handleAbsencePhoto(msg, img, from, senderPhone) {
+    const s = absenceSessions.get(from);
+    if (!s) return false;
+    if (Date.now() - s.at > ABSENCE_SESSION_TTL) { absenceEnd(from); return false; }
+    const reply = ekskulReplyFn(from, msg);
+    if (s.step !== 'PHOTO') { reply('Selesaikan dulu pertanyaan sebelumnya (' + (s.step === 'CHILD' ? 'pilih anak' : 'tanggal') + '), baru kirim foto. Atau ketik *BATAL*.'); return true; }
+    if (s.busy) return true;                                       // beberapa foto sekaligus: hanya foto pertama yang dipakai
+    s.busy = true; s.at = Date.now();
+    try {
+        let buffer;
+        try { buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger: pino({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage }); }
+        catch (e) { console.error('[IZIN WA] gagal mengunduh foto:', e.message); reply('⚠️ Foto gagal diunduh. Silakan kirim ulang.'); s.busy = false; return true; }
+        if (!buffer || buffer.length === 0) { reply('⚠️ Foto kosong. Silakan kirim ulang.'); s.busy = false; return true; }
+        if (buffer.length > ABSENCE_MAX_BYTES) { reply('⚠️ Ukuran foto terlalu besar (maks. 10 MB). Silakan kirim ulang.'); s.busy = false; return true; }
+        const mime = (img && img.mimetype) || 'image/jpeg';
+        const out = await createAbsenceNotice(s, buffer, mime, from, senderPhone);
+        if (out.ok) { absenceEnd(from); reply(out.text); }
+        else { reply(out.text); if (out.end) absenceEnd(from); else s.busy = false; }
+    } catch (e) {
+        console.error('[IZIN WA]', e.message);
+        reply('⚠️ Terjadi gangguan. Silakan kirim ulang fotonya.');
+        s.busy = false;
+    }
+    return true;
+}
+
+async function createAbsenceNotice(s, buffer, mime, from, senderPhone) {
+    const st = s.student;
+    const label = absenceKindLabel(s.kind);
+    // Periksa lagi (sesi bisa berumur 30 menit, atau ada laporan lain yang masuk lebih dulu)
+    const ex = await supabase.from('student_absence_notices').select('status').eq('student_id', st.id).eq('absence_date', s.date).in('status', ['menunggu', 'disetujui']).limit(1);
+    if (ex.data && ex.data.length) return { ok: false, end: true, text: 'Pemberitahuan untuk ' + st.full_name + ' tanggal ' + fmtTanggalHari(s.date) + ' sudah ada (status *' + ex.data[0].status + '*).' };
+    const wali = await absenceHomeroom(st.class_id);
+    const ext = mime === 'image/png' ? '.png' : (mime === 'image/webp' ? '.webp' : '.jpg');
+    const filePath = (st.school_id || 'umum') + '/' + st.id + '/' + crypto.randomUUID() + ext;
+    const up = await supabase.storage.from(ABSENCE_BUCKET).upload(filePath, buffer, { contentType: mime, upsert: false });
+    if (up.error) { console.error('[IZIN WA] upload gagal:', up.error.message); return { ok: false, text: '⚠️ Foto gagal disimpan. Coba kirim ulang.' }; }
+    let row = null, lastErr = null;
+    for (let attempt = 0; attempt < 6 && !row; attempt++) {
+        const ins = await supabase.from('student_absence_notices').insert({
+            school_id: st.school_id || null, student_id: st.id, class_id: st.class_id || null, kind: s.kind, absence_date: s.date,
+            short_code: absenceCode(), file_path: filePath, file_name: 'WA-' + Date.now() + ext, mime_type: mime, file_size: buffer.length,
+            parent_phone: senderPhone || null, parent_jid: from, homeroom_user_id: wali ? wali.user_id : null, homeroom_jid: wali ? wali.jid : null
+        }).select('id, short_code').single();
+        if (!ins.error) { row = ins.data; break; }
+        lastErr = ins.error;
+        if (ins.error.code === '23505' && String(ins.error.message).indexOf('short_code') === -1 && String(ins.error.details || '').indexOf('short_code') === -1) break;   // duplikat siswa+tanggal
+    }
+    if (!row) {
+        await supabase.storage.from(ABSENCE_BUCKET).remove([filePath]);
+        if (lastErr && lastErr.code === '23505') return { ok: false, end: true, text: 'Pemberitahuan untuk ' + st.full_name + ' tanggal ' + fmtTanggalHari(s.date) + ' sudah ada. Tidak perlu mengirim lagi.' };
+        console.error('[IZIN WA] simpan gagal:', lastErr && lastErr.message);
+        return { ok: false, text: '⚠️ Pemberitahuan gagal disimpan. Coba kirim ulang fotonya.' };
+    }
+    // Beritahu wali kelas (foto surat ikut dikirim bersama keterangan)
+    let waliNote = '';
+    if (wali && wali.jid) {
+        const caption = await renderMessage('absence_notice_homeroom', {
+            kelas: (st.classes && st.classes.name) || '-', nama_siswa: st.full_name, jenis: label, tanggal: fmtTanggalHari(s.date), kode: row.short_code
+        });
+        if (caption) {
+            enqueueTask(async function() {
+                const sent = await sendSafeMessage(wali.jid, { image: buffer, caption: caption, mimetype: mime });
+                const mid = sent && sent.key && sent.key.id;
+                if (mid) await supabase.from('student_absence_notices').update({ homeroom_wa_message_id: mid }).eq('id', row.id);
+            }, { to: wali.jid, kind: 'izin_sakit_wali' });
+        }
+        waliNote = 'Wali kelas sudah diberi tahu. ';
+    } else {
+        waliNote = 'Nomor WhatsApp wali kelas belum terdaftar, jadi pemberitahuan ini akan diproses lewat aplikasi Pusaka oleh wali kelas/kesiswaan. ';
+    }
+    return { ok: true, text: '✅ Pemberitahuan *' + label.toLowerCase() + '* untuk *' + st.full_name + '* tanggal *' + fmtTanggalHari(s.date) + '* sudah diterima.\n\n' + waliNote +
+        'Mohon menunggu persetujuan wali kelas. Hasilnya akan diberitahukan ke nomor ini. Jika *ditolak*, absensi tidak berubah dan Anda perlu mengetik *' + s.kind + '* dari awal.' };
+}
+
+// ---- Sisi wali kelas: "ACC" / "TOLAK [alasan]" (boleh disertai kode, atau membalas/quote pesan pemberitahuan) ----
+function absenceDecisionParse(text) {
+    const m = String(text).trim().match(/^(acc|setuju|disetujui|setujui|tolak|ditolak)(?![a-z0-9])(?:\s+([a-z0-9]{4})(?=\s|$))?\s*(.*)$/i);
+    if (!m) return null;
+    const verb = m[1].toLowerCase();
+    return { approve: ['acc', 'setuju', 'disetujui', 'setujui'].indexOf(verb) !== -1, code: m[2] ? m[2].toUpperCase() : null, note: (m[3] || '').trim() };
+}
+async function handleAbsenceDecision(msg, from, text, senderPhone, stanzaId) {
+    const d = absenceDecisionParse(text);
+    if (!d) return false;
+    // "acc 1234" bisa saja kata lain: pastikan pengirim wali kelas dan fitur menyala
+    const cfg = await getBotSettings();
+    if (!cfg.parent_absence_wa_enabled) return false;
+    const hr = await absenceSenderAsHomeroom(senderPhone);
+    if (!hr) return false;
+    const reply = ekskulReplyFn(from, msg);
+    const q = await supabase.from('student_absence_notices')
+        .select('id, short_code, kind, absence_date, class_id, homeroom_wa_message_id, students(full_name), classes:class_id(name)')
+        .eq('status', 'menunggu').in('class_id', hr.classIds).order('created_at', { ascending: true }).limit(30);
+    if (q.error) { console.error('[IZIN WA]', q.error.message); reply('⚠️ Terjadi gangguan. Coba lagi nanti.'); return true; }
+    const pending = q.data || [];
+    if (pending.length === 0) { reply('Tidak ada pemberitahuan izin/sakit yang menunggu persetujuan Anda.'); return true; }
+    let target = null;
+    if (stanzaId) target = pending.find(function(x) { return x.homeroom_wa_message_id === stanzaId; }) || null;
+    if (!target && d.code) {
+        target = pending.find(function(x) { return x.short_code === d.code; }) || null;
+        if (!target) { reply('Kode *' + d.code + '* tidak ditemukan di pemberitahuan yang menunggu. Periksa kembali kodenya.'); return true; }
+    }
+    if (!target && pending.length === 1) target = pending[0];
+    if (!target) {
+        reply('Ada *' + pending.length + '* pemberitahuan yang menunggu. Sebutkan kodenya, mis. *' + (d.approve ? 'ACC' : 'TOLAK') + ' ' + pending[0].short_code + '*:\n\n' +
+            pending.slice(0, 10).map(function(x) { return '• *' + x.short_code + '* - ' + ((x.students && x.students.full_name) || '-') + ' (' + ((x.classes && x.classes.name) || '-') + ') ' + x.kind + ' ' + ddmmyyyy(x.absence_date); }).join('\n'));
+        return true;
+    }
+    const by = hr.teacherByClass.get(target.class_id) || hr.userId;
+    const r = await supabase.rpc('absence_notice_apply', { p_id: target.id, p_approve: d.approve, p_by: by, p_via: 'wa', p_note: d.note || null });
+    if (r.error) { console.error('[IZIN WA]', r.error.message); reply('⚠️ Gagal memproses. Coba lagi nanti atau gunakan aplikasi Pusaka.'); return true; }
+    const res = r.data || {};
+    const nama = (target.students && target.students.full_name) || '-';
+    if (!res.ok) {
+        if (res.reason === 'tidak_ada_jadwal') reply('⚠️ Tidak bisa disetujui: kelas tidak punya jadwal pelajaran pada ' + fmtTanggalHari(target.absence_date) + ', jadi absensi tidak bisa disimpan. Hubungi admin.');
+        else if (res.reason === 'sudah_diputuskan') reply('Pemberitahuan ini sudah diputuskan sebelumnya (' + res.status + ').');
+        else reply('Pemberitahuan tidak ditemukan.');
+        return true;
+    }
+    if (d.approve) {
+        reply('✅ *Disetujui.* Absensi *' + nama + '* tanggal ' + fmtTanggalHari(target.absence_date) + ' tersimpan sebagai *' + target.kind + '* (' + (res.rows || 0) + ' jam pelajaran)' +
+            (res.skipped ? '.\n_' + res.skipped + ' jam pelajaran tidak diubah karena sudah tercatat hadir._' : '.'));
+    } else {
+        reply('❌ *Ditolak.* Absensi *' + nama + '* tidak diubah. Orang tua akan diberi tahu.');
+    }
+    await notifyAbsenceParent(target.id).catch(function(e) { console.error('[IZIN WA] notifikasi ortu:', e.message); });
+    return true;
+}
+
+// Kirim hasil keputusan ke orang tua (satu kali; dipakai bot dan endpoint untuk keputusan dari aplikasi).
+async function notifyAbsenceParent(id) {
+    const claim = await supabase.from('student_absence_notices').update({ parent_notified_at: new Date().toISOString() })
+        .eq('id', id).neq('status', 'menunggu').is('parent_notified_at', null)
+        .select('id, kind, absence_date, status, decision_note, parent_phone, parent_jid, student_id, class_id').maybeSingle();
+    if (claim.error) throw new Error(claim.error.message);
+    const n = claim.data;
+    if (!n) return false;                                           // belum diputuskan atau sudah pernah diberi tahu
+    const to = n.parent_jid || (n.parent_phone ? formatToInternational(n.parent_phone) + '@s.whatsapp.net' : null);
+    if (!to) return false;
+    const st = await supabase.from('students').select('full_name, classes(name)').eq('id', n.student_id).maybeSingle();
+    const vars = {
+        nama_siswa: (st.data && st.data.full_name) || '-', kelas: (st.data && st.data.classes && st.data.classes.name) || '-',
+        jenis: absenceKindLabel(n.kind), tanggal: fmtTanggalHari(n.absence_date), alasan: n.decision_note ? '\nAlasan: ' + n.decision_note : ''
+    };
+    const text = await renderMessage(n.status === 'disetujui' ? 'absence_notice_approved' : 'absence_notice_rejected', vars);
+    if (!text) return false;
+    enqueueTask(function() { return sendSafeMessage(to, { text: text }); }, { to: to, kind: 'izin_sakit_hasil' });
+    return true;
+}
+// ===== END IZIN/SAKIT ORTU =====
 
 // ---- Surat tugas saya: pilih surat yang buktinya belum lengkap, lalu kirim foto langsung ke chat ----
 const SURAT_LOOKBACK_DAYS = 45;
@@ -2142,6 +2489,14 @@ async function notifyViolationInner(violationId, userId) {
     }, { to: jid, kind: 'parent_violation_new' });
     return { status: 'queued' };
 }
+// Keputusan izin/sakit diambil di aplikasi (RPC decide_absence_notice): kirim hasilnya ke orang tua (sekali saja).
+app.post('/absence-notice-decided', requireUser, async (req, res) => {
+    const id = req.body && req.body.notice_id;
+    if (typeof id !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(id)) return res.status(400).json({ status: 'error', message: 'notice_id tidak valid.' });
+    try { return res.json({ status: 'ok', sent: await notifyAbsenceParent(id) }); }
+    catch (e) { console.error('[IZIN WA]', e.message); return res.status(500).json({ status: 'error', message: e.message }); }
+});
+
 app.post('/violation-created', requireUser, async (req, res) => {
     const id = req.body && req.body.violation_id;
     if (typeof id !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(id)) return res.status(400).json({ status: 'error', message: 'violation_id tidak valid.' });
