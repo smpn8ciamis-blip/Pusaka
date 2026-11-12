@@ -97,6 +97,7 @@ export default function AbsenceNoticesCard() {
       queryClient.invalidateQueries({ queryKey: ['absence-notices'] });
       queryClient.invalidateQueries({ queryKey: ['absence-notices-pending-count'] });
       queryClient.invalidateQueries({ queryKey: ['attendance'] });
+      queryClient.invalidateQueries({ queryKey: ['homeroom-attendance'] });   // rekap absensi wali kelas ikut diperbarui
     },
     onError: (e: any) => {
       toast.error(e?.message || 'Gagal memproses');

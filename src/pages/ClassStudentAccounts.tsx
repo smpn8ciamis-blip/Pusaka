@@ -73,8 +73,6 @@ export default function ClassStudentAccounts() {
           </p>
         </div>
 
-        {cls?.id && <AbsenceNoticesCard />}
-
         {cls?.id && schoolId ? (
           <HomeroomStudentTab
             key={cls.id}

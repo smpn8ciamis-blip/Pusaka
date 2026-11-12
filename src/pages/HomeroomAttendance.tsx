@@ -1,6 +1,7 @@
 // src/pages/HomeroomAttendance.tsx
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { useAuth } from '@/contexts/AuthContext';
+import AbsenceNoticesCard from '@/components/homeroom/AbsenceNoticesCard';
 import { useAcademicYear } from '@/contexts/AcademicYearContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -906,6 +907,9 @@ const HomeroomAttendance = () => {
             </Dialog>
           </div>
         </div>
+
+        {/* Pemberitahuan izin/sakit dari orang tua (WhatsApp): foto surat + ACC/Tolak */}
+        <AbsenceNoticesCard />
 
         {/* Data siswa & akun dipindah ke menu Akun Siswa (/akun-siswa) */}
         <Tabs defaultValue="attendance" className="space-y-4">
