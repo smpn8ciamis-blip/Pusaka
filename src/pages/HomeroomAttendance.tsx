@@ -25,8 +25,13 @@ import {
   Save,
   X as XIcon,
   Info,
+  Eye,
+  Search,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
 } from 'lucide-react';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   BarChart,
   Bar,
@@ -41,9 +46,16 @@ import {
   Cell,
 } from 'recharts';
 import { Button } from '@/components/ui/button';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import { addLetterheadToPDF } from '@/lib/pdfLetterhead';
+import { PdfPreviewDialog } from '@/components/piket/PdfPreviewDialog';
+import { DataPagination } from '@/components/ui/data-pagination';
+import { usePagination } from '@/components/ui/usePagination';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  buildHomeroomAttendancePdf,
+  homeroomRecapFileName,
+  toTitleCase,
+} from '@/lib/homeroomAttendancePdf';
+import { PAPER_LABEL, type PdfPaper } from '@/lib/pdfPaper';
 import { notifyBotIfAttendanceComplete } from '@/lib/waBot';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -55,7 +67,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ImportAttendance } from '@/components/ImportAttendance';
 import { useAttendanceDaySettings, isAttendanceAllowedForDate, getActiveDayNames } from '@/hooks/useAttendanceDaySettings';
-import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear } from 'date-fns';
+import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, format as formatDate } from 'date-fns';
 
 const COLORS = {
   hadir: '#10b981',
@@ -64,13 +76,78 @@ const COLORS = {
   alpa: '#ef4444',
 };
 
-// Function to convert name to Title Case
-const toTitleCase = (name: string): string => {
-  return name
-    .toLowerCase()
-    .split(' ')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
+// ---------- Urutan, filter & tombol urut tabel ----------
+type SortDir = 'asc' | 'desc';
+interface SortState<K extends string> {
+  key: K;
+  dir: SortDir;
+}
+type StudentSortKey = 'no' | 'nis' | 'name' | 'hadir' | 'sakit' | 'izin' | 'alpa' | 'total' | 'pct';
+type HistorySortKey = 'date' | 'nis' | 'name' | 'status';
+type StudentFilter = 'all' | 'alpa' | 'sakit' | 'izin' | 'nodata';
+
+const STUDENT_FILTER_LABEL: Record<StudentFilter, string> = {
+  all: 'Semua siswa',
+  alpa: 'Pernah alpa',
+  sakit: 'Pernah sakit',
+  izin: 'Pernah izin',
+  nodata: 'Belum ada data',
+};
+const NUMERIC_SORT_KEYS: string[] = ['hadir', 'sakit', 'izin', 'alpa', 'total', 'pct', 'date'];
+
+const cmpText = (a: unknown, b: unknown) =>
+  String(a ?? '').localeCompare(String(b ?? ''), 'id', { numeric: true, sensitivity: 'base' });
+
+const nextSort = <K extends string>(prev: SortState<K>, key: K): SortState<K> =>
+  prev.key === key
+    ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+    : { key, dir: NUMERIC_SORT_KEYS.includes(key) ? 'desc' : 'asc' };
+
+function SortHead<K extends string>({
+  label,
+  k,
+  sort,
+  onSort,
+  className = '',
+}: {
+  label: string;
+  k: K;
+  sort: SortState<K>;
+  onSort: (k: K) => void;
+  className?: string;
+}) {
+  const active = sort.key === k;
+  const Icon = active ? (sort.dir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <TableHead
+      className={className}
+      aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(k)}
+        className="inline-flex items-center gap-1 hover:text-foreground"
+        title={`Urutkan berdasarkan ${label}`}
+      >
+        {label}
+        <Icon className={`h-3 w-3 ${active ? '' : 'opacity-40'}`} />
+      </button>
+    </TableHead>
+  );
+}
+
+const PDF_PREFS_KEY = 'pusaka.homeroomRecap.pdfPrefs';
+const loadPdfPrefs = (): { place: string; paper: PdfPaper } => {
+  const d = { place: 'Ciamis', paper: 'a4' as PdfPaper };
+  try {
+    const raw = JSON.parse(localStorage.getItem(PDF_PREFS_KEY) || '{}');
+    return {
+      place: typeof raw.place === 'string' ? raw.place : d.place,
+      paper: raw.paper === 'f4' ? 'f4' : 'a4',
+    };
+  } catch {
+    return d;
+  }
 };
 
 // Editable row component for homeroom teachers
@@ -237,10 +314,20 @@ const HomeroomAttendance = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('teachers')
-        .select('id, school_id')
+        .select('id, school_id, nip')
         .eq('user_id', user?.id)
         .maybeSingle();
       if (error) throw error;
+      return data;
+    },
+    enabled: !!user?.id,
+  });
+
+  // Nama wali kelas (untuk tanda tangan di PDF)
+  const { data: myProfile } = useQuery({
+    queryKey: ['homeroom-profile-name', user?.id],
+    queryFn: async () => {
+      const { data } = await supabase.from('profiles').select('full_name').eq('id', user!.id).maybeSingle();
       return data;
     },
     enabled: !!user?.id,
@@ -394,175 +481,160 @@ const HomeroomAttendance = () => {
     { status: 'Alpa', jumlah: stats.alpa },
   ];
 
-  const handleExportPDF = async () => {
-    if (!homeroomClass || !studentStats) return;
+  // ---------- Rekap per siswa: filter, urut, halaman ----------
+  const [studentSearch, setStudentSearch] = useState('');
+  const [studentFilter, setStudentFilter] = useState<StudentFilter>('all');
+  const [studentSort, setStudentSort] = useState<SortState<StudentSortKey>>({ key: 'no', dir: 'asc' });
 
+  const studentRows = useMemo(
+    () =>
+      studentStats.map((s, i) => ({
+        ...s,
+        order: i,
+        pct: s.total > 0 ? (s.hadir / s.total) * 100 : -1,
+      })),
+    [studentStats]
+  );
+
+  const visibleStudents = useMemo(() => {
+    const q = studentSearch.trim().toLowerCase();
+    const rows = studentRows.filter((s) => {
+      if (q && !`${s.full_name ?? ''} ${s.nis ?? ''} ${s.nisn ?? ''}`.toLowerCase().includes(q)) return false;
+      if (studentFilter === 'alpa') return s.alpa > 0;
+      if (studentFilter === 'sakit') return s.sakit > 0;
+      if (studentFilter === 'izin') return s.izin > 0;
+      if (studentFilter === 'nodata') return s.total === 0;
+      return true;
+    });
+    const sign = studentSort.dir === 'asc' ? 1 : -1;
+    const k = studentSort.key;
+    return [...rows].sort((a, b) => {
+      let c = 0;
+      if (k === 'no') c = a.order - b.order;
+      else if (k === 'nis') c = cmpText(a.nis, b.nis);
+      else if (k === 'name') c = cmpText(a.full_name, b.full_name);
+      else c = (a[k] as number) - (b[k] as number);
+      return c === 0 ? a.order - b.order : c * sign;
+    });
+  }, [studentRows, studentSearch, studentFilter, studentSort]);
+
+  const studentPager = usePagination(visibleStudents, 10);
+  useEffect(() => {
+    studentPager.setCurrentPage(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studentSearch, studentFilter, studentSort]);
+  const studentFilterActive = studentSearch.trim() !== '' || studentFilter !== 'all';
+
+  // ---------- Riwayat absensi: filter, urut, halaman ----------
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyStatus, setHistoryStatus] = useState<'all' | 'hadir' | 'sakit' | 'izin' | 'alpa'>('all');
+  const [historySort, setHistorySort] = useState<SortState<HistorySortKey>>({ key: 'date', dir: 'desc' });
+
+  const visibleHistory = useMemo(() => {
+    const q = historySearch.trim().toLowerCase();
+    const rows = deduplicatedRecords.filter((r) => {
+      if (historyStatus !== 'all' && r.status !== historyStatus) return false;
+      if (q && !`${r.students?.full_name ?? ''} ${r.students?.nis ?? ''}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+    const sign = historySort.dir === 'asc' ? 1 : -1;
+    const k = historySort.key;
+    // sort stabil: data dengan nilai sama tetap berurutan menurut waktu input terbaru
+    return [...rows].sort((a, b) => {
+      const c =
+        k === 'date'
+          ? cmpText(a.date, b.date)
+          : k === 'nis'
+          ? cmpText(a.students?.nis, b.students?.nis)
+          : k === 'name'
+          ? cmpText(a.students?.full_name, b.students?.full_name)
+          : cmpText(a.status, b.status);
+      return c * sign;
+    });
+  }, [deduplicatedRecords, historySearch, historyStatus, historySort]);
+
+  const historyPager = usePagination(visibleHistory, 10);
+  useEffect(() => {
+    historyPager.setCurrentPage(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historySearch, historyStatus, historySort]);
+  const historyFilterActive = historySearch.trim() !== '' || historyStatus !== 'all';
+
+  // ---------- Pratinjau PDF (titimangsa + tanda tangan wali kelas) ----------
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [pdfPrefs, setPdfPrefs] = useState(loadPdfPrefs);
+  const [signDate, setSignDate] = useState(() => formatDate(new Date(), 'yyyy-MM-dd'));
+  const [pdfOnlyFiltered, setPdfOnlyFiltered] = useState(false);
+  const patchPdfPrefs = (p: Partial<{ place: string; paper: PdfPaper }>) =>
+    setPdfPrefs((prev) => {
+      const next = { ...prev, ...p };
+      try {
+        localStorage.setItem(PDF_PREFS_KEY, JSON.stringify(next));
+      } catch {
+        /* penyimpanan browser bisa diblokir; abaikan */
+      }
+      return next;
+    });
+
+  const pdfStudents = pdfOnlyFiltered ? visibleStudents : studentRows;
+  const pdfRebuildKeyRaw = [
+    pdfPrefs.place,
+    pdfPrefs.paper,
+    signDate,
+    pdfOnlyFiltered,
+    pdfStudents.map((s) => s.id).join(','),
+    filterStartDate,
+    filterEndDate,
+    !!schoolSettings,
+    teacherInfo?.nip ?? '',
+    myProfile?.full_name ?? '',
+  ].join('|');
+  // Tunda pembuatan ulang PDF saat mengetik (kop & logo berat dimuat ulang tiap kali)
+  const [pdfRebuildKey, setPdfRebuildKey] = useState(pdfRebuildKeyRaw);
+  useEffect(() => {
+    const t = setTimeout(() => setPdfRebuildKey(pdfRebuildKeyRaw), 500);
+    return () => clearTimeout(t);
+  }, [pdfRebuildKeyRaw]);
+
+  const buildRecapPdf = async () => {
+    if (!homeroomClass) throw new Error('Kelas wali belum dimuat.');
+    if (!schoolSettings) throw new Error('Pengaturan sekolah belum dimuat. Tutup lalu coba lagi sebentar lagi.');
+    const total = studentRows.length;
+    return buildHomeroomAttendancePdf(
+      {
+        className: homeroomClass.name,
+        homeroomName: myProfile?.full_name,
+        homeroomNip: teacherInfo?.nip,
+        startDate: filterStartDate,
+        endDate: filterEndDate,
+        students: pdfStudents.map((s) => ({
+          id: s.id,
+          nisn: s.nisn,
+          nis: s.nis,
+          name: s.full_name,
+          hadir: s.hadir,
+          sakit: s.sakit,
+          izin: s.izin,
+          alpa: s.alpa,
+          total: s.total,
+        })),
+        records: deduplicatedRecords.map((r) => ({ student_id: r.student_id, date: r.date, status: r.status })),
+        place: pdfPrefs.place,
+        signDate,
+        paper: pdfPrefs.paper,
+        note: pdfOnlyFiltered && pdfStudents.length !== total ? `Hanya ${pdfStudents.length} dari ${total} siswa (sesuai filter).` : undefined,
+      },
+      schoolSettings as never
+    );
+  };
+
+  const openPdfPreview = () => {
+    if (!homeroomClass || !students) return;
     if (!schoolSettings) {
       toast.error('Pengaturan sekolah belum dimuat. Silakan coba lagi.');
       return;
     }
-
-    const doc = new jsPDF('l', 'mm', 'a4');
-
-    const letterheadSettings = {
-      school_name: schoolSettings.school_name || 'NAMA SEKOLAH',
-      district_name: schoolSettings.district_name || undefined,
-      district_font_size: schoolSettings.district_font_size || undefined,
-      district_font_style: schoolSettings.district_font_style || undefined,
-      district_line_spacing: schoolSettings.district_line_spacing || undefined,
-      school_address: schoolSettings.school_address || undefined,
-      school_phone: schoolSettings.school_phone || undefined,
-      logo_url: schoolSettings.logo_url || undefined,
-      logo_width: schoolSettings.logo_width || undefined,
-      logo_height: schoolSettings.logo_height || undefined,
-      logo_position_x: schoolSettings.logo_position_x || undefined,
-      logo_position_y: schoolSettings.logo_position_y || undefined,
-      right_logo_url: schoolSettings.right_logo_url || undefined,
-      right_logo_width: schoolSettings.right_logo_width || undefined,
-      right_logo_height: schoolSettings.right_logo_height || undefined,
-      right_logo_position_x: schoolSettings.right_logo_position_x || undefined,
-      right_logo_position_y: schoolSettings.right_logo_position_y || undefined,
-      header_font_size: schoolSettings.header_font_size || undefined,
-      header_font_style: schoolSettings.header_font_style || undefined,
-      school_line_spacing: schoolSettings.school_line_spacing || undefined,
-      subheader_font_size: schoolSettings.subheader_font_size || undefined,
-      show_address: schoolSettings.show_address ?? true,
-      show_phone: schoolSettings.show_phone ?? true,
-      watermark_url: schoolSettings.watermark_url || undefined,
-      watermark_opacity: schoolSettings.watermark_opacity || undefined,
-      watermark_size: schoolSettings.watermark_size || undefined,
-      watermark_position: schoolSettings.watermark_position || undefined,
-      watermark_enabled: schoolSettings.watermark_enabled ?? false,
-    };
-
-    const startY = await addLetterheadToPDF(doc, letterheadSettings);
-
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text('REKAP KEHADIRAN SISWA WALI KELAS', doc.internal.pageSize.getWidth() / 2, startY, {
-      align: 'center',
-    });
-
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Kelas: ${homeroomClass.name}`, 14, startY + 8);
-    doc.text(`Periode: ${filterStartDate} s/d ${filterEndDate}`, 14, startY + 14);
-    doc.text(`Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}`, 14, startY + 20);
-
-    const startDate = new Date(filterStartDate);
-    const endDate = new Date(filterEndDate);
-    const dates: string[] = [];
-
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-      dates.push(new Date(d).toISOString().split('T')[0]);
-    }
-
-    const dayNumbers = dates.map((date) => new Date(date).getDate());
-
-    const headers = ['No', 'NISN', 'Nama Siswa', ...dayNumbers.map((d) => d.toString()), 'H', 'S', 'I', 'A'];
-
-    const attendanceMap = new Map<string, Map<string, string>>();
-    deduplicatedRecords.forEach((record) => {
-      if (!attendanceMap.has(record.student_id)) {
-        attendanceMap.set(record.student_id, new Map());
-      }
-      const statusCode =
-        record.status === 'hadir'
-          ? 'H'
-          : record.status === 'sakit'
-          ? 'S'
-          : record.status === 'izin'
-          ? 'I'
-          : 'A';
-      attendanceMap.get(record.student_id)?.set(record.date, statusCode);
-    });
-
-    const tableData = studentStats.map((student, index) => {
-      const studentAttendance = attendanceMap.get(student.id) || new Map();
-      const row: any[] = [index + 1, student.nisn || student.nis, toTitleCase(student.full_name)];
-
-      dates.forEach((date) => {
-        row.push(studentAttendance.get(date) || '-');
-      });
-
-      row.push(
-        student.hadir.toString(),
-        student.sakit.toString(),
-        student.izin.toString(),
-        student.alpa.toString()
-      );
-
-      return row;
-    });
-
-    autoTable(doc, {
-      startY: startY + 28,
-      head: [headers],
-      body: tableData,
-      theme: 'grid',
-      headStyles: {
-        fillColor: [139, 92, 246],
-        fontSize: 7,
-        halign: 'center',
-      },
-      styles: {
-        fontSize: 6,
-        cellPadding: 1,
-        halign: 'center',
-      },
-      columnStyles: {
-        0: { cellWidth: 8 },
-        1: { cellWidth: 15 },
-        2: { cellWidth: 30, halign: 'left' },
-      },
-      margin: { left: 10, right: 10 },
-      didParseCell: (data) => {
-        const cellValue = data.cell.raw;
-        if (cellValue === 'H') {
-          data.cell.styles.fillColor = [16, 185, 129];
-          data.cell.styles.textColor = [255, 255, 255];
-          data.cell.styles.fontStyle = 'bold';
-        } else if (cellValue === 'S') {
-          data.cell.styles.fillColor = [245, 158, 11];
-          data.cell.styles.textColor = [255, 255, 255];
-          data.cell.styles.fontStyle = 'bold';
-        } else if (cellValue === 'I') {
-          data.cell.styles.fillColor = [59, 130, 246];
-          data.cell.styles.textColor = [255, 255, 255];
-          data.cell.styles.fontStyle = 'bold';
-        } else if (cellValue === 'A') {
-          data.cell.styles.fillColor = [239, 68, 68];
-          data.cell.styles.textColor = [255, 255, 255];
-          data.cell.styles.fontStyle = 'bold';
-        }
-      },
-    });
-
-    const finalY = (doc as any).lastAutoTable.finalY || startY + 28;
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Keterangan:', 14, finalY + 10);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-
-    doc.setFillColor(16, 185, 129);
-    doc.rect(14, finalY + 13, 5, 5, 'F');
-    doc.text('H = Hadir', 21, finalY + 17);
-
-    doc.setFillColor(245, 158, 11);
-    doc.rect(50, finalY + 13, 5, 5, 'F');
-    doc.text('S = Sakit', 57, finalY + 17);
-
-    doc.setFillColor(59, 130, 246);
-    doc.rect(86, finalY + 13, 5, 5, 'F');
-    doc.text('I = Izin', 93, finalY + 17);
-
-    doc.setFillColor(239, 68, 68);
-    doc.rect(120, finalY + 13, 5, 5, 'F');
-    doc.text('A = Alpa', 127, finalY + 17);
-
-    doc.save(`Rekap-Absensi-${homeroomClass.name}-${filterStartDate}-${filterEndDate}.pdf`);
+    setPreviewOpen(true);
   };
 
   const getStatusIcon = (status: string) => {
@@ -984,9 +1056,9 @@ const HomeroomAttendance = () => {
                       />
                     </div>
                     <div className="flex items-end">
-                      <Button onClick={handleExportPDF} className="w-full" size="sm">
-                        <Download className="w-4 h-4 mr-2" />
-                        Export PDF
+                      <Button onClick={openPdfPreview} className="w-full" size="sm">
+                        <Eye className="w-4 h-4 mr-2" />
+                        Pratinjau PDF
                       </Button>
                     </div>
                   </div>
@@ -1087,25 +1159,70 @@ const HomeroomAttendance = () => {
                 <CardTitle className="text-sm md:text-base">Rekap Per Siswa</CardTitle>
               </CardHeader>
               <CardContent className="p-2 md:p-6">
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      className="pl-8"
+                      placeholder="Cari nama / NIS / NISN…"
+                      value={studentSearch}
+                      onChange={(e) => setStudentSearch(e.target.value)}
+                    />
+                  </div>
+                  <Select value={studentFilter} onValueChange={(v) => setStudentFilter(v as StudentFilter)}>
+                    <SelectTrigger className="sm:w-48">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(STUDENT_FILTER_LABEL) as StudentFilter[]).map((k) => (
+                        <SelectItem key={k} value={k}>
+                          {STUDENT_FILTER_LABEL[k]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {studentFilterActive && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setStudentSearch('');
+                        setStudentFilter('all');
+                      }}
+                    >
+                      <XIcon className="mr-1 h-4 w-4" />
+                      Reset
+                    </Button>
+                  )}
+                </div>
                 <div className="overflow-x-auto">
                   <Table className="min-w-[600px]">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="text-xs md:text-sm">No</TableHead>
-                        <TableHead className="text-xs md:text-sm">NIS</TableHead>
-                        <TableHead className="text-xs md:text-sm">Nama</TableHead>
-                        <TableHead className="text-center text-xs md:text-sm">Hadir</TableHead>
-                        <TableHead className="text-center text-xs md:text-sm">Sakit</TableHead>
-                        <TableHead className="text-center text-xs md:text-sm">Izin</TableHead>
-                        <TableHead className="text-center text-xs md:text-sm">Alpa</TableHead>
-                        <TableHead className="text-center text-xs md:text-sm">Total</TableHead>
-                        <TableHead className="text-center text-xs md:text-sm">%</TableHead>
+                        <SortHead label="No" k="no" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
+                        <SortHead label="NIS" k="nis" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
+                        <SortHead label="Nama" k="name" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
+                        <SortHead label="Hadir" k="hadir" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-center text-xs md:text-sm" />
+                        <SortHead label="Sakit" k="sakit" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-center text-xs md:text-sm" />
+                        <SortHead label="Izin" k="izin" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-center text-xs md:text-sm" />
+                        <SortHead label="Alpa" k="alpa" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-center text-xs md:text-sm" />
+                        <SortHead label="Total" k="total" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-center text-xs md:text-sm" />
+                        <SortHead label="%" k="pct" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-center text-xs md:text-sm" />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {studentStats.map((student, index) => (
+                      {studentPager.paginatedItems.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={9} className="py-6 text-center text-sm text-muted-foreground">
+                            {studentFilterActive ? 'Tidak ada siswa yang cocok dengan filter.' : 'Belum ada siswa.'}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {studentPager.paginatedItems.map((student, index) => (
                         <TableRow key={student.id}>
-                          <TableCell className="text-xs md:text-sm">{index + 1}</TableCell>
+                          <TableCell className="text-xs md:text-sm">
+                            {(studentPager.currentPage - 1) * studentPager.pageSize + index + 1}
+                          </TableCell>
                           <TableCell className="text-xs md:text-sm">{student.nis}</TableCell>
                           <TableCell className="text-xs md:text-sm">
                             {toTitleCase(student.full_name)}
@@ -1125,29 +1242,81 @@ const HomeroomAttendance = () => {
                     </TableBody>
                   </Table>
                 </div>
+                <DataPagination
+                  currentPage={studentPager.currentPage}
+                  totalPages={studentPager.totalPages}
+                  totalItems={studentPager.totalItems}
+                  pageSize={studentPager.pageSize}
+                  onPageChange={studentPager.setCurrentPage}
+                  onPageSizeChange={studentPager.setPageSize}
+                  pageSizeOptions={[10, 25, 50, 100]}
+                />
               </CardContent>
             </Card>
 
             {/* Recent Attendance Records */}
             <Card>
               <CardHeader className="pb-2 md:pb-6">
-                <CardTitle className="text-sm md:text-base">Riwayat Absensi Terbaru</CardTitle>
+                <CardTitle className="text-sm md:text-base">Riwayat Absensi</CardTitle>
               </CardHeader>
               <CardContent className="p-2 md:p-6">
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      className="pl-8"
+                      placeholder="Cari nama / NIS…"
+                      value={historySearch}
+                      onChange={(e) => setHistorySearch(e.target.value)}
+                    />
+                  </div>
+                  <Select value={historyStatus} onValueChange={(v) => setHistoryStatus(v as typeof historyStatus)}>
+                    <SelectTrigger className="sm:w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Semua status</SelectItem>
+                      <SelectItem value="hadir">Hadir</SelectItem>
+                      <SelectItem value="sakit">Sakit</SelectItem>
+                      <SelectItem value="izin">Izin</SelectItem>
+                      <SelectItem value="alpa">Alpa</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {historyFilterActive && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setHistorySearch('');
+                        setHistoryStatus('all');
+                      }}
+                    >
+                      <XIcon className="mr-1 h-4 w-4" />
+                      Reset
+                    </Button>
+                  )}
+                </div>
                 <div className="overflow-x-auto">
                   <Table className="min-w-[500px]">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="text-xs md:text-sm">Tanggal</TableHead>
-                        <TableHead className="text-xs md:text-sm">NIS</TableHead>
-                        <TableHead className="text-xs md:text-sm">Nama</TableHead>
-                        <TableHead className="text-xs md:text-sm">Status</TableHead>
+                        <SortHead label="Tanggal" k="date" sort={historySort} onSort={(k) => setHistorySort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
+                        <SortHead label="NIS" k="nis" sort={historySort} onSort={(k) => setHistorySort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
+                        <SortHead label="Nama" k="name" sort={historySort} onSort={(k) => setHistorySort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
+                        <SortHead label="Status" k="status" sort={historySort} onSort={(k) => setHistorySort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
                         <TableHead className="text-xs md:text-sm">Catatan</TableHead>
                         <TableHead className="text-xs md:text-sm">Aksi</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {deduplicatedRecords.slice(0, 20).map((record) => (
+                      {historyPager.paginatedItems.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">
+                            {historyFilterActive ? 'Tidak ada data yang cocok dengan filter.' : 'Belum ada data absensi pada periode ini.'}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {historyPager.paginatedItems.map((record) => (
                         <EditableAttendanceRow
                           key={`${record.id}`}
                           record={record}
@@ -1157,11 +1326,72 @@ const HomeroomAttendance = () => {
                     </TableBody>
                   </Table>
                 </div>
+                <DataPagination
+                  currentPage={historyPager.currentPage}
+                  totalPages={historyPager.totalPages}
+                  totalItems={historyPager.totalItems}
+                  pageSize={historyPager.pageSize}
+                  onPageChange={historyPager.setCurrentPage}
+                  onPageSizeChange={historyPager.setPageSize}
+                  pageSizeOptions={[10, 25, 50, 100]}
+                />
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
       </div>
+
+      <PdfPreviewDialog
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        title={`Pratinjau Rekap Absensi ${homeroomClass.name}`}
+        filename={homeroomRecapFileName(homeroomClass.name, filterStartDate, filterEndDate)}
+        build={buildRecapPdf}
+        rebuildKey={pdfRebuildKey}
+        toolbar={
+          <div className="flex flex-wrap items-end gap-3 rounded-md border bg-muted/30 p-3">
+            <div>
+              <Label className="text-xs">Tempat titimangsa</Label>
+              <Input
+                value={pdfPrefs.place}
+                maxLength={60}
+                onChange={(e) => patchPdfPrefs({ place: e.target.value })}
+                placeholder="Ciamis"
+                className="w-40"
+              />
+            </div>
+            <div>
+              <Label className="text-xs">Tanggal titimangsa</Label>
+              <Input type="date" value={signDate} onChange={(e) => setSignDate(e.target.value)} className="w-40" />
+            </div>
+            <div>
+              <Label className="text-xs">Kertas</Label>
+              <Select value={pdfPrefs.paper} onValueChange={(v) => patchPdfPrefs({ paper: v as PdfPaper })}>
+                <SelectTrigger className="w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(PAPER_LABEL) as PdfPaper[]).map((k) => (
+                    <SelectItem key={k} value={k}>
+                      {PAPER_LABEL[k]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2 pb-2">
+              <Checkbox
+                id="hr-pdf-filtered"
+                checked={pdfOnlyFiltered}
+                onCheckedChange={(v) => setPdfOnlyFiltered(v === true)}
+              />
+              <Label htmlFor="hr-pdf-filtered" className="text-xs">
+                Ikuti filter &amp; urutan tabel ({visibleStudents.length} dari {studentRows.length} siswa)
+              </Label>
+            </div>
+          </div>
+        }
+      />
     </DashboardLayout>
   );
 };
