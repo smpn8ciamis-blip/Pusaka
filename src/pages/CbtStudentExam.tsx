@@ -496,7 +496,9 @@ export default function CbtStudentExam() {
                 const attemptsUsed = sessions.length;
                 const canStart = attemptsUsed < (exam.max_attempts || 1) && !inProgress;
                 const scored = completed.filter((s: any) => s.grading_status !== 'pending_essay' && s.score != null);
-                const lastCompleted = scored.length ? scored.reduce((a: any, b: any) => (Number(b.score) > Number(a.score) ? b : a)) : completed[0];
+                // Nilai remidial dibatasi maksimal KKM (sama seperti yang masuk ke menu Nilai)
+                const effScore = (s: any) => (s.is_remedial ? Math.min(Number(s.score), Number(exam.pass_score)) : Number(s.score));
+                const lastCompleted = scored.length ? scored.reduce((a: any, b: any) => (effScore(b) > effScore(a) ? b : a)) : completed[0];
                 return (
                   <Card key={exam.id} className="hover:shadow-lg transition-all border-l-4 border-l-primary/40 hover:border-l-primary">
                     <CardHeader className="pb-2">
@@ -517,13 +519,14 @@ export default function CbtStudentExam() {
                         <span className="px-2 py-0.5 rounded-full bg-muted">{exam.duration_minutes} menit</span>
                         <span className="px-2 py-0.5 rounded-full bg-muted">KKM {exam.pass_score}</span>
                         <span className="px-2 py-0.5 rounded-full bg-muted">{attemptsUsed}/{exam.max_attempts || 1}</span>
+                        {exam.remedial && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-medium">Remidial s.d. {format(new Date(exam.remedial_until), 'dd MMM HH:mm', { locale: idLocale })}</span>}
                         {exam.require_token && <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 flex items-center gap-1"><KeyRound className="h-2.5 w-2.5" />Token</span>}
                         {exam.anti_cheat_enabled && <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300 flex items-center gap-1"><Shield className="h-2.5 w-2.5" />Anti-cheat</span>}
                       </div>
                       {lastCompleted && exam.show_result_to_student && lastCompleted.grading_status !== 'pending_essay' && (
                         <div className="flex items-center justify-between p-2 rounded bg-muted/50">
                           <span className="text-xs text-muted-foreground">Nilai Terbaik</span>
-                          <span className={`font-bold ${(lastCompleted.score || 0) >= exam.pass_score ? 'text-emerald-600' : 'text-destructive'}`}>{Number(lastCompleted.score ?? 0).toFixed(1)}</span>
+                          <span className={`font-bold ${effScore(lastCompleted) >= exam.pass_score ? 'text-emerald-600' : 'text-destructive'}`}>{effScore(lastCompleted).toFixed(1)}</span>
                         </div>
                       )}
                       {lastCompleted?.grading_status === 'pending_essay' && (
@@ -539,7 +542,7 @@ export default function CbtStudentExam() {
                           if (exam.require_token) { setPendingExam(exam); setTokenInputOpen(true); }
                           else if (confirm('Mulai ujian? Timer akan berjalan.')) startOrResumeExam.mutate({ exam });
                         }}>
-                          <Play className="h-3.5 w-3.5" /> {attemptsUsed > 0 ? `Coba Lagi (${attemptsUsed + 1}/${exam.max_attempts})` : 'Mulai Ujian'}
+                          <Play className="h-3.5 w-3.5" /> {exam.remedial ? `Mulai Remidial (${attemptsUsed + 1}/${exam.max_attempts})` : attemptsUsed > 0 ? `Coba Lagi (${attemptsUsed + 1}/${exam.max_attempts})` : 'Mulai Ujian'}
                         </Button>
                       )}
                       {!canStart && !inProgress && <p className="text-[11px] text-center text-muted-foreground">Batas percobaan tercapai</p>}
@@ -558,7 +561,7 @@ export default function CbtStudentExam() {
                   {existingSessions.filter((s: any) => isFinished(s.status)).slice(0, 10).map((s: any) => (
                     <div key={s.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
                       <div>
-                        <p className="text-sm font-medium">Percobaan #{s.attempt_number || 1}</p>
+                        <p className="text-sm font-medium">Percobaan #{s.attempt_number || 1}{s.is_remedial && <Badge variant="outline" className="ml-2 text-[10px] border-amber-500 text-amber-600">Remidial</Badge>}</p>
                         <p className="text-xs text-muted-foreground">{format(new Date(s.created_at), 'dd MMM yyyy HH:mm', { locale: idLocale })}</p>
                       </div>
                       {s.grading_status === 'pending_essay' ? <Badge variant="outline">Menunggu Koreksi</Badge> :
