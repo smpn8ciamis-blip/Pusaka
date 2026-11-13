@@ -360,7 +360,7 @@ const HomeroomAttendance = () => {
     enabled: !!user?.id,
   });
 
-  // Get students from homeroom class
+  // Get students from homeroom class (hanya siswa aktif)
   const { data: students } = useQuery({
     queryKey: ['homeroom-students', homeroomClass?.id],
     queryFn: async () => {
@@ -370,6 +370,9 @@ const HomeroomAttendance = () => {
         .from('students')
         .select('*')
         .eq('class_id', homeroomClass.id)
+        // Siswa mutasi/nonaktif/alumni tidak ikut diabsen (sama seperti halaman Absensi per jam)
+        .eq('status', 'aktif')
+        .eq('is_alumni', false)
         .order('full_name');
 
       if (error) throw error;
