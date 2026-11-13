@@ -17,7 +17,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAcademicYear } from '@/contexts/AcademicYearContext';
-import { Plus, Search, Edit, Trash2, FileSpreadsheet, Users, Download, Printer, KeyRound, Activity, BookmarkPlus, Library, RefreshCcw, Pause, Play, Power, Clock, BarChart3, ShieldAlert } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, FileSpreadsheet, Users, Download, Printer, KeyRound, Activity, BookmarkPlus, Library, RefreshCcw, Pause, Play, Power, Clock, BarChart3, ShieldAlert, RotateCcw } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
@@ -25,6 +25,7 @@ import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { format } from 'date-fns';
 import { RichTextEditor, RichTextDisplay } from '@/components/cbt/RichTextEditor';
+import { CbtRemedialDialog } from '@/components/cbt/CbtRemedialDialog';
 
 const ITEMS_PER_PAGE = 10;
 
@@ -44,6 +45,7 @@ export default function CbtExamManagement() {
   const [isGradingOpen, setIsGradingOpen] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [isAnalysisOpen, setIsAnalysisOpen] = useState(false);
+  const [isRemedialOpen, setIsRemedialOpen] = useState(false);
   const [selectedExam, setSelectedExam] = useState<any>(null);
   const [selectedSession, setSelectedSession] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -803,6 +805,7 @@ export default function CbtExamManagement() {
                             {exam.grade_component && (
                               <Button variant="ghost" size="icon" title={`Kirim ulang nilai ke menu Nilai (${exam.grade_component.toUpperCase()})`} disabled={syncGradesMutation.isPending} onClick={() => syncGradesMutation.mutate(exam.id)}><RefreshCcw className="h-4 w-4 text-emerald-600" /></Button>
                             )}
+                            <Button variant="ghost" size="icon" title="Remidial (siswa di bawah KKM)" onClick={() => { setSelectedExam(exam); setIsRemedialOpen(true); }}><RotateCcw className="h-4 w-4 text-amber-600" /></Button>
                             <Button variant="ghost" size="icon" title="Analisis Jawaban" onClick={() => { setSelectedExam(exam); setIsAnalysisOpen(true); }}><BarChart3 className="h-4 w-4 text-purple-600" /></Button>
                             <Button variant="ghost" size="icon" title="Edit" onClick={() => handleEditExam(exam)}><Edit className="h-4 w-4" /></Button>
                             <Button variant="ghost" size="icon" title="Hapus" onClick={() => { if (confirm('Hapus ujian ini?')) deleteExamMutation.mutate(exam.id); }}><Trash2 className="h-4 w-4 text-destructive" /></Button>
@@ -828,6 +831,8 @@ export default function CbtExamManagement() {
           </Card>
 
           {/* Edit Exam */}
+          <CbtRemedialDialog exam={selectedExam} open={isRemedialOpen} onOpenChange={setIsRemedialOpen} />
+
           <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
             <DialogContent className="max-w-2xl">
               <DialogHeader><DialogTitle>Edit Ujian</DialogTitle></DialogHeader>
@@ -1141,7 +1146,7 @@ export default function CbtExamManagement() {
                           )}
 
                           <div className="flex items-center justify-between pt-1 border-t">
-                            <span className="text-[10px] text-muted-foreground">Percobaan #{r.attempt_number || 1}</span>
+                            <span className="text-[10px] text-muted-foreground">Percobaan #{r.attempt_number || 1}{r.is_remedial && <Badge variant="outline" className="ml-1 px-1 py-0 text-[9px] border-amber-500 text-amber-600">Remidial</Badge>}</span>
                             <div className="flex gap-1">
                               {r.status === 'in_progress' && <Button size="icon" variant="ghost" className="h-7 w-7" title="Jeda" onClick={() => sessionActionMutation.mutate({ id: r.id, action: 'pause' })}><Pause className="h-3 w-3" /></Button>}
                               {r.status === 'paused' && <Button size="icon" variant="ghost" className="h-7 w-7" title="Resume" onClick={() => sessionActionMutation.mutate({ id: r.id, action: 'resume' })}><Play className="h-3 w-3" /></Button>}
@@ -1192,7 +1197,7 @@ export default function CbtExamManagement() {
                         {r.essay_score?.toFixed(1) || '0'}
                         {r.grading_status !== 'fully_graded' && <Badge variant="outline" className="ml-1 text-xs">Perlu Koreksi</Badge>}
                       </TableCell>
-                      <TableCell><Badge variant={r.score >= (selectedExam?.pass_score || 70) ? 'default' : 'destructive'}>{r.score?.toFixed(1) || '-'}</Badge></TableCell>
+                      <TableCell><Badge variant={r.score >= (selectedExam?.pass_score || 70) ? 'default' : 'destructive'}>{r.score?.toFixed(1) || '-'}</Badge>{r.is_remedial && <Badge variant="outline" className="ml-1 text-[10px] border-amber-500 text-amber-600">Remidial</Badge>}</TableCell>
                       <TableCell><Badge variant="outline">{r.status}</Badge></TableCell>
                       <TableCell>
                         <Button size="sm" variant="outline" onClick={() => { setSelectedSession(r); setIsGradingOpen(true); }}>Koreksi</Button>
