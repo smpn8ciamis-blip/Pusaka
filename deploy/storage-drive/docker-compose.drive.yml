@@ -1,0 +1,25 @@
+# PUSAKA — Supabase Storage memakai gerbang S3 → Google Drive.
+# Taruh berkas ini di folder yang sama dengan docker-compose.yml Supabase
+# (~/sekolah-app/supabase-docker/docker/), lalu jalankan:
+#   docker compose -f docker-compose.yml -f docker-compose.drive.yml up -d storage
+# Variabel S3_GATEWAY_ACCESS_KEY / S3_GATEWAY_SECRET_KEY dibaca dari .env Supabase (folder yang sama);
+# nilainya HARUS sama dengan yang ada di .env bot (/srv/wa-bot/.env). Lihat README.md.
+services:
+  storage:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      STORAGE_BACKEND: s3
+      # Nama bucket S3 HARUS "stub": sama dengan awalan folder berkas lama (volumes/storage/stub/stub/...).
+      GLOBAL_S3_BUCKET: stub
+      GLOBAL_S3_ENDPOINT: http://host.docker.internal:9100
+      GLOBAL_S3_PROTOCOL: http
+      GLOBAL_S3_FORCE_PATH_STYLE: "true"
+      STORAGE_S3_BUCKET: stub
+      STORAGE_S3_ENDPOINT: http://host.docker.internal:9100
+      STORAGE_S3_FORCE_PATH_STYLE: "true"
+      STORAGE_S3_REGION: stub
+      REGION: stub
+      AWS_ACCESS_KEY_ID: ${S3_GATEWAY_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${S3_GATEWAY_SECRET_KEY}
+      TENANT_ID: stub
