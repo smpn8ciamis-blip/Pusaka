@@ -55,6 +55,7 @@ export const useTeacherClassAttendance = (
         .from('students')
         .select('id, full_name')
         .eq('class_id', homeroomClass.id)
+        .eq('status', 'aktif')
         .eq('is_alumni', false)
         .order('full_name');
 
