@@ -108,7 +108,7 @@ AS $$
 DECLARE
   e public.cbt_exams;
   v_class uuid;
-  v_sem text;
+  v_sem integer;   -- semester di jadwal & pengaturan sekolah bertipe integer
   v_score numeric;
   v_sched uuid;
 BEGIN
