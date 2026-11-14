@@ -25,17 +25,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
-const { createDriveStore, configFromEnv, loadDotEnv } = require('./drive-s3-gateway.cjs');
-
-const MIME = {
-    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon', heic: 'image/heic',
-    pdf: 'application/pdf', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    txt: 'text/plain', csv: 'text/csv', json: 'application/json', zip: 'application/zip', rar: 'application/vnd.rar', '7z': 'application/x-7z-compressed',
-    mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4',
-};
-const guessMime = (name) => MIME[(name.split('.').pop() || '').toLowerCase()] || 'application/octet-stream';
+const { createDriveStore, configFromEnv, loadDotEnv, guessMime } = require('./drive-s3-gateway.cjs');
 
 function parseArgs(argv) {
     const a = { concurrency: 3, s3Bucket: 'stub' };
@@ -57,7 +47,7 @@ function parseArgs(argv) {
 function* walk(dir) {
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
         const p = path.join(dir, ent.name);
-        if (ent.isDirectory()) yield* walk(p);
+        if (ent.isDirectory()) { if (ent.name !== '.pusaka-meta') yield* walk(p); } // .pusaka-meta = catatan gerbang (mode server)
         else if (ent.isFile()) yield p;
     }
 }
@@ -98,7 +88,7 @@ async function main() {
     for (const f of walk(root)) {
         const rel = path.relative(root, f).split(path.sep).join('/');
         const base = path.basename(f);
-        if (base.startsWith('.') || /\.(tmp|part)$/.test(base)) continue;
+        if (base.startsWith('.') || /\.(tmp|part|pusaka-tmp)$/.test(base)) continue;
         if (rel.split('/')[0] !== args.s3Bucket || rel.split('/').length < 4) { bad++; if (bad <= 5) console.warn('Dilewati (bukan struktur <' + args.s3Bucket + '>/<tenant>/<bucket>/<nama>/<versi>): ' + rel); continue; }
         items.push({ file: f, key: rel, size: fs.statSync(f).size });
     }

@@ -31,6 +31,7 @@ Aplikasi → Supabase Storage (storage-api) → gerbang S3 (drive-s3-gateway.cjs
    ```
    S3_GATEWAY_ACCESS_KEY=isi-acak-pendek
    S3_GATEWAY_SECRET_KEY=isi-acak-panjang
+   S3_LOCAL_DIR=/home/<pengguna>/sekolah-app/supabase-docker/docker/volumes/storage   # opsional; untuk saklar "server" (lihat bagian Saklar)
    ```
    `GOOGLE_CLIENT_ID` dan `GOOGLE_CLIENT_SECRET` sudah ada di `.env` bot. Lalu:
    ```bash
@@ -63,11 +64,36 @@ Aplikasi → Supabase Storage (storage-api) → gerbang S3 (drive-s3-gateway.cjs
    (`volumes/storage/stub`) setelah `--verify` bersih. Catatan: backup harian di server memakai `tar` folder ini; setelah dihapus
    backup berkas tidak lagi berisi upload (sudah ada di Drive).
 
+## Saklar: simpan unggahan baru di Google Drive atau di server
+Di aplikasi: menu **Backup Database** → kartu **Tempat Penyimpanan Berkas Upload** (hanya admin/super admin). Geser saklar,
+konfirmasi, selesai; tanpa restart apa pun. Kartu itu juga menampilkan sisa ruang Drive dan sisa disk server.
+
+- Saklar hanya menentukan **tempat unggahan baru**. Berkas yang sudah ada selalu dibuka dari tempatnya (server dulu, lalu Drive),
+  jadi memindah saklar tidak membuat berkas lama hilang. Berkas lama tidak dipindah otomatis (untuk menyalin server → Drive
+  pakai `drive-s3-migrate.cjs`).
+- Mode **server** memakai folder berkas Supabase yang sama dengan sebelumnya, jadi berkas lama langsung terbaca. Syaratnya di `.env` bot:
+  ```
+  S3_LOCAL_DIR=/home/<pengguna>/sekolah-app/supabase-docker/docker/volumes/storage
+  ```
+  (isi dengan path asli dari `find`/`pwd` di langkah 1; harus folder yang di dalamnya ada `stub/stub/...`).
+- Pilihan saklar disimpan di `storage-mode.json` di folder gerbang (`/srv/wa-bot`), jadi tetap setelah restart. Tanpa `S3_LOCAL_DIR`
+  gerbang hanya bisa mode Drive. `S3_DEFAULT_MODE=local` bisa dipakai bila ingin awalnya mode server.
+- Kedua `.cjs` dan `server.js` terbaru harus disalin ke `/srv/wa-bot/`, lalu:
+  ```bash
+  pm2 restart drive-s3 --update-env
+  pm2 restart wa-bot --update-env
+  ```
+  Bot meneruskan perintah ke gerbang di `127.0.0.1:9100` memakai `S3_GATEWAY_SECRET_KEY` (atau `S3_GATEWAY_ADMIN_TOKEN` bila diisi);
+  API admin gerbang hanya menerima permintaan dari server itu sendiri.
+- Saat Drive bermasalah di mode server: berkas di server tetap bisa dibuka/diunggah/dihapus; berkas yang hanya ada di Drive
+  tampil "tidak ditemukan" sampai Drive pulih. Pindah ke mode Drive ditolak selama Drive tidak siap. Mode server memakai disk server
+  (pantau sisa disk di kartu itu).
+
 ## Kembali ke penyimpanan lokal (rollback)
 Hapus `COMPOSE_FILE` dan berkas override (atau ubah `STORAGE_BACKEND: file`), lalu `docker compose up -d storage`.
 Berkas yang diunggah **setelah** pindah hanya ada di Drive; berkas lama masih di disk selama belum dihapus.
 
 ## Variabel opsional gerbang
 `S3_GATEWAY_HOST` (0.0.0.0), `S3_GATEWAY_PORT` (9100), `S3_CACHE_DIR`, `S3_CACHE_MAX_MB` (1024), `S3_CACHE_FILE_MAX_MB` (25),
-`S3_SPOOL_DIR`, `S3_DRIVE_ROOT_NAME` ("Pusaka Storage"), `S3_LOG=1` (log detail). Cache dan spool memakai disk sementara
+`S3_SPOOL_DIR`, `S3_DRIVE_ROOT_NAME` ("Pusaka Storage"), `S3_LOG=1` (log detail), `S3_LOCAL_DIR`, `S3_DEFAULT_MODE`, `S3_MODE_FILE`, `S3_GATEWAY_ADMIN_TOKEN` (lihat bagian Saklar). Cache dan spool memakai disk sementara
 (unggahan besar ditampung dulu di disk sebelum dikirim ke Drive).

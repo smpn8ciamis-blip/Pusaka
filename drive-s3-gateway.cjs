@@ -18,6 +18,14 @@
  * Env opsional: S3_GATEWAY_HOST (0.0.0.0), S3_GATEWAY_PORT (9100), GDRIVE_TOKEN_FILE, S3_DRIVE_ROOT_NAME,
  *               S3_DRIVE_ROOT_ID, S3_CACHE_DIR, S3_CACHE_MAX_MB (1024), S3_CACHE_FILE_MAX_MB (25),
  *               S3_SPOOL_DIR, S3_LOG=1, ENV_FILE
+ *
+ * Saklar penyimpanan (Google Drive atau disk server):
+ *   S3_LOCAL_DIR            folder berkas di server (isi: folder volumes/storage Supabase; kunci = path relatif, tata letak sama
+ *                           dengan backend "file" Supabase, jadi berkas lama langsung terbaca). Tanpa ini hanya mode Drive.
+ *   S3_DEFAULT_MODE         "drive" (default) atau "local"; hanya dipakai sebelum saklar pernah diubah
+ *   S3_MODE_FILE            tempat menyimpan pilihan saklar (default: storage-mode.json di folder berkas ini)
+ *   S3_GATEWAY_ADMIN_TOKEN  token API admin (/__admin/*, hanya dari 127.0.0.1); default: S3_GATEWAY_SECRET_KEY
+ * Mode hanya menentukan TEMPAT UNGGAHAN BARU. Berkas selalu dibaca dari tempat mana pun ia berada (server dulu, lalu Drive).
  */
 const http = require('http');
 const fs = require('fs');
@@ -371,8 +379,181 @@ function createDriveStore(cfg) {
 }
 
 // ---------- server S3 ----------
+// ---------- tipe berkas (untuk berkas lama tanpa catatan tipe) ----------
+const MIME = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon', heic: 'image/heic',
+    pdf: 'application/pdf', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    txt: 'text/plain', csv: 'text/csv', json: 'application/json', zip: 'application/zip', rar: 'application/vnd.rar', '7z': 'application/x-7z-compressed',
+    mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4',
+};
+const guessMime = (name) => MIME[(String(name).split('.').pop() || '').toLowerCase()] || 'application/octet-stream';
+
+// ---------- penyimpanan di disk server ----------
+// Berkas disimpan di <localDir>/<kunci> (sama dengan backend "file" Supabase). Tipe/cache-control/ETag berkas baru dicatat di
+// <localDir>/.pusaka-meta/<sha256 kunci>.json; berkas lama (tanpa catatan) dibaca apa adanya (tipe ditebak dari ekstensi).
+function createLocalStore(cfg) {
+    const root = path.resolve(cfg.localDir);
+    const metaDir = path.join(root, '.pusaka-meta');
+    const rand = () => crypto.randomBytes(6).toString('hex');
+    const pathOf = (key) => {
+        const segs = String(key).split('/');
+        if (segs.length < 2 || segs.some((x) => x === '' || x === '.' || x === '..' || x.includes('\0'))) return null;
+        const p = path.join(root, ...segs);
+        return p.startsWith(root + path.sep) ? p : null;
+    };
+    const metaFile = (key) => path.join(metaDir, keyHash(key) + '.json');
+    async function readSide(key) { try { return JSON.parse(await fsp.readFile(metaFile(key), 'utf8')); } catch (e) { return {}; } }
+    async function writeSide(key, o) {
+        await fsp.mkdir(metaDir, { recursive: true });
+        const f = metaFile(key), tmp = f + '.' + rand() + '.pusaka-tmp';
+        await fsp.writeFile(tmp, JSON.stringify(o));
+        await fsp.rename(tmp, f);
+    }
+    async function find(key) {
+        const p = pathOf(key);
+        if (!p) return null;
+        let st;
+        try { st = await fsp.stat(p); } catch (e) { return null; }
+        if (!st.isFile()) return null;
+        const side = await readSide(key);
+        const parts = String(key).split('/');
+        const pseudo = crypto.createHash('md5').update(st.size + ':' + Math.round(st.mtimeMs)).digest('hex');
+        return { store: 'local', localPath: p, key, size: st.size, md5: side.md5 && side.size === st.size ? side.md5 : pseudo, mtime: st.mtime.toISOString(), ct: side.ct || guessMime(parts[parts.length - 2] || ''), cc: side.cc || '', meta: side.meta || {} };
+    }
+    // move=true: pindahkan berkas sumber (berkas sementara milik pemanggil); false: salin
+    async function place(dest, src, move) {
+        const tmp = path.join(path.dirname(dest), '.' + rand() + '.pusaka-tmp');
+        try {
+            await fsp.mkdir(path.dirname(dest), { recursive: true });
+            if (move) { try { await fsp.rename(src, tmp); } catch (e) { if (e.code !== 'EXDEV') throw e; await fsp.copyFile(src, tmp); } }
+            else await fsp.copyFile(src, tmp);
+            await fsp.rename(tmp, dest);
+        } catch (e) {
+            await fsp.unlink(tmp).catch(() => {});
+            if (e.code === 'ENAMETOOLONG') throw new S3Error(400, 'KeyTooLongError', 'Nama objek terlalu panjang');
+            if (e.code === 'ENOSPC') throw new S3Error(507, 'StorageQuotaExceeded', 'Disk server penuh.');
+            throw e;
+        }
+    }
+    async function put(key, filePath, size, md5, o) {
+        const p = pathOf(key);
+        if (!p) throw new S3Error(400, 'InvalidKey', 'Kunci objek tidak valid');
+        await place(p, filePath, true);
+        await writeSide(key, { ct: o.ct || 'application/octet-stream', cc: o.cc || '', meta: o.meta || {}, md5: md5 || '', size });
+        return find(key);
+    }
+    async function open(meta, range) {
+        return { body: Readable.toWeb(fs.createReadStream(meta.localPath, range ? { start: range.start, end: range.end } : undefined)) };
+    }
+    async function delKey(key) {
+        const p = pathOf(key);
+        if (!p) return 0;
+        let n = 0;
+        try { await fsp.unlink(p); n = 1; } catch (e) { if (!['ENOENT', 'ENOTDIR', 'EISDIR'].includes(e.code)) throw e; }
+        await fsp.unlink(metaFile(key)).catch(() => {});
+        // rapikan folder kosong (tapi jangan hapus <bucket-s3>/<tenant>/<bucket>)
+        let d = path.dirname(p);
+        while (n && path.relative(root, d).split(path.sep).length > 3) { try { await fsp.rmdir(d); } catch (e) { break; } d = path.dirname(d); }
+        return n;
+    }
+    async function copy(srcMeta, newKey, o) {
+        const p = pathOf(newKey);
+        if (!p) throw new S3Error(400, 'InvalidKey', 'Kunci objek tidak valid');
+        await place(p, srcMeta.localPath, false);
+        await writeSide(newKey, { ct: o.ct || srcMeta.ct, cc: o.cc !== undefined ? o.cc : srcMeta.cc, meta: o.meta || srcMeta.meta, md5: srcMeta.md5, size: srcMeta.size });
+        return find(newKey);
+    }
+    async function* scan() {
+        async function* walk(dir) {
+            for (const ent of await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+                const p = path.join(dir, ent.name);
+                if (ent.isDirectory()) { if (dir === root && ent.name === '.pusaka-meta') continue; yield* walk(p); }
+                else if (ent.isFile() && !ent.name.endsWith('.pusaka-tmp')) yield p;
+            }
+        }
+        for await (const p of walk(root)) {
+            const key = path.relative(root, p).split(path.sep).join('/');
+            if (key.split('/').length < 2) continue;
+            const m = await find(key);
+            if (m) yield m;
+        }
+    }
+    async function space() {
+        try { const s = await fsp.statfs(root); return { freeBytes: Number(s.bavail) * Number(s.bsize), totalBytes: Number(s.blocks) * Number(s.bsize) }; } catch (e) { return {}; }
+    }
+    async function check() { await fsp.mkdir(root, { recursive: true }); await fsp.access(root, fs.constants.W_OK); }
+    return { find, put, open, delKey, copy, scan, space, check, root };
+}
+
+// ---------- router: memilih Drive / server ----------
+// Unggahan baru ke penyimpanan aktif (getMode()); pembacaan: server dulu (murah), baru Drive; hapus di keduanya.
+function createRoutedStore({ drive, local, getMode, tmpName }) {
+    const isLocalMode = () => !!local && getMode() === 'local';
+    const active = () => (isLocalMode() ? local : drive);
+    const tag = (m, store) => { if (m) m.store = store; return m; };
+    async function find(key) {
+        if (local) { const m = await local.find(key); if (m) return m; }
+        try { return tag(await drive.find(key), 'drive'); }
+        catch (e) { if (isLocalMode()) { console.error('[S3] Drive tidak terjangkau saat mode server: ' + e.message); return null; } throw e; }
+    }
+    async function put(key, filePath, size, md5, o) {
+        const a = active();
+        const m = await a.put(key, filePath, size, md5, o);
+        if (a === drive) { if (local) await local.delKey(key).catch(() => {}); return tag(m, 'drive'); }
+        return m;
+    }
+    const open = (meta, range) => (meta.store === 'local' ? local.open(meta, range) : drive.open(meta, range));
+    async function delKey(key) {
+        let n = 0;
+        if (local) n += await local.delKey(key);
+        try { n += await drive.delKey(key); }
+        catch (e) { if (!(local && (n > 0 || isLocalMode()))) throw e; console.error('[S3] Gagal menghapus di Drive (' + e.message + '); berkas di server sudah dihapus.'); }
+        return n;
+    }
+    async function copy(srcMeta, newKey, o) {
+        const a = active();
+        const srcStore = srcMeta.store === 'local' ? local : drive;
+        if (srcStore === a) {
+            const m = await a.copy(srcMeta, newKey, o);
+            if (a === drive) { if (local) await local.delKey(newKey).catch(() => {}); return tag(m, 'drive'); }
+            return m;
+        }
+        // beda tempat: salin lewat berkas sementara
+        const tmp = tmpName();
+        try {
+            const src = await srcStore.open(srcMeta, null);
+            if (!src) throw new S3Error(404, 'NoSuchKey', 'Sumber salinan tidak ditemukan');
+            const h = crypto.createHash('md5'); let size = 0;
+            await pipeline(Readable.fromWeb(src.body), new Transform({ transform(c, e, cb) { h.update(c); size += c.length; cb(null, c); } }), fs.createWriteStream(tmp));
+            const merged = { ct: o.ct || srcMeta.ct, cc: o.cc !== undefined ? o.cc : srcMeta.cc, meta: o.meta || srcMeta.meta };
+            const m = await a.put(newKey, tmp, size, h.digest('hex'), merged);
+            if (a === drive) { if (local) await local.delKey(newKey).catch(() => {}); return tag(m, 'drive'); }
+            return m;
+        } finally { fsp.unlink(tmp).catch(() => {}); }
+    }
+    async function* scan() {
+        const seen = new Set();
+        if (local) for await (const m of local.scan()) { seen.add(m.key); yield m; }
+        try { for await (const m of drive.scan()) if (!seen.has(m.key)) yield tag(m, 'drive'); }
+        catch (e) { if (!isLocalMode()) throw e; }
+    }
+    return { find, put, open, delKey, copy, scan, quota: () => drive.quota() };
+}
+
 function createGateway(cfg) {
-    const drive = cfg.store || createDriveStore(cfg);
+    const driveRaw = cfg.store || createDriveStore(cfg);
+    const local = cfg.localDir ? createLocalStore(cfg) : null;
+    // saklar penyimpanan: dibaca dari berkas pilihan (bila ada); tanpa S3_LOCAL_DIR selalu mode Drive
+    let modeState = (() => {
+        let st = {};
+        try { st = JSON.parse(fs.readFileSync(cfg.modeFile, 'utf8')); } catch (e) { /* belum pernah diatur */ }
+        let mode = st.mode === 'local' || st.mode === 'drive' ? st.mode : (cfg.defaultMode === 'local' ? 'local' : 'drive');
+        if (mode === 'local' && !local) mode = 'drive';
+        return { mode, changedAt: st.changedAt || null, changedBy: st.changedBy || null };
+    })();
+    const drive = createRoutedStore({ drive: driveRaw, local, getMode: () => modeState.mode, tmpName: () => tmpName() });
     const cache = new DiskCache(cfg.cacheDir, (cfg.cacheMaxMb || 0) * 1024 * 1024);
     const cacheFileMax = (cfg.cacheFileMaxMb || 25) * 1024 * 1024;
     const spool = cfg.spoolDir;
@@ -457,6 +638,11 @@ function createGateway(cfg) {
         if (headOnly) { res.writeHead(200, h); return res.end(); }
         res.writeHead(range ? 206 : 200, h);
         if (m.size === 0) return res.end();
+        if (m.store === 'local') { // berkas di disk server: langsung dialirkan (tanpa cache)
+            const rs = fs.createReadStream(m.localPath, range ? { start: range.start, end: range.end } : undefined);
+            rs.on('error', () => { metaCache.delete(key); res.destroy(); });
+            return void rs.pipe(res);
+        }
         const cached = cache.get(key);
         if (cached) {
             const rs = fs.createReadStream(cached, range ? { start: range.start, end: range.end } : undefined);
@@ -625,15 +811,63 @@ function createGateway(cfg) {
         xml(res, 200, out + '</ListBucketResult>');
     }
 
-    // ----- health -----
-    let healthAt = 0, healthVal = null;
-    async function health(res) {
-        if (Date.now() - healthAt > 60000) {
+    // ----- health + saklar penyimpanan -----
+    let healthAt = 0, driveVal = null;
+    async function driveHealth(force) {
+        if (force || Date.now() - healthAt > 60000) {
             healthAt = Date.now();
-            try { const qt = await drive.quota(); healthVal = { ok: true, drive: 'ok', usage: Number(qt.usage || 0), limit: qt.limit ? Number(qt.limit) : null }; }
-            catch (e) { healthVal = { ok: false, drive: String(e.message).slice(0, 200) }; }
+            try { const qt = await driveRaw.quota(); driveVal = { ok: true, usage: Number(qt.usage || 0), limit: qt.limit ? Number(qt.limit) : null }; }
+            catch (e) { driveVal = { ok: false, error: String(e.message).slice(0, 200) }; }
         }
-        send(res, healthVal.ok ? 200 : 503, { 'Content-Type': 'application/json' }, JSON.stringify({ ...healthVal, cacheBytes: cache.total, cacheFiles: cache.idx.size }));
+        return driveVal;
+    }
+    async function localHealth() {
+        if (!local) return null;
+        try { await local.check(); return { ok: true, path: local.root, ...(await local.space()) }; }
+        catch (e) { return { ok: false, path: local.root, error: String(e.message).slice(0, 200) }; }
+    }
+    async function health(res) {
+        const d = await driveHealth(), l = await localHealth();
+        const ok = modeState.mode === 'local' ? !!(l && l.ok) : d.ok;
+        const body = { ok, mode: modeState.mode, drive: d.ok ? 'ok' : d.error, ...(d.ok ? { usage: d.usage, limit: d.limit } : {}), local: l, cacheBytes: cache.total, cacheFiles: cache.idx.size };
+        send(res, ok ? 200 : 503, { 'Content-Type': 'application/json' }, JSON.stringify(body));
+    }
+    async function setMode(mode, by) {
+        if (mode !== 'drive' && mode !== 'local') throw new S3Error(400, 'InvalidArgument', 'Mode harus "drive" atau "local".');
+        if (mode === 'local') {
+            if (!local) throw new S3Error(400, 'LocalNotConfigured', 'Penyimpanan server belum diatur (isi S3_LOCAL_DIR di .env lalu restart gerbang).');
+            try { await local.check(); } catch (e) { throw new S3Error(400, 'LocalNotWritable', 'Folder penyimpanan server tidak bisa ditulis: ' + e.message); }
+        } else {
+            const d = await driveHealth(true);
+            if (!d.ok) throw new S3Error(400, 'DriveUnavailable', 'Google Drive tidak bisa dipakai saat ini: ' + d.error);
+        }
+        modeState = { mode, changedAt: new Date().toISOString(), changedBy: by ? String(by).slice(0, 80) : null };
+        if (cfg.modeFile) { const tmp = cfg.modeFile + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(modeState)); fs.renameSync(tmp, cfg.modeFile); }
+        console.log('[S3] Saklar penyimpanan: unggahan baru ke ' + (mode === 'local' ? 'SERVER' : 'GOOGLE DRIVE'));
+        return modeState;
+    }
+    const json = (res, st, o) => send(res, st, { 'Content-Type': 'application/json' }, JSON.stringify(o));
+    async function admin(req, res, rawPath) {
+        try {
+            if (!/^(::1|127\.0\.0\.1|::ffff:127\.0\.0\.1)$/.test(req.socket.remoteAddress || '')) throw new S3Error(403, 'AccessDenied', 'API admin hanya dapat diakses dari server ini.');
+            const given = Buffer.from(String(req.headers['x-admin-token'] || '')), want = Buffer.from(cfg.adminToken || cfg.secretKey || '');
+            if (!want.length || given.length !== want.length || !crypto.timingSafeEqual(given, want)) throw new S3Error(403, 'AccessDenied', 'Token admin salah.');
+            if (rawPath === '/__admin/status' && req.method === 'GET') {
+                const d = await driveHealth(), l = await localHealth();
+                return json(res, 200, { status: 'success', mode: modeState.mode, changedAt: modeState.changedAt, drive: d, local: l ? { available: true, ...l } : { available: false } });
+            }
+            if (rawPath === '/__admin/mode' && req.method === 'POST') {
+                let body = {};
+                try { body = JSON.parse((await readSmallBody(req, 4096)) || '{}'); } catch (e) { throw new S3Error(400, 'MalformedJSON', 'Badan permintaan bukan JSON.'); }
+                const st = await setMode(body.mode, body.by);
+                return json(res, 200, { status: 'success', mode: st.mode, changedAt: st.changedAt });
+            }
+            throw new S3Error(404, 'NotFound', 'Rute admin tidak ada.');
+        } catch (e) {
+            if (e instanceof S3Error) return json(res, e.status, { status: 'error', code: e.code, message: e.message });
+            console.error('[S3] admin error: ' + e.message);
+            return json(res, 500, { status: 'error', message: e.message });
+        }
     }
 
     // ----- router -----
@@ -647,6 +881,7 @@ function createGateway(cfg) {
 
     async function handle(req, res, rawPath, rawQuery) {
         if (rawPath === '/__health' && req.method === 'GET') return health(res);
+        if (rawPath.startsWith('/__admin/')) return admin(req, res, rawPath);
         verifyRequest(req, rawPath, rawQuery, cfg);
         const params = new URLSearchParams(rawQuery);
         const segs = rawPath.split('/').filter((s, i) => i > 0);
@@ -701,7 +936,7 @@ function createGateway(cfg) {
     const sweeper = setInterval(sweepSpool, 3600 * 1000);
     sweeper.unref();
 
-    return { server, drive, cache, sweepSpool, close: () => new Promise((r) => { clearInterval(sweeper); server.close(() => r()); server.closeAllConnections && server.closeAllConnections(); }) };
+    return { server, drive: driveRaw, store: drive, local, getMode: () => modeState.mode, setMode, cache, sweepSpool, close: () => new Promise((r) => { clearInterval(sweeper); server.close(() => r()); server.closeAllConnections && server.closeAllConnections(); }) };
 }
 
 function configFromEnv() {
@@ -722,10 +957,14 @@ function configFromEnv() {
         cacheFileMaxMb: Number(e.S3_CACHE_FILE_MAX_MB) || 25,
         spoolDir: e.S3_SPOOL_DIR || path.join(os.tmpdir(), 'pusaka-drive-s3-spool'),
         log: e.S3_LOG === '1',
+        localDir: e.S3_LOCAL_DIR || '',
+        modeFile: e.S3_MODE_FILE || path.join(__dirname, 'storage-mode.json'),
+        defaultMode: e.S3_DEFAULT_MODE || 'drive',
+        adminToken: e.S3_GATEWAY_ADMIN_TOKEN || '',
     };
 }
 
-module.exports = { createGateway, createDriveStore, configFromEnv, sigV4Signature, canonicalQuery, AwsChunkedDecoder, keyHash, loadDotEnv };
+module.exports = { createGateway, createDriveStore, createLocalStore, guessMime, configFromEnv, sigV4Signature, canonicalQuery, AwsChunkedDecoder, keyHash, loadDotEnv };
 
 if (require.main === module) {
     loadDotEnv();
@@ -736,7 +975,7 @@ if (require.main === module) {
         process.exit(1);
     }
     const gw = createGateway(cfg);
-    gw.server.listen(cfg.port, cfg.host, () => console.log('[S3] Gerbang S3→Google Drive berjalan di ' + cfg.host + ':' + cfg.port + ' (cache ' + cfg.cacheDir + ', maks ' + cfg.cacheMaxMb + ' MB)'));
+    gw.server.listen(cfg.port, cfg.host, () => console.log('[S3] Gerbang S3→Google Drive berjalan di ' + cfg.host + ':' + cfg.port + ' (mode unggahan: ' + gw.getMode() + (cfg.localDir ? ', folder server ' + cfg.localDir : ', S3_LOCAL_DIR belum diatur') + ', cache ' + cfg.cacheDir + ' maks ' + cfg.cacheMaxMb + ' MB)'));
     process.on('unhandledRejection', (e) => console.error('[S3] unhandledRejection:', e && e.message));
     const stop = () => gw.close().then(() => process.exit(0));
     process.on('SIGTERM', stop);
