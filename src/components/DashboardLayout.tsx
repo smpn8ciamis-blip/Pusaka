@@ -400,7 +400,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         { icon: Upload, label: 'Upload Foto Massal', href: '/bulk-photo-upload' },
         { icon: Upload, label: 'Manajemen Upload Berkas', href: '/file-upload-management' },
         { icon: Bell, label: 'Billing Dashboard', href: '/billing-dashboard' },
-        { icon: Server, label: 'Sistem Informasi', href: '/system-info' },
+        { icon: Server, label: 'Monitoring Server', href: '/system-info' },
         { icon: Gauge, label: 'Uji Server', href: '/uji-server' },
       ],
     },
