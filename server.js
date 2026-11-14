@@ -3534,6 +3534,41 @@ async function checkBackupSchedule() {
     } catch (e) { console.error('[BACKUP SCHEDULE ERROR]:', e.message); }
 }
 
+// ===== Saklar penyimpanan berkas: Google Drive atau disk server =====
+// Gerbang S3 (drive-s3-gateway.cjs, proses PM2 "drive-s3") menentukan tempat unggahan baru; bot hanya meneruskan perintah admin
+// (hanya admin/super_admin) ke API admin gerbang di 127.0.0.1. Tidak ada polling.
+const S3_GATEWAY_URL = (process.env.S3_GATEWAY_URL || ('http://127.0.0.1:' + (process.env.S3_GATEWAY_PORT || 9100))).replace(/\/$/, '');
+async function s3GatewayAdmin(pathname, method, body) {
+    const token = process.env.S3_GATEWAY_ADMIN_TOKEN || process.env.S3_GATEWAY_SECRET_KEY || '';
+    if (!token) { const e = new Error('S3_GATEWAY_SECRET_KEY (atau S3_GATEWAY_ADMIN_TOKEN) belum diisi di .env bot.'); e.http = 400; throw e; }
+    let r;
+    try {
+        r = await fetch(S3_GATEWAY_URL + pathname, { method: method, headers: { 'x-admin-token': token, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000) });
+    } catch (e) {
+        const er = new Error('Gerbang penyimpanan tidak berjalan atau tidak dapat dihubungi di ' + S3_GATEWAY_URL + '. Jalankan di server: pm2 start drive-s3-gateway.cjs --name drive-s3');
+        er.http = 400; er.unreachable = true; throw er;
+    }
+    const j = await r.json().catch(function() { return {}; });
+    if (!r.ok) {
+        const er = new Error(r.status === 403 ? 'Token ke gerbang penyimpanan ditolak. Pastikan .env bot dan gerbang memakai S3_GATEWAY_SECRET_KEY yang sama.' : (j.message || ('Gerbang penyimpanan membalas error ' + r.status)));
+        er.http = 400; throw er;
+    }
+    return j;
+}
+app.get('/admin/storage/status', requireAdmin, async function(req, res) {
+    try { const j = await s3GatewayAdmin('/__admin/status', 'GET'); res.json(Object.assign({}, j, { status: 'success', reachable: true })); }
+    catch (e) { res.json({ status: 'success', reachable: false, message: e.message }); }
+});
+app.post('/admin/storage/mode', requireAdmin, async function(req, res) {
+    const mode = req.body && req.body.mode;
+    if (mode !== 'drive' && mode !== 'local') return res.status(400).json({ status: 'error', message: 'mode harus "drive" atau "local".' });
+    try {
+        const j = await s3GatewayAdmin('/__admin/mode', 'POST', { mode: mode, by: req.adminUserId });
+        console.log('[STORAGE] saklar penyimpanan -> ' + mode + ' oleh ' + req.adminUserId);
+        res.json(Object.assign({}, j, { status: 'success' }));
+    } catch (e) { res.status(e.http || 400).json({ status: 'error', message: e.message }); }
+});
+
 app.get('/admin/backup/status', requireAdmin, function(req, res) {
     const t = readGdriveToken();
     res.json({ status: 'success', google_configured: !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET), connected: !!(t && t.refresh_token), contacts_granted: hasContactsScope(t), email: (t && t.email) || null, running: backupRunning || contactsRunning, redirect_uri: GOOGLE_REDIRECT_URI });
