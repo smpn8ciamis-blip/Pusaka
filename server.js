@@ -3534,6 +3534,184 @@ async function checkBackupSchedule() {
     } catch (e) { console.error('[BACKUP SCHEDULE ERROR]:', e.message); }
 }
 
+// ===== Monitoring server (real-time): CPU, RAM, disk, jaringan, proses, container Docker =====
+// Dibaca dari /proc dan `df`/`docker stats` di VPS ini, hanya saat admin membuka halaman Monitoring Server (tanpa polling di server).
+// <<SERVER_METRICS
+const { execFile } = require('child_process');
+const metricsState = { prev: null, last: null, lastAt: 0, inflight: null, disk: { at: 0, data: [] }, docker: { at: 0, data: null, inflight: false } };
+const readProcFile = function(p) { try { return fs.readFileSync(p, 'utf8'); } catch (e) { return null; } };
+function parseCpuStat(txt) {
+    const out = { total: null, cores: [] };
+    String(txt).split('\n').forEach(function(line) {
+        const m = /^(cpu\d*)\s+(.*)$/.exec(line);
+        if (!m) return;
+        const n = m[2].trim().split(/\s+/).map(Number); // user nice system idle iowait irq softirq steal
+        const rec = { idle: (n[3] || 0) + (n[4] || 0), total: n.slice(0, 8).reduce(function(a, b) { return a + (b || 0); }, 0) };
+        if (m[1] === 'cpu') out.total = rec; else out.cores.push(rec);
+    });
+    return out;
+}
+function parseMeminfo(txt) {
+    const g = {};
+    String(txt).split('\n').forEach(function(line) { const m = /^(\w+):\s+(\d+)\s*kB/.exec(line); if (m) g[m[1]] = Number(m[2]) * 1024; });
+    const total = g.MemTotal || 0;
+    const avail = g.MemAvailable !== undefined ? g.MemAvailable : (g.MemFree || 0) + (g.Buffers || 0) + (g.Cached || 0);
+    const used = Math.max(0, total - avail);
+    const swapTotal = g.SwapTotal || 0, swapUsed = Math.max(0, swapTotal - (g.SwapFree || 0));
+    return { total: total, used: used, available: avail, free: g.MemFree || 0, cached: (g.Cached || 0) + (g.SReclaimable || 0), buffers: g.Buffers || 0, percent: total ? Math.round(used / total * 1000) / 10 : 0, swapTotal: swapTotal, swapUsed: swapUsed };
+}
+function parseNetDev(txt) {
+    let rx = 0, tx = 0; const ifs = [];
+    String(txt).split('\n').slice(2).forEach(function(line) {
+        const m = /^\s*([^:\s]+):\s*(.*)$/.exec(line);
+        if (!m) return;
+        if (m[1] === 'lo' || /^(veth|docker|br-|virbr|tun|tap|cali|flannel|cni)/.test(m[1])) return;
+        const f = m[2].trim().split(/\s+/).map(Number);
+        rx += f[0] || 0; tx += f[8] || 0; ifs.push(m[1]);
+    });
+    return { rx: rx, tx: tx, ifs: ifs };
+}
+function parseDf(txt) {
+    const seen = new Map();
+    String(txt).split('\n').slice(1).forEach(function(line) {
+        const m = /^(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/.exec(line);
+        if (!m) return;
+        const mount = m[6];
+        if (/^\/(proc|sys|dev|run)(\/|$)/.test(mount) || /^\/(var\/lib\/docker|snap)\//.test(mount)) return;
+        const total = Number(m[2]), used = Number(m[3]), free = Number(m[4]);
+        if (!total) return;
+        const rec = { fs: m[1], mount: mount, total: total, used: used, free: free, percent: Math.round(used / Math.max(1, used + free) * 1000) / 10 };
+        const prev = seen.get(m[1]);
+        if (!prev || mount.length < prev.mount.length) seen.set(m[1], rec);
+    });
+    return Array.from(seen.values()).sort(function(a, b) { return a.mount === '/' ? -1 : b.mount === '/' ? 1 : a.mount.localeCompare(b.mount); });
+}
+function parseDockerStats(txt) {
+    const rows = [];
+    String(txt).split('\n').forEach(function(line) {
+        if (!line.trim()) return;
+        try {
+            const j = JSON.parse(line);
+            rows.push({ name: j.Name, cpu: parseFloat(j.CPUPerc) || 0, memPercent: parseFloat(j.MemPerc) || 0, memUsage: j.MemUsage || '', netIO: j.NetIO || '', blockIO: j.BlockIO || '', pids: Number(j.PIDs) || 0 });
+        } catch (e) { /* baris tidak valid */ }
+    });
+    return rows.sort(function(a, b) { return b.cpu - a.cpu || b.memPercent - a.memPercent; });
+}
+function readProcs() {
+    const map = new Map();
+    let pids;
+    try { pids = fs.readdirSync('/proc').filter(function(x) { return /^\d+$/.test(x); }); } catch (e) { return map; }
+    pids.forEach(function(pid) {
+        const st = readProcFile('/proc/' + pid + '/stat');
+        if (!st) return;
+        const open = st.indexOf('('), close = st.lastIndexOf(')');
+        if (open < 0 || close < 0) return;
+        const f = st.slice(close + 2).split(' '); // f[11]=utime f[12]=stime f[21]=rss (halaman)
+        map.set(Number(pid), { name: st.slice(open + 1, close), ticks: (Number(f[11]) || 0) + (Number(f[12]) || 0), rss: (Number(f[21]) || 0) * 4096 });
+    });
+    return map;
+}
+function cpuFallback() { // bukan Linux (mis. pengembangan di laptop)
+    const cs = os.cpus();
+    const rec = function(c) { const t = c.times; return { idle: t.idle, total: t.user + t.nice + t.sys + t.idle + t.irq }; };
+    const cores = cs.map(rec);
+    return { total: { idle: cores.reduce(function(a, c) { return a + c.idle; }, 0), total: cores.reduce(function(a, c) { return a + c.total; }, 0) }, cores: cores };
+}
+function rawSample() {
+    const cpuTxt = readProcFile('/proc/stat'), netTxt = readProcFile('/proc/net/dev');
+    return { t: Date.now(), cpu: cpuTxt ? parseCpuStat(cpuTxt) : cpuFallback(), net: netTxt ? parseNetDev(netTxt) : { rx: 0, tx: 0, ifs: [] }, procs: readProcs() };
+}
+const pct = function(idle, total) { return total > 0 ? Math.max(0, Math.min(100, Math.round((1 - idle / total) * 1000) / 10)) : 0; };
+// Selisih dua cuplikan -> persen CPU, kecepatan jaringan, persen CPU per proses (100% = 1 inti penuh, seperti `top`).
+function computeDelta(prev, cur) {
+    const dt = Math.max(0.001, (cur.t - prev.t) / 1000);
+    const dTotal = cur.cpu.total.total - prev.cpu.total.total;
+    const cores = cur.cpu.cores.map(function(c, i) { const p = prev.cpu.cores[i]; return p ? pct(c.idle - p.idle, c.total - p.total) : 0; });
+    const nCores = Math.max(1, cur.cpu.cores.length);
+    const perCoreJiffies = dTotal / nCores;
+    const procs = [];
+    cur.procs.forEach(function(v, pid) {
+        const p = prev.procs.get(pid);
+        const cpu = p && perCoreJiffies > 0 ? Math.max(0, (v.ticks - p.ticks) / perCoreJiffies * 100) : 0;
+        procs.push({ pid: pid, name: v.name, cpu: Math.round(cpu * 10) / 10, rss: v.rss });
+    });
+    return {
+        dt: dt, cpu: pct(cur.cpu.total.idle - prev.cpu.total.idle, dTotal), cores: cores,
+        rxBps: Math.max(0, (cur.net.rx - prev.net.rx) / dt), txBps: Math.max(0, (cur.net.tx - prev.net.tx) / dt), procs: procs,
+    };
+}
+function runCmd(cmd, args, timeout) {
+    return new Promise(function(resolve, reject) {
+        execFile(cmd, args, { timeout: timeout, maxBuffer: 4 * 1024 * 1024 }, function(err, stdout) { if (err) reject(err); else resolve(String(stdout)); });
+    });
+}
+async function readDisks() {
+    if (Date.now() - metricsState.disk.at < 10000) return metricsState.disk.data;
+    let rows = [];
+    try { rows = parseDf(await runCmd('df', ['-PB1', '-x', 'tmpfs', '-x', 'devtmpfs', '-x', 'squashfs', '-x', 'overlay'], 5000)); } catch (e) { rows = []; }
+    if (!rows.length) { try { rows = parseDf(await runCmd('df', ['-PB1', '-x', 'tmpfs', '-x', 'devtmpfs', '-x', 'squashfs'], 5000)); } catch (e) { rows = []; } }
+    metricsState.disk = { at: Date.now(), data: rows };
+    return rows;
+}
+// `docker stats` lambat (1-5 dtk): dijalankan di latar belakang, hasil terakhir dipakai (maks. 5 dtk usang)
+function refreshDocker() {
+    const d = metricsState.docker;
+    if (d.inflight || Date.now() - d.at < 5000) return;
+    d.inflight = true;
+    runCmd('docker', ['stats', '--no-stream', '--format', '{{json .}}'], 15000)
+        .then(function(out) { d.data = { available: true, containers: parseDockerStats(out) }; })
+        .catch(function(e) { d.data = { available: false, error: String(e.message || e).split('\n')[0].slice(0, 200) }; })
+        .then(function() { d.at = Date.now(); d.inflight = false; });
+}
+function cmdOf(pid, fallback) {
+    const raw = readProcFile('/proc/' + pid + '/cmdline');
+    if (!raw) return fallback;
+    const parts = raw.split('\0').filter(Boolean);
+    if (!parts.length) return fallback;
+    const shown = parts.map(function(x, i) { return i === 0 || x.startsWith('-') ? path.basename(x) : (x.startsWith('/') ? path.basename(x) : x); });
+    return shown.join(' ').slice(0, 80);
+}
+async function buildMetrics(prev, cur) {
+    const d = computeDelta(prev, cur);
+    const memTxt = readProcFile('/proc/meminfo');
+    const memory = memTxt ? parseMeminfo(memTxt) : (function() { const t = os.totalmem(), f = os.freemem(); return { total: t, used: t - f, available: f, free: f, cached: 0, buffers: 0, percent: Math.round((t - f) / t * 1000) / 10, swapTotal: 0, swapUsed: 0 }; })();
+    const disk = await readDisks();
+    refreshDocker();
+    const top = function(list) { return list.map(function(p) { return { pid: p.pid, name: p.name, cmd: cmdOf(p.pid, p.name), cpu: p.cpu, rss: p.rss, memPercent: memory.total ? Math.round(p.rss / memory.total * 1000) / 10 : 0 }; }); };
+    const byCpu = top(d.procs.slice().sort(function(a, b) { return b.cpu - a.cpu || b.rss - a.rss; }).slice(0, 8));
+    const byMem = top(d.procs.slice().sort(function(a, b) { return b.rss - a.rss; }).slice(0, 8));
+    const cs = os.cpus();
+    return {
+        status: 'success', t: cur.t, intervalSec: Math.round(d.dt * 10) / 10,
+        host: { hostname: os.hostname(), os: os.type() + ' ' + os.release(), arch: os.arch(), uptime: os.uptime(), cpuModel: cs[0] ? cs[0].model : '', cores: cs.length, node: process.version },
+        cpu: { percent: d.cpu, perCore: d.cores, load: os.loadavg() },
+        memory: memory, disk: disk,
+        network: { rxBps: d.rxBps, txBps: d.txBps, rxTotal: cur.net.rx, txTotal: cur.net.tx, interfaces: cur.net.ifs },
+        processes: { total: cur.procs.size, byCpu: byCpu, byMem: byMem },
+        docker: metricsState.docker.data,
+    };
+}
+async function getServerMetrics() {
+    if (metricsState.last && Date.now() - metricsState.lastAt < 1000) return metricsState.last; // beberapa admin sekaligus: pakai cuplikan yang sama
+    if (metricsState.inflight) return metricsState.inflight;
+    metricsState.inflight = (async function() {
+        try {
+            let prev = metricsState.prev;
+            if (!prev || Date.now() - prev.t > 30000) { prev = rawSample(); await new Promise(function(r) { setTimeout(r, 600); }); } // cuplikan pertama: ukur 0,6 dtk
+            const cur = rawSample();
+            const out = await buildMetrics(prev, cur);
+            metricsState.prev = cur; metricsState.last = out; metricsState.lastAt = Date.now();
+            return out;
+        } finally { metricsState.inflight = null; }
+    })();
+    return metricsState.inflight;
+}
+// SERVER_METRICS>>
+app.get('/admin/server-metrics', requireAdmin, async function(req, res) {
+    try { res.json(await getServerMetrics()); }
+    catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
+});
+
 // ===== Saklar penyimpanan berkas: Google Drive atau disk server =====
 // Gerbang S3 (drive-s3-gateway.cjs, proses PM2 "drive-s3") menentukan tempat unggahan baru; bot hanya meneruskan perintah admin
 // (hanya admin/super_admin) ke API admin gerbang di 127.0.0.1. Tidak ada polling.

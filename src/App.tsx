@@ -361,7 +361,7 @@ const App = () => (
               <Route path="/whatsapp-bot" element={<ProtectedRoute requireRole="admin"><WhatsAppBotSettings /></ProtectedRoute>} />
               <Route path="/fingerprint" element={<ProtectedRoute requireRole="admin"><FingerprintSettings /></ProtectedRoute>} />
               <Route path="/uji-server" element={<ProtectedRoute allowedRoles={['admin', 'super_admin']}><ServerTest /></ProtectedRoute>} />
-              <Route path="/system-info" element={<ProtectedRoute requireRole="admin"><SystemInfo /></ProtectedRoute>} />
+              <Route path="/system-info" element={<ProtectedRoute allowedRoles={['admin', 'super_admin']}><SystemInfo /></ProtectedRoute>} />
               <Route path="/bulk-photo-upload" element={<ProtectedRoute requireRole="admin"><BulkPhotoUpload /></ProtectedRoute>} />
               <Route path="/guru-piket-dashboard" element={<ProtectedRoute allowedRoles={['guru_piket', 'admin']}><GuruPiketDashboard /></ProtectedRoute>} />
               <Route path="/dispensasi-siswa" element={<ProtectedRoute allowedRoles={['guru_piket', 'admin', 'kesiswaan']}><DispensasiSiswa /></ProtectedRoute>} />
