@@ -3,7 +3,7 @@
 // Butuh Node 18+ (tanpa paket tambahan). Lihat README.md.
 //
 //   node loadtest.mjs seed    --students 200 --questions 40
-//   node loadtest.mjs run     --students 200 --duration 180 --save-every 30
+//   node loadtest.mjs run     --students 200 --duration 180 --save-every 45
 //   node loadtest.mjs cleanup
 //
 // Env: SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY (SERVICE_ROLE_KEY hanya untuk seed & cleanup)
@@ -151,15 +151,13 @@ async function student(u, o) {
     const qids = paper.json.questions.map((q) => q.id);
     const answers = {};
     const endAt = Date.now() + o.duration * 1000;
-    const pending = {};
     let nextSave = Date.now() + o.saveEvery * 1000 * (0.7 + Math.random() * 0.6);
     while (Date.now() < endAt) {
       await sleep(1000 + rand(2500)); // membaca & memilih jawaban
-      if (Math.random() < 0.7) { const q = qids[rand(qids.length)]; const v = 'ABCD'[rand(4)]; answers[q] = v; pending[q] = v; }
+      if (Math.random() < 0.7) { const q = qids[rand(qids.length)]; const v = 'ABCD'[rand(4)]; answers[q] = v; }
       if (Date.now() >= nextSave) {
-        const sent = { ...pending };
-        await rpc('cbt_save_progress', { p_session_id: sessionId, p_answers: sent, p_essays: {}, p_time_remaining: Math.max(0, Math.round((endAt - Date.now()) / 1000)) });
-        for (const k of Object.keys(sent)) delete pending[k];
+        // mode ringan: jawaban hanya di perangkat; server menerima denyut kecil (jumlah terjawab + sisa waktu)
+        await rpc('cbt_heartbeat', { p_session_id: sessionId, p_answered: Object.keys(answers).length, p_time_remaining: Math.max(0, Math.round((endAt - Date.now()) / 1000)) });
         nextSave = Date.now() + o.saveEvery * 1000 * (0.7 + Math.random() * 0.6);
       }
     }
@@ -174,7 +172,7 @@ async function run() {
   const st = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
   const n = Math.min(num('students', st.users.length), st.users.length);
   const o = {
-    examId: st.examId, duration: num('duration', 180), saveEvery: num('save-every', 30),
+    examId: st.examId, duration: num('duration', 180), saveEvery: num('save-every', 45),
     ramp: args['sync-start'] ? 0 : num('ramp', 20), syncSubmit: !!args['sync-submit'], submitSpread: num('submit-spread', 20),
   };
   const users = st.users.slice(0, n).map((u) => ({ ...u, token: null }));

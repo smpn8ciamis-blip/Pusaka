@@ -22,14 +22,14 @@ export SERVICE_ROLE_KEY="<service role key>"   # hanya untuk seed & cleanup
    ```bash
    node loadtest.mjs seed --students 200 --questions 40
    ```
-2. **Jalankan uji** (180 detik, siswa memulai bertahap dalam 20 detik, simpan jawaban tiap ~30 detik seperti aplikasi asli):
+2. **Jalankan uji** (180 detik, siswa memulai bertahap dalam 20 detik, kirim denyut ringan tiap ~45 detik dan mengumpulkan semua jawaban di akhir, seperti aplikasi asli (butuh migrasi `20261116100000_cbt_lokal_heartbeat.sql`)):
    ```bash
    node loadtest.mjs run --students 200 --duration 180
    ```
    Opsi penting:
    - `--sync-start` semua siswa menekan Mulai di detik yang sama (skenario terburuk, lonjakan memuat soal)
    - `--sync-submit` semua siswa mengumpulkan serentak (lonjakan tulis)
-   - `--save-every 10` simpan lebih sering dari biasa (uji ketahanan lebih berat)
+   - `--save-every 10` denyut lebih sering dari biasa (uji ketahanan lebih berat)
    - `--ramp 60` sebar waktu mulai selama 60 detik
    - `--login-rate 5` batas login per detik (lihat catatan di bawah)
 3. **Bersihkan**:
@@ -48,7 +48,7 @@ export SERVICE_ROLE_KEY="<service role key>"   # hanya untuk seed & cleanup
 
 ## Membaca hasil
 - **galat** harus 0 atau sangat kecil (< 1%).
-- **p95 ms** untuk `cbt_save_progress` dan `cbt_submit_session` sebaiknya di bawah 2000 ms. `cbt_exam_paper` boleh lebih lambat saat serentak karena membawa seluruh soal (lihat kolom KB/resp).
+- **p95 ms** untuk `cbt_heartbeat` dan `cbt_submit_session` sebaiknya di bawah 2000 ms. `cbt_exam_paper` boleh lebih lambat saat serentak karena membawa seluruh soal (lihat kolom KB/resp).
 - Hasil `LOLOS` berarti galat < 1% dan p95 < 2 detik.
 - Bila `login` banyak gagal: GoTrue membatasi laju masuk per IP. Turunkan `--login-rate`, atau naikkan `GOTRUE_RATE_LIMIT_TOKEN_REFRESH`/`GOTRUE_RATE_LIMIT_SIGN_IN_SIGN_UPS` di pengaturan Supabase Anda untuk sementara. Token login berlaku sekitar 1 jam, jadi jalankan `run` tidak lebih dari 1 jam setelah login.
 
