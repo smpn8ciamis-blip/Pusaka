@@ -33,6 +33,8 @@ const VerifyStudent = lazy(() => import("./pages/VerifyStudent"));
 const VerifyReport = lazy(() => import("./pages/VerifyReport"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const HomeroomAttendance = lazy(() => import("./pages/HomeroomAttendance"));
+const KaihJournal = lazy(() => import("./pages/KaihJournal"));
+const KaihMonitor = lazy(() => import("./pages/KaihMonitor"));
 const ClassStudentAccounts = lazy(() => import("./pages/ClassStudentAccounts"));
 const Announcements = lazy(() => import("./pages/Announcements"));
 const StudentAttendanceReport = lazy(() => import("./pages/StudentAttendanceReport"));
@@ -276,6 +278,8 @@ const App = () => (
               <Route path="/elearning" element={<ProtectedRoute allowedRoles={['teacher']}><Elearning /></ProtectedRoute>} />
               <Route path="/repository" element={<ProtectedRoute><Repository /></ProtectedRoute>} />
               <Route path="/homeroom-attendance" element={<ProtectedRoute><HomeroomAttendance /></ProtectedRoute>} />
+              <Route path="/jurnal-kaih" element={<ProtectedRoute allowedRoles={['siswa']}><KaihJournal /></ProtectedRoute>} />
+              <Route path="/pantau-kaih" element={<ProtectedRoute allowedRoles={['teacher', 'kesiswaan', 'admin', 'super_admin']}><KaihMonitor /></ProtectedRoute>} />
               <Route path="/akun-siswa" element={<ProtectedRoute allowedRoles={['teacher', 'admin', 'super_admin', 'kesiswaan']}><ClassStudentAccounts /></ProtectedRoute>} />
               <Route path="/announcements" element={<ProtectedRoute><Announcements /></ProtectedRoute>} />
               <Route path="/student-attendance-report" element={<ProtectedRoute><StudentAttendanceReport /></ProtectedRoute>} />
