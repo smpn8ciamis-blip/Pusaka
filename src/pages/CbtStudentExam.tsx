@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -9,13 +9,21 @@ import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Clock, CheckCircle, FileText, Play, KeyRound, RotateCcw, AlertTriangle, Shield, ShieldAlert } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { Clock, CheckCircle, FileText, Play, KeyRound, RotateCcw, AlertTriangle, Shield, ShieldAlert, HardDriveDownload, Maximize } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { id as idLocale } from 'date-fns/locale';
 import { RichTextDisplay } from '@/components/cbt/RichTextEditor';
+import { useCbtAntiCheat } from '@/hooks/useCbtAntiCheat';
+import { createDeadline, violationLabel } from '@/lib/cbtAntiCheat';
+import {
+  clearProgress, deletePaper, emptyProgress, loadPaper, loadProgress, makeImageUrlMap, prefetchPaper, purgeOldPapers, purgeOldProgress,
+  releaseTabLock, resumeTimeLeft, rewriteImages, saveProgress, tryAcquireTabLock,
+  type LocalProgress, type PrefetchProgress, type StoredPaper,
+} from '@/lib/cbtLocal';
 
 // Urutan acak yang stabil per sesi (tetap sama saat siswa melanjutkan ujian)
 const seededShuffle = <T,>(arr: T[], seedStr: string): T[] => {
@@ -29,18 +37,27 @@ const seededShuffle = <T,>(arr: T[], seedStr: string): T[] => {
 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const isFinished = (st: string) => st === 'completed' || st === 'timeout';
+const isMissingRpc = (e: any) => e?.code === 'PGRST202' || e?.code === '42883' || /could not find the function/i.test(e?.message || '');
 
-// Beban server dijaga ringan: 1 panggilan daftar ujian, 1 panggilan memuat soal, lalu simpan berkala
-// HANYA jawaban yang berubah (sekitar tiap 30 detik, dengan jeda acak agar ratusan siswa tidak serentak).
-const SAVE_INTERVAL_MS = 30000;
-const SAVE_DEBOUNCE_MS = 8000;
+// Mode ringan: semua soal diunduh sekali ke perangkat, jawaban disimpan di perangkat (localStorage) dan
+// HANYA dikirim ke server saat siswa menekan Selesai / waktu habis. Selama ujian server hanya menerima
+// denyut kecil (jumlah soal terjawab + sisa waktu, tanpa isi jawaban) yang juga membawa status jeda/akhiri dari pengawas.
+const HEARTBEAT_MS = 45000;
+const HEARTBEAT_PAUSED_MS = 15000;
+const LOCAL_SAVE_DEBOUNCE_MS = 300;
+
+interface PrepState { open: boolean; percent: number; label: string; imagesDone: number; imagesTotal: number; error: string | null; examTitle: string; canRetry: boolean }
+const PREP_CLOSED: PrepState = { open: false, percent: 0, label: '', imagesDone: 0, imagesTotal: 0, error: null, examTitle: '', canRetry: false };
 
 export default function CbtStudentExam() {
+  const { user } = useAuth();
+  const userId = user?.id || 'anon';
   const queryClient = useQueryClient();
   const [activeSession, setActiveSession] = useState<any>(null);
   const [activeExam, setActiveExam] = useState<any>(null);
   const [orderedQuestions, setOrderedQuestions] = useState<any[]>([]);
-  const [loadingPaper, setLoadingPaper] = useState(false);
+  const [imageMap, setImageMap] = useState<Record<string, string>>({});
+  const [prep, setPrep] = useState<PrepState>(PREP_CLOSED);
   const [paused, setPaused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -54,23 +71,30 @@ export default function CbtStudentExam() {
   const [exitTokenOpen, setExitTokenOpen] = useState(false);
   const [exitTokenInput, setExitTokenInput] = useState('');
   const [warningOpen, setWarningOpen] = useState<string | null>(null);
+  const [needFullscreen, setNeedFullscreen] = useState(false);
 
   const sessionRef = useRef<any>(null);
   const examRef = useRef<any>(null);
+  const questionsRef = useRef<any[]>([]);
   const answersRef = useRef<Record<string, string>>({});
   const essaysRef = useRef<Record<string, string>>({});
-  const dirtyAnswersRef = useRef<Record<string, string>>({});
-  const dirtyEssaysRef = useRef<Record<string, string>>({});
-  const deadlineRef = useRef<number>(0);
+  const localRef = useRef<LocalProgress>(emptyProgress());
+  const localTimerRef = useRef<any>(null);
+  const deadlineRef = useRef<ReturnType<typeof createDeadline> | null>(null);
   const timeLeftRef = useRef<number>(0);
   const pausedRef = useRef(false);
   const submittingRef = useRef(false);
-  const savingRef = useRef(false);
-  const debounceRef = useRef<any>(null);
+  const beatingRef = useRef(false);
+  const beginningRef = useRef(false);
+  const violationsRef = useRef(0);
+  const revokeImagesRef = useRef<(() => void) | null>(null);
+  const prepCtxRef = useRef<{ exam: any; token: string | null; session: any; pubExam: any } | null>(null);
+  const tabIdRef = useRef(Math.random().toString(36).slice(2));
 
   useEffect(() => { sessionRef.current = activeSession; examRef.current = activeExam; }, [activeSession, activeExam]);
-  useEffect(() => { answersRef.current = answers; essaysRef.current = essayAnswers; }, [answers, essayAnswers]);
+  useEffect(() => { questionsRef.current = orderedQuestions; }, [orderedQuestions]);
   useEffect(() => { pausedRef.current = paused; }, [paused]);
+  useEffect(() => { purgeOldPapers(); purgeOldProgress(); }, []);
 
   // Satu panggilan: ujian yang boleh diikuti + riwayat sesi siswa (kunci jawaban & token tidak ikut terkirim)
   const { data: overview, isLoading: overviewLoading } = useQuery({
@@ -86,71 +110,75 @@ export default function CbtStudentExam() {
   const availableExams: any[] = overview?.exams || [];
   const existingSessions: any[] = overview?.sessions || [];
 
-  const resetExamState = () => {
-    setActiveSession(null); setActiveExam(null); setAnswers({}); setEssayAnswers({}); setOrderedQuestions([]);
-    setViolations(0); setPaused(false); setTimeLeft(0); setCurrentIdx(0);
-    dirtyAnswersRef.current = {}; dirtyEssaysRef.current = {};
-    if (debounceRef.current) { clearTimeout(debounceRef.current); debounceRef.current = null; }
-  };
+  // ---------- penyimpanan lokal (di perangkat) ----------
+  const persistLocalNow = useCallback(() => {
+    const sess = sessionRef.current;
+    if (!sess) return;
+    if (localTimerRef.current) { clearTimeout(localTimerRef.current); localTimerRef.current = null; }
+    localRef.current.answers = answersRef.current;
+    localRef.current.essays = essaysRef.current;
+    localRef.current.violations = violationsRef.current;
+    localRef.current.timeLeft = timeLeftRef.current;
+    localRef.current.timeAt = Date.now();
+    saveProgress(userId, sess.id, localRef.current);
+  }, [userId]);
+  const persistLocalSoon = useCallback(() => {
+    if (localTimerRef.current) return;
+    localTimerRef.current = setTimeout(() => { localTimerRef.current = null; persistLocalNow(); }, LOCAL_SAVE_DEBOUNCE_MS);
+  }, [persistLocalNow]);
+
+  const countAnswered = () => questionsRef.current.filter((q: any) => (q.question_type === 'essay' ? !!essaysRef.current[q.id] : !!answersRef.current[q.id])).length;
 
   const exitFullscreen = () => { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); };
 
-  const finishLocally = (message: string) => {
+  const resetExamState = () => {
+    const sess = sessionRef.current;
+    if (sess) releaseTabLock(sess.id, tabIdRef.current);
+    revokeImagesRef.current?.(); revokeImagesRef.current = null;
+    setActiveSession(null); setActiveExam(null); setAnswers({}); setEssayAnswers({}); setOrderedQuestions([]); setImageMap({});
+    setViolations(0); setPaused(false); setTimeLeft(0); setCurrentIdx(0); setNeedFullscreen(false); setWarningOpen(null);
+    answersRef.current = {}; essaysRef.current = {}; violationsRef.current = 0; localRef.current = emptyProgress();
+    if (localTimerRef.current) { clearTimeout(localTimerRef.current); localTimerRef.current = null; }
+    sessionRef.current = null; examRef.current = null;
+  };
+
+  /** Ujian selesai / diakhiri: hapus soal dan jawaban dari perangkat. */
+  const finishLocally = (message: string, sessionId?: string) => {
+    const sid = sessionId || sessionRef.current?.id;
+    if (sid) { clearProgress(userId, sid); deletePaper(sid); }
     exitFullscreen();
     resetExamState();
     queryClient.invalidateQueries({ queryKey: ['cbt-student-overview'] });
     toast.success(message);
   };
 
-  // Simpan hanya yang berubah + sisa waktu. Balasan memuat status sesi (dijeda / diakhiri pengawas).
-  const flushProgress = useCallback(async (force = false) => {
-    const sess = sessionRef.current;
-    if (!sess || submittingRef.current || savingRef.current) return;
-    const dA = dirtyAnswersRef.current; const dE = dirtyEssaysRef.current;
-    const hasDirty = Object.keys(dA).length > 0 || Object.keys(dE).length > 0;
-    if (!hasDirty && !force) return;
-    savingRef.current = true;
-    const sentA = { ...dA }; const sentE = { ...dE };
+  // ---------- pelanggaran (anti curang) ----------
+  const sendViolation = async (rec: { type: string; detail: string | null }) => {
+    const sess = sessionRef.current; const exam = examRef.current;
+    if (!sess || !exam) return false;
     try {
-      const { data, error } = await (supabase as any).rpc('cbt_save_progress', {
-        p_session_id: sess.id, p_answers: sentA, p_essays: sentE,
-        p_time_remaining: Math.max(0, timeLeftRef.current),
+      const { error } = await supabase.from('cbt_session_violations').insert({
+        session_id: sess.id, exam_id: exam.id, student_id: sess.student_id, violation_type: rec.type, detail: rec.detail,
       });
-      if (error) throw error;
-      if (data && data.ok === false) {
-        if (data.status === 'paused') { setPaused(true); }
-        else if (isFinished(data.status)) { finishLocally('Ujian telah diakhiri oleh pengawas.'); }
-        return;
-      }
-      // hapus dari antrean hanya bila nilainya belum berubah sejak dikirim
-      Object.keys(sentA).forEach((k) => { if (dirtyAnswersRef.current[k] === sentA[k]) delete dirtyAnswersRef.current[k]; });
-      Object.keys(sentE).forEach((k) => { if (dirtyEssaysRef.current[k] === sentE[k]) delete dirtyEssaysRef.current[k]; });
-      if (pausedRef.current) { setPaused(false); deadlineRef.current = Date.now() + timeLeftRef.current * 1000; }
-    } catch { /* jaringan putus: antrean tetap, dicoba lagi pada siklus berikutnya */ }
-    finally { savingRef.current = false; }
-  }, []);
-
-  const scheduleDebouncedSave = () => {
-    if (debounceRef.current) return;
-    debounceRef.current = setTimeout(() => { debounceRef.current = null; flushProgress(); }, SAVE_DEBOUNCE_MS + Math.random() * 4000);
+      return !error;
+    } catch { return false; }
   };
-  const setAnswer = (qid: string, value: string) => {
-    setAnswers((p) => ({ ...p, [qid]: value }));
-    dirtyAnswersRef.current[qid] = value;
-    scheduleDebouncedSave();
-  };
-  const setEssay = (qid: string, value: string) => {
-    setEssayAnswers((p) => ({ ...p, [qid]: value }));
-    dirtyEssaysRef.current[qid] = value;
-    scheduleDebouncedSave();
+  const flushViolations = async () => {
+    const list = [...localRef.current.pendingViolations].slice(0, 20);
+    for (const rec of list) {
+      if (await sendViolation(rec)) {
+        localRef.current.pendingViolations = localRef.current.pendingViolations.filter((r) => r !== rec);
+      } else break;
+    }
+    if (list.length) persistLocalNow();
   };
 
-  // Kumpulkan: kirim SEMUA jawaban (idempotent), nilai dihitung di server; coba ulang bila jaringan bermasalah
+  // Kumpulkan: kirim SEMUA jawaban sekaligus (idempotent), nilai dihitung di server; coba ulang bila jaringan bermasalah
   const handleSubmitExam = useCallback(async (timeout = false) => {
     const sess = sessionRef.current;
     if (!sess || submittingRef.current) return;
     submittingRef.current = true; setSubmitting(true);
-    if (debounceRef.current) { clearTimeout(debounceRef.current); debounceRef.current = null; }
+    persistLocalNow();
     let lastErr: any = null;
     for (let attempt = 0; attempt < (timeout ? 12 : 5); attempt++) {
       try {
@@ -159,141 +187,233 @@ export default function CbtStudentExam() {
         });
         if (error) throw error;
         const showScore = examRef.current?.show_result_to_student !== false && data?.grading_status !== 'pending_essay';
+        await flushViolations().catch(() => {});
         submittingRef.current = false; setSubmitting(false);
         finishLocally(data?.grading_status === 'pending_essay' ? 'Ujian selesai! Menunggu koreksi essay.'
-          : showScore ? `Ujian selesai! Nilai: ${Number(data?.score ?? 0).toFixed(1)}` : 'Ujian selesai!');
+          : showScore ? `Ujian selesai! Nilai: ${Number(data?.score ?? 0).toFixed(1)}` : 'Ujian selesai!', sess.id);
         return;
       } catch (e: any) { lastErr = e; await sleep(Math.min(8000, 1000 * 2 ** attempt)); }
     }
     submittingRef.current = false; setSubmitting(false);
-    toast.error('Jawaban belum terkirim: ' + (lastErr?.message || 'koneksi bermasalah') + '. Jawaban tetap aman di layar, tekan Selesai lagi saat koneksi pulih.');
-  }, []);
+    toast.error('Jawaban belum terkirim: ' + (lastErr?.message || 'koneksi bermasalah') + '. Jawaban tetap aman di perangkat ini, tekan Selesai lagi saat koneksi pulih.');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [persistLocalNow, userId]);
 
-  // Timer berbasis tenggat (tidak melenceng) – hanya berjalan saat tidak dijeda
+  // Denyut ringan ke server: jumlah soal terjawab + sisa waktu (TANPA isi jawaban). Balasan memuat status sesi.
+  const heartbeat = useCallback(async () => {
+    const sess = sessionRef.current;
+    if (!sess || submittingRef.current || beatingRef.current) return;
+    beatingRef.current = true;
+    try {
+      const args = { p_session_id: sess.id, p_answered: countAnswered(), p_time_remaining: Math.max(0, timeLeftRef.current) };
+      let data: any;
+      const r = await (supabase as any).rpc('cbt_heartbeat', args);
+      if (r.error) {
+        if (!isMissingRpc(r.error)) throw r.error;
+        // migrasi belum dijalankan: pakai simpan-kemajuan tanpa isi jawaban
+        const f = await (supabase as any).rpc('cbt_save_progress', { p_session_id: sess.id, p_answers: {}, p_essays: {}, p_time_remaining: args.p_time_remaining });
+        if (f.error) throw f.error;
+        data = f.data;
+      } else data = r.data;
+      await flushViolations();
+      // pengawas meminta jawaban dikumpulkan -> kirim jawaban dari perangkat ini
+      if (data?.finish_requested && !submittingRef.current) { beatingRef.current = false; toast.info('Pengawas meminta ujian dikumpulkan.'); handleSubmitExam(false); return; }
+      if (data && data.ok === false) {
+        if (data.status === 'paused') setPaused(true);
+        else if (isFinished(data.status)) finishLocally('Ujian telah diakhiri oleh pengawas.');
+        return;
+      }
+      if (pausedRef.current) { setPaused(false); deadlineRef.current = createDeadline(timeLeftRef.current); }
+    } catch { /* jaringan putus: jawaban aman di perangkat, dicoba lagi pada denyut berikutnya */ }
+    finally { beatingRef.current = false; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handleSubmitExam, persistLocalNow]);
+
+  const setAnswer = (qid: string, value: string) => {
+    answersRef.current = { ...answersRef.current, [qid]: value };
+    setAnswers(answersRef.current);
+    persistLocalSoon();
+  };
+  const setEssay = (qid: string, value: string) => {
+    essaysRef.current = { ...essaysRef.current, [qid]: value };
+    setEssayAnswers(essaysRef.current);
+    persistLocalSoon();
+  };
+
+  // Timer: jam monoton + jam dinding (memundurkan jam perangkat tidak menambah waktu) – hanya berjalan saat tidak dijeda
   useEffect(() => {
     if (!activeSession || paused || submitting) return;
+    if (!deadlineRef.current) deadlineRef.current = createDeadline(timeLeftRef.current);
+    let n = 0;
     const t = setInterval(() => {
-      const left = Math.max(0, Math.round((deadlineRef.current - Date.now()) / 1000));
+      const left = deadlineRef.current ? deadlineRef.current.left() : 0;
       timeLeftRef.current = left;
       setTimeLeft(left);
+      if (++n % 5 === 0) persistLocalNow();
       if (left <= 0) { clearInterval(t); handleSubmitExam(true); }
     }, 1000);
     return () => clearInterval(t);
-  }, [activeSession?.id, paused, submitting, handleSubmitExam]);
+  }, [activeSession?.id, paused, submitting, handleSubmitExam, persistLocalNow]);
 
-  // Simpan berkala (jeda acak) + saat tab disembunyikan; saat dijeda: cek status tiap ~15 dtk
+  // Denyut berkala (jeda acak agar ratusan siswa tidak serentak); saat dijeda: cek status tiap ~15 dtk.
+  // Juga simpan lokal saat halaman disembunyikan / ditutup.
   useEffect(() => {
     if (!activeSession) return;
     let stop = false; let timer: any;
     const loop = async () => {
       if (stop) return;
-      await flushProgress(true);
-      timer = setTimeout(loop, (pausedRef.current ? 15000 : SAVE_INTERVAL_MS) + Math.random() * 10000);
+      await heartbeat();
+      timer = setTimeout(loop, (pausedRef.current ? HEARTBEAT_PAUSED_MS : HEARTBEAT_MS) + Math.random() * 15000);
     };
-    timer = setTimeout(loop, SAVE_INTERVAL_MS + Math.random() * 10000);
-    const onHide = () => { if (document.hidden) flushProgress(); };
+    timer = setTimeout(loop, 3000 + Math.random() * 5000);
+    const onHide = () => { persistLocalNow(); if (document.hidden) heartbeat(); };
     document.addEventListener('visibilitychange', onHide);
-    const onUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('pagehide', persistLocalNow);
+    const onUnload = (e: BeforeUnloadEvent) => { persistLocalNow(); e.preventDefault(); e.returnValue = ''; };
     window.addEventListener('beforeunload', onUnload);
-    return () => { stop = true; clearTimeout(timer); document.removeEventListener('visibilitychange', onHide); window.removeEventListener('beforeunload', onUnload); };
-  }, [activeSession?.id, flushProgress]);
-
-  // ANTI-CHEAT: detect tab/window blur, fullscreen exit
-  useEffect(() => {
-    if (!activeExam?.anti_cheat_enabled || !activeSession || activeSession.status !== 'in_progress') return;
-
-    const logViolation = async (type: string, detail?: string) => {
-      try {
-        await supabase.from('cbt_session_violations').insert({
-          session_id: activeSession.id, exam_id: activeExam.id,
-          student_id: activeSession.student_id, violation_type: type, detail: detail || null,
-        });
-      } catch {}
-      setViolations(v => {
-        const nv = v + 1;
-        const max = activeExam.max_violations || 3;
-        if (nv >= max) {
-          setWarningOpen(`Anda telah ${nv} kali melakukan pelanggaran. Ujian akan diakhiri otomatis.`);
-          setTimeout(() => handleSubmitExam(), 2000);
-        } else {
-          setWarningOpen(`⚠ Pelanggaran terdeteksi (${type}). ${nv}/${max} kesempatan.`);
-        }
-        return nv;
-      });
-    };
-
-    const onVis = () => { if (document.hidden) logViolation('tab_switch', 'Pindah tab/window'); };
-    const onBlur = () => logViolation('blur', 'Window kehilangan fokus');
-    const onFsChange = () => { if (!document.fullscreenElement) logViolation('fullscreen_exit', 'Keluar dari fullscreen'); };
-    const onCtxMenu = (e: MouseEvent) => e.preventDefault();
-    const onCopy = (e: ClipboardEvent) => { e.preventDefault(); logViolation('copy', 'Mencoba copy'); };
-    const onKey = (e: KeyboardEvent) => {
-      // Block common shortcuts
-      if ((e.ctrlKey || e.metaKey) && ['c','x','p','s','u'].includes(e.key.toLowerCase())) { e.preventDefault(); }
-      if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && ['I','J','C'].includes(e.key))) e.preventDefault();
-    };
-
-    document.addEventListener('visibilitychange', onVis);
-    window.addEventListener('blur', onBlur);
-    document.addEventListener('fullscreenchange', onFsChange);
-    document.addEventListener('contextmenu', onCtxMenu);
-    document.addEventListener('copy', onCopy);
-    document.addEventListener('keydown', onKey);
-
-    // Try enter fullscreen
-    const el = document.documentElement;
-    if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
-
+    // tanda "tab ini yang aktif" agar ujian tidak dibuka ganda di tab lain
+    const lockTimer = setInterval(() => tryAcquireTabLock(activeSession.id, tabIdRef.current), 2000);
     return () => {
-      document.removeEventListener('visibilitychange', onVis);
-      window.removeEventListener('blur', onBlur);
-      document.removeEventListener('fullscreenchange', onFsChange);
-      document.removeEventListener('contextmenu', onCtxMenu);
-      document.removeEventListener('copy', onCopy);
-      document.removeEventListener('keydown', onKey);
+      stop = true; clearTimeout(timer); clearInterval(lockTimer);
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', persistLocalNow);
+      window.removeEventListener('beforeunload', onUnload);
     };
-  }, [activeExam?.anti_cheat_enabled, activeSession?.id, activeSession?.status]);
+  }, [activeSession?.id, heartbeat, persistLocalNow]);
 
-  // Mulai / lanjutkan: token & batas percobaan diperiksa di server; lalu muat soal (tanpa kunci jawaban) sekali saja
-  const startOrResumeExam = useMutation({
-    mutationFn: async ({ exam }: { exam: any }) => {
-      const { data, error } = await (supabase as any).rpc('cbt_start_session', { p_exam_id: exam.id, p_token: tokenInput.trim() || null });
-      if (error) throw error;
+  // ---------- ANTI CURANG ----------
+  const handleViolation = useCallback((type: string, detail: string) => {
+    const exam = examRef.current; const sess = sessionRef.current;
+    if (!exam?.anti_cheat_enabled || !sess || submittingRef.current) return;
+    const rec = { type, detail: detail || null, at: Date.now() };
+    localRef.current.pendingViolations.push(rec);
+    sendViolation(rec).then((ok) => {
+      if (ok) localRef.current.pendingViolations = localRef.current.pendingViolations.filter((r) => r !== rec);
+      persistLocalNow();
+    });
+    const nv = violationsRef.current + 1;
+    violationsRef.current = nv; setViolations(nv);
+    persistLocalNow();
+    const max = exam.max_violations || 3;
+    if (nv >= max) {
+      setWarningOpen(`Pelanggaran terdeteksi (${violationLabel(type)}). Anda telah ${nv} kali melanggar. Ujian diakhiri otomatis dan jawaban dikirim.`);
+      setTimeout(() => handleSubmitExam(), 2000);
+    } else {
+      setWarningOpen(`⚠ Pelanggaran terdeteksi: ${violationLabel(type)}. ${nv}/${max} kesempatan.`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handleSubmitExam, persistLocalNow]);
+
+  const antiCheatOn = !!activeExam?.anti_cheat_enabled && !!activeSession && !paused && !submitting;
+  useCbtAntiCheat({ enabled: antiCheatOn, onViolation: handleViolation });
+
+  // Masuk layar penuh: perlu klik pengguna. Jika belum layar penuh saat ujian mulai, minta lewat tombol.
+  useEffect(() => {
+    if (!activeExam?.anti_cheat_enabled || !activeSession) { setNeedFullscreen(false); return; }
+    setNeedFullscreen(!!document.fullscreenEnabled && !document.fullscreenElement);
+  }, [activeExam?.anti_cheat_enabled, activeSession?.id]);
+
+  /** Dipanggil langsung dari klik tombol Mulai/Lanjutkan (agar browser mengizinkan layar penuh). */
+  const enterFullscreenFor = (exam: any) => {
+    if (exam?.anti_cheat_enabled && document.documentElement.requestFullscreen && !document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    }
+  };
+
+  // ---------- mulai / lanjutkan: token -> unduh semua soal ke perangkat -> ujian dimulai ----------
+  const loadAndStart = async (ctx: { exam: any; token: string | null; session: any; pubExam: any }) => {
+    const { session, pubExam } = ctx;
+    const onProgress = (p: PrefetchProgress) => setPrep((s) => ({ ...s, open: true, error: null, percent: p.percent, label: p.label, imagesDone: p.imagesDone, imagesTotal: p.imagesTotal }));
+    if (!tryAcquireTabLock(session.id, tabIdRef.current)) {
+      throw new Error('Ujian ini sedang terbuka di tab/jendela lain pada perangkat ini. Tutup tab lainnya lalu coba lagi.');
+    }
+    // soal yang sudah ada di perangkat (melanjutkan ujian) tidak diunduh ulang
+    let paper: StoredPaper | null = await loadPaper(session.id);
+    let serverAnswers: Record<string, string> = {}; let serverEssays: Record<string, string> = {};
+    let serverStatus: string = session.status; let serverLeft: number = session.time_remaining_seconds ?? pubExam.duration_minutes * 60;
+    if (paper) {
+      onProgress({ phase: 'done', percent: 100, label: 'Soal ditemukan di perangkat', imagesDone: 0, imagesTotal: 0 });
+    } else {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('Perangkat sedang offline. Sambungkan internet untuk mengunduh soal.');
+      const res = await prefetchPaper(session.id, {
+        onProgress,
+        fetchPaper: async () => {
+          const { data, error } = await (supabase as any).rpc('cbt_exam_paper', { p_session_id: session.id });
+          if (error) throw error;
+          return data;
+        },
+      });
+      paper = res.paper;
+      serverAnswers = (res.raw as any).answers || {}; serverEssays = (res.raw as any).essays || {};
+      serverStatus = (res.raw as any).status ?? serverStatus;
+      serverLeft = (res.raw as any).time_remaining_seconds ?? serverLeft;
+    }
+    // jawaban yang tersimpan di perangkat lebih baru daripada di server
+    const local = loadProgress(userId, session.id);
+    const mergedA = { ...serverAnswers, ...(local?.answers || {}) };
+    const mergedE = { ...serverEssays, ...(local?.essays || {}) };
+    let vCount = local?.violations || 0;
+    if (pubExam.anti_cheat_enabled) {
+      try {
+        const { count } = await supabase.from('cbt_session_violations').select('id', { count: 'exact', head: true }).eq('session_id', session.id);
+        vCount = Math.max(vCount, count || 0);
+      } catch { /* pakai hitungan lokal */ }
+    }
+    let qs: any[] = paper.questions || [];
+    if (pubExam.shuffle_questions) qs = seededShuffle(qs, session.id);
+    const left = resumeTimeLeft(serverLeft, local);
+
+    const { map, revoke } = makeImageUrlMap(paper);
+    revokeImagesRef.current?.(); revokeImagesRef.current = revoke;
+    sessionRef.current = session; examRef.current = pubExam;
+    localRef.current = { ...(local || emptyProgress()), answers: mergedA, essays: mergedE, violations: vCount };
+    answersRef.current = mergedA; essaysRef.current = mergedE; violationsRef.current = vCount;
+    timeLeftRef.current = left; deadlineRef.current = createDeadline(left);
+    persistLocalNow();
+    setImageMap(map); setOrderedQuestions(qs); questionsRef.current = qs;
+    setAnswers(mergedA); setEssayAnswers(mergedE);
+    setPaused(serverStatus === 'paused');
+    setActiveSession(session); setActiveExam(pubExam);
+    setTimeLeft(left); setCurrentIdx(0); setTokenInputOpen(false); setTokenInput(''); setViolations(vCount);
+    setPrep(PREP_CLOSED);
+    prepCtxRef.current = null;
+    queryClient.invalidateQueries({ queryKey: ['cbt-student-overview'] });
+    toast.success(paper.failedImages.length ? `Ujian dimulai. ${paper.failedImages.length} gambar dimuat dari tautan asli.` : 'Ujian dimulai!');
+  };
+
+  const beginExam = async (exam: any, token: string | null) => {
+    if (beginningRef.current) return;
+    beginningRef.current = true;
+    enterFullscreenFor(exam);
+    setPrep({ ...PREP_CLOSED, open: true, percent: 2, label: token !== null || exam.require_token ? 'Memeriksa token…' : 'Menyiapkan ujian…', examTitle: exam.title });
+    let ctx: { exam: any; token: string | null; session: any; pubExam: any } | null = null;
+    try {
+      // 1. token & batas percobaan diperiksa di server (satu panggilan)
+      const { data, error } = await (supabase as any).rpc('cbt_start_session', { p_exam_id: exam.id, p_token: token });
+      if (error) { setPrep(PREP_CLOSED); exitFullscreen(); toast.error(error.message); return; }
       const { session, exam: pubExam } = data as { session: any; exam: any };
-      const { data: paper, error: pErr } = await (supabase as any).rpc('cbt_exam_paper', { p_session_id: session.id });
-      if (pErr) throw pErr;
-      return { session, exam: pubExam, paper };
-    },
-    onMutate: () => setLoadingPaper(true),
-    onSettled: () => setLoadingPaper(false),
-    onSuccess: ({ session, exam, paper }) => {
-      let qs: any[] = paper.questions || [];
-      if (exam.shuffle_questions) qs = seededShuffle(qs, session.id);
-      const left = Math.max(0, paper.time_remaining_seconds ?? session.time_remaining_seconds ?? exam.duration_minutes * 60);
-      dirtyAnswersRef.current = {}; dirtyEssaysRef.current = {};
-      timeLeftRef.current = left; deadlineRef.current = Date.now() + left * 1000;
-      setOrderedQuestions(qs);
-      setAnswers(paper.answers || {}); setEssayAnswers(paper.essays || {});
-      setPaused(paper.status === 'paused');
-      setActiveSession(session); setActiveExam(exam);
-      setTimeLeft(left);
-      setCurrentIdx(0); setTokenInputOpen(false); setTokenInput(''); setViolations(0);
-      queryClient.invalidateQueries({ queryKey: ['cbt-student-overview'] });
-      toast.success('Ujian dimulai!');
-    },
-    onError: (e: any) => toast.error(e.message),
-  });
+      ctx = { exam, token, session, pubExam };
+      prepCtxRef.current = ctx;
+      // 2. unduh semua soal ke perangkat, lalu mulai
+      await loadAndStart(ctx);
+    } catch (e: any) {
+      setPrep((s) => ({ ...s, open: true, error: e?.message || 'Gagal mengunduh soal', canRetry: !!ctx }));
+    } finally { beginningRef.current = false; }
+  };
+
+  const retryPrep = async () => {
+    const ctx = prepCtxRef.current;
+    if (!ctx || beginningRef.current) return;
+    beginningRef.current = true;
+    setPrep((s) => ({ ...s, error: null, percent: 2, label: 'Mencoba lagi…' }));
+    try { await loadAndStart(ctx); }
+    catch (e: any) { setPrep((s) => ({ ...s, error: e?.message || 'Gagal mengunduh soal', canRetry: true })); }
+    finally { beginningRef.current = false; }
+  };
+  const closePrep = () => { setPrep(PREP_CLOSED); prepCtxRef.current = null; exitFullscreen(); queryClient.invalidateQueries({ queryKey: ['cbt-student-overview'] }); };
 
   const formatTime = (s: number) => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
   const sessionsForExam = (id: string) => existingSessions.filter((s: any) => s.exam_id === id);
-
-  if (loadingPaper && !activeSession) {
-    return (
-      <DashboardLayout>
-        <div className="py-24 text-center text-muted-foreground">Menyiapkan soal ujian…</div>
-      </DashboardLayout>
-    );
-  }
 
   // ===== ACTIVE EXAM VIEW =====
   if (activeSession && orderedQuestions.length > 0) {
@@ -304,9 +424,11 @@ export default function CbtStudentExam() {
     const allAnswered = answeredCount === orderedQuestions.length;
     const timeWarn = timeLeft < 300;
 
+    const antiCheat = !!activeExam?.anti_cheat_enabled;
     return (
       <DashboardLayout>
-        <div className="space-y-3 max-w-3xl mx-auto px-2">
+        {antiCheat && <style>{'@media print { body * { display: none !important; } }'}</style>}
+        <div className={`space-y-3 max-w-3xl mx-auto px-2 ${antiCheat ? 'select-none' : ''}`} style={antiCheat ? ({ WebkitTouchCallout: 'none' } as CSSProperties) : undefined}>
           {/* Modern sticky header */}
           <Card className="sticky top-2 z-20 shadow-md border-primary/20 bg-gradient-to-r from-primary/5 via-background to-primary/5 backdrop-blur">
             <CardContent className="p-3 flex items-center justify-between flex-wrap gap-2">
@@ -342,9 +464,13 @@ export default function CbtStudentExam() {
           {activeExam?.anti_cheat_enabled && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 p-2.5 text-xs flex items-start gap-2">
               <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-              <p>Mode Anti Curang aktif. Jangan pindah tab, keluar fullscreen, atau klik kanan. Pelanggaran tercatat otomatis.</p>
+              <p>Mode Anti Curang aktif. Jangan pindah tab/aplikasi, membuka layar belah atau jendela lain, keluar layar penuh, menyalin/menempel, mencetak, atau menangkap layar. Pelanggaran tercatat otomatis.</p>
             </div>
           )}
+
+          <p className="flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+            <HardDriveDownload className="h-3 w-3" /> Soal dan jawaban tersimpan di perangkat ini; jawaban dikirim ke server saat Anda menekan Selesai.
+          </p>
 
           {activeExam?.instructions && currentIdx === 0 && (
             <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/30">
@@ -367,9 +493,9 @@ export default function CbtStudentExam() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <RichTextDisplay html={currentQ.question_text} className="text-base" />
+              <RichTextDisplay html={rewriteImages(currentQ.question_text, imageMap)} className="text-base" />
               {isEssay ? (
-                <Textarea rows={8} placeholder="Tulis jawaban Anda..." value={essayAnswers[currentQ.id] || ''}
+                <Textarea rows={8} className="select-text" placeholder="Tulis jawaban Anda..." value={essayAnswers[currentQ.id] || ''}
                   onChange={e => setEssay(currentQ.id, e.target.value)} />
               ) : (
                 <RadioGroup value={answers[currentQ.id] || ''} onValueChange={v => setAnswer(currentQ.id, v)} className="space-y-2">
@@ -413,6 +539,19 @@ export default function CbtStudentExam() {
             </Card>
           </div>
         </div>
+
+        {/* Mode anti curang: wajib layar penuh */}
+        <Dialog open={needFullscreen && !paused}>
+          <DialogContent onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><Maximize className="h-5 w-5" /> Masuk layar penuh</DialogTitle>
+              <DialogDescription className="pt-2">Ujian ini memakai mode anti curang. Klik tombol di bawah untuk masuk layar penuh, lalu kerjakan ujian tanpa membuka aplikasi lain atau layar belah.</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button onClick={() => { document.documentElement.requestFullscreen?.().catch(() => {}); setNeedFullscreen(false); }}>Masuk Layar Penuh</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Ujian dijeda pengawas: timer berhenti, menunggu dilanjutkan */}
         <Dialog open={paused}>
@@ -533,14 +672,14 @@ export default function CbtStudentExam() {
                         <div className="p-1.5 rounded bg-amber-50 dark:bg-amber-950/30 text-[11px] text-center">Menunggu koreksi essay</div>
                       )}
                       {inProgress && exam.allow_resume !== false && (
-                        <Button className="w-full gap-1" size="sm" variant="secondary" onClick={() => startOrResumeExam.mutate({ exam })} disabled={startOrResumeExam.isPending}>
+                        <Button className="w-full gap-1" size="sm" variant="secondary" onClick={() => beginExam(exam, null)} disabled={prep.open}>
                           <RotateCcw className="h-3.5 w-3.5" /> Lanjutkan
                         </Button>
                       )}
                       {canStart && (
                         <Button className="w-full gap-1" size="sm" onClick={() => {
                           if (exam.require_token) { setPendingExam(exam); setTokenInputOpen(true); }
-                          else if (confirm('Mulai ujian? Timer akan berjalan.')) startOrResumeExam.mutate({ exam });
+                          else if (confirm('Mulai ujian? Semua soal akan diunduh ke perangkat ini lebih dulu, lalu timer berjalan.')) beginExam(exam, null);
                         }}>
                           <Play className="h-3.5 w-3.5" /> {exam.remedial ? `Mulai Remidial (${attemptsUsed + 1}/${exam.max_attempts})` : attemptsUsed > 0 ? `Coba Lagi (${attemptsUsed + 1}/${exam.max_attempts})` : 'Mulai Ujian'}
                         </Button>
@@ -583,8 +722,36 @@ export default function CbtStudentExam() {
             <Input value={tokenInput} onChange={e => setTokenInput(e.target.value.toUpperCase())} placeholder="Token (6 karakter)" className="font-mono text-center text-lg" maxLength={12} autoFocus />
             <DialogFooter>
               <Button variant="outline" onClick={() => { setTokenInputOpen(false); setTokenInput(''); }}>Batal</Button>
-              <Button onClick={() => startOrResumeExam.mutate({ exam: pendingExam })} disabled={!tokenInput || startOrResumeExam.isPending}>Mulai</Button>
+              <Button onClick={() => beginExam(pendingExam, tokenInput.trim() || null)} disabled={!tokenInput || prep.open}>Mulai</Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Unduh soal ke perangkat sebelum ujian dimulai */}
+        <Dialog open={prep.open}>
+          <DialogContent onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><HardDriveDownload className="h-5 w-5" /> {prep.error ? 'Soal belum siap' : 'Mengunduh soal ke perangkat'}</DialogTitle>
+              <DialogDescription className="pt-1">{prep.examTitle}</DialogDescription>
+            </DialogHeader>
+            {prep.error ? (
+              <p className="text-sm text-destructive">{prep.error}</p>
+            ) : (
+              <div className="space-y-2">
+                <Progress value={prep.percent} className="h-3" />
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{prep.label}</span>
+                  <span className="font-mono tabular-nums">{prep.percent}%</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">Timer ujian baru berjalan setelah semua soal selesai diunduh. Jangan tutup halaman ini.</p>
+              </div>
+            )}
+            {prep.error && (
+              <DialogFooter>
+                <Button variant="outline" onClick={closePrep}>Tutup</Button>
+                {prep.canRetry && <Button onClick={retryPrep}>Coba Lagi</Button>}
+              </DialogFooter>
+            )}
           </DialogContent>
         </Dialog>
       </DashboardLayout>

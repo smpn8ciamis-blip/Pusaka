@@ -26,6 +26,7 @@ import * as XLSX from 'xlsx';
 import { format } from 'date-fns';
 import { RichTextEditor, RichTextDisplay } from '@/components/cbt/RichTextEditor';
 import { CbtRemedialDialog } from '@/components/cbt/CbtRemedialDialog';
+import { violationLabel } from '@/lib/cbtAntiCheat';
 
 const ITEMS_PER_PAGE = 10;
 
@@ -407,16 +408,26 @@ export default function CbtExamManagement() {
       } else if (action === 'resume') {
         await supabase.from('cbt_exam_sessions').update({ status: 'in_progress', last_activity_at: new Date().toISOString() }).eq('id', id);
       } else if (action === 'finalize') {
-        const { error } = await (supabase as any).rpc('cbt_force_finish', { p_session_id: id });
-        if (error) throw error;
+        // Jawaban siswa tersimpan di perangkatnya sampai ia menekan Selesai. Akhiri = MINTA perangkat siswa
+        // mengumpulkan jawaban (nilai tidak 0); dipaksa langsung bila siswa tidak aktif / permintaan tidak dipenuhi.
+        const r = await (supabase as any).rpc('cbt_finish_or_request', { p_session_id: id });
+        if (r.error) {
+          if (r.error.code === 'PGRST202' || r.error.code === '42883') {
+            const { error } = await (supabase as any).rpc('cbt_force_finish', { p_session_id: id });
+            if (error) throw error;
+          } else throw r.error;
+        } else if (r.data?.requested) {
+          return { requested: true } as const;
+        }
       } else if (action === 'reset') {
         await supabase.from('cbt_student_answers').delete().eq('session_id', id);
         await supabase.from('cbt_exam_sessions').delete().eq('id', id);
       }
     },
-    onSuccess: () => {
+    onSuccess: (res: any) => {
       queryClient.invalidateQueries({ queryKey: ['cbt-results'] });
-      toast.success('Aksi berhasil');
+      if (res?.requested) toast.info('Permintaan kumpul dikirim ke perangkat siswa. Jawaban masuk otomatis dalam ±1 menit; tekan Akhiri lagi bila belum selesai.');
+      else toast.success('Aksi berhasil');
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -1070,7 +1081,7 @@ export default function CbtExamManagement() {
                 <Button size="sm" variant="destructive" onClick={() => {
                   const active = (examResults || []).filter((r: any) => r.status !== 'completed');
                   if (!active.length) return toast.info('Tidak ada sesi aktif');
-                  if (confirm(`Akhiri PAKSA ${active.length} sesi? Tindakan tidak bisa dibatalkan.`)) {
+                  if (confirm(`Akhiri ${active.length} sesi? Perangkat siswa diminta mengumpulkan jawabannya; siswa yang tidak aktif diakhiri langsung. Tidak bisa dibatalkan.`)) {
                     active.forEach((r: any) => sessionActionMutation.mutate({ id: r.id, action: 'finalize' }));
                   }
                 }}><Power className="h-3 w-3 mr-1" /> Akhiri Semua</Button>
@@ -1469,7 +1480,7 @@ export default function CbtExamManagement() {
                                 <div key={v.id} className="flex items-center justify-between py-1 border-b last:border-0">
                                   <span>{sess?.students?.full_name || 'Tidak diketahui'}</span>
                                   <span className="flex items-center gap-2">
-                                    <Badge variant="destructive" className="text-[10px]">{v.violation_type}</Badge>
+                                    <Badge variant="destructive" className="text-[10px]" title={v.detail || undefined}>{violationLabel(v.violation_type)}</Badge>
                                     <span className="text-muted-foreground">{format(new Date(v.created_at), 'dd/MM HH:mm')}</span>
                                   </span>
                                 </div>
