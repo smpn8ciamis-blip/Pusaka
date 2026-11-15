@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import {
   Home, Calendar, BookOpen, GraduationCap, CalendarCheck, AlertTriangle, Trophy, Users,
   Star, Hourglass, Megaphone, IdCard, Upload, UserCircle, Settings, ExternalLink, Link2,
-  LogOut, Search, Smartphone,
+  LogOut, Search, Smartphone, Sunrise,
 } from "lucide-react";
 
 interface NavItem {
@@ -32,6 +32,7 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
       { tab: "achievements", label: "Prestasi", icon: Trophy },
       { tab: "ekskul", label: "Ekstrakurikuler", icon: Users },
       { tab: "salat", label: "Absensi Salat", icon: Star },
+      { url: "/jurnal-kaih", label: "Jurnal 7 Kebiasaan", icon: Sunrise },
       { tab: "dispensasi", label: "Dispensasi", icon: Hourglass },
     ],
   },

@@ -20,7 +20,7 @@ import {
   MapPin, CalendarDays, Hash, Users, GraduationCap, CreditCard, IdCard,
   UserCircle, Home, Box, BarChart3, ChevronRight, AlertCircle, BadgeCheck,
   Search, Grid3X3, CalendarCheck, Megaphone, Hourglass, ExternalLink, Link2,
-  Trash2, X, Upload, CheckCircle2, Wifi, WifiOff, Monitor,
+  Trash2, X, Upload, CheckCircle2, Wifi, WifiOff, Monitor, Sunrise,
 } from "lucide-react";
 import { format, isValid, formatDistanceToNow } from "date-fns";
 import { id as localeId } from "date-fns/locale";
@@ -805,6 +805,7 @@ const StudentDashboardPage = () => {
     { tab: 'grades', label: 'Nilai', icon: BookOpen, color: 'bg-emerald-500' },
     { tab: 'elearning', label: 'E-Learning', icon: GraduationCap, color: 'bg-sky-500' },
     { tab: 'attendance', label: 'Absensi', icon: CalendarCheck, color: 'bg-amber-500' },
+    { url: '/jurnal-kaih', label: 'Jurnal 7 Kebiasaan', icon: Sunrise, color: 'bg-orange-500', isExternal: true },
     { tab: 'violations', label: 'Pelanggaran', icon: AlertTriangle, color: 'bg-red-500' },
     { tab: 'achievements', label: 'Prestasi', icon: Trophy, color: 'bg-purple-500' },
     { tab: 'ekskul', label: 'Ekstrakurikuler', icon: Users, color: 'bg-orange-500' },
@@ -849,6 +850,7 @@ const StudentDashboardPage = () => {
     // Warna pastel per menu + lencana angka (sesuai data yang sudah ada)
     const PASTEL: Record<string, { tile: string; icon: string }> = {
       schedule: { tile: 'bg-[#E1F0FF]', icon: 'text-[#1E6FE0]' },
+      '/jurnal-kaih': { tile: 'bg-[#FFEBD6]', icon: 'text-orange-600' },
       idcard: { tile: 'bg-[#FDE7EA]', icon: 'text-rose-600' },
       grades: { tile: 'bg-[#E3F6E8]', icon: 'text-emerald-600' },
       elearning: { tile: 'bg-[#E0F4FA]', icon: 'text-cyan-600' },
@@ -900,7 +902,7 @@ const StudentDashboardPage = () => {
           <h2 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-white mb-4">Layanan Cepat</h2>
           <div className="grid grid-cols-4 gap-x-3 gap-y-5">
             {menusShown.map((menu: any) => {
-              const pal = PASTEL[menu.tab as string] ?? FALLBACK;
+              const pal = PASTEL[(menu.tab ?? menu.url) as string] ?? FALLBACK;
               const badge = badgeFor(menu);
               return (
                 <button
