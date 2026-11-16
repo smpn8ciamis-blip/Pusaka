@@ -2,6 +2,10 @@ import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Camera, Loader2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+  AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { compressAvatar } from '@/lib/avatarCompress';
 
@@ -15,24 +19,30 @@ interface Props {
 
 const BUCKET = 'student-photos';
 
+interface PhotoStatus { enabled: boolean; once: boolean; uploaded: boolean; can_upload: boolean }
+
 /** Foto profil siswa + tombol ganti/hapus. Tombol hanya muncul bila admin mengizinkan (saklar di Pengaturan). */
 export function StudentPhotoUploader({ userId, name, photoUrl, avatarClassName = 'w-16 h-16 border-4 border-white/30' }: Props) {
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [lockedOpen, setLockedOpen] = useState(false);
 
-  const { data: allowed } = useQuery({
-    queryKey: ['student-photo-upload-enabled'],
+  const { data: status } = useQuery({
+    queryKey: ['student-photo-upload-status', userId],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc('student_photo_upload_enabled' as never);
+      const { data, error } = await supabase.rpc('student_photo_upload_status' as never);
       if (error) throw error;
-      return data as unknown as boolean;
+      return data as unknown as PhotoStatus;
     },
-    staleTime: 60 * 1000,
+    staleTime: 30 * 1000,
     retry: false,
   });
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ['student-account', userId] });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['student-account', userId] });
+    qc.invalidateQueries({ queryKey: ['student-photo-upload-status', userId] });
+  };
   const path = `siswa/${userId}/foto.jpg`;
 
   const upload = useMutation({
@@ -63,7 +73,22 @@ export function StudentPhotoUploader({ userId, name, photoUrl, avatarClassName =
     onSettled: () => setBusy(false),
   });
 
-  const canEdit = allowed !== false && !!userId;
+  // Status belum terbaca (mis. migrasi belum dijalankan) → tampilkan seperti biasa; server tetap menegakkan aturan.
+  const canEdit = status?.enabled !== false && !!userId;
+  const onceLocked = !!status?.once && !!status?.uploaded;
+
+  const onCameraClick = () => {
+    if (onceLocked) { setLockedOpen(true); return; }
+    inputRef.current?.click();
+  };
+  const onFilePicked = (f: File) => {
+    if (status?.once && !window.confirm('Foto profil hanya dapat diunggah 1 kali. Untuk mengubahnya nanti Anda harus menghubungi admin. Lanjutkan?')) {
+      if (inputRef.current) inputRef.current.value = '';
+      return;
+    }
+    setBusy(true);
+    upload.mutate(f);
+  };
 
   return (
     <div className="flex flex-col items-center gap-1.5 shrink-0">
@@ -84,7 +109,7 @@ export function StudentPhotoUploader({ userId, name, photoUrl, avatarClassName =
           <button
             type="button"
             disabled={busy}
-            onClick={() => inputRef.current?.click()}
+            onClick={onCameraClick}
             aria-label="Ganti foto profil"
             className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full bg-white text-[#1E6FE0] shadow flex items-center justify-center disabled:opacity-60"
           >
@@ -101,10 +126,10 @@ export function StudentPhotoUploader({ userId, name, photoUrl, avatarClassName =
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) { setBusy(true); upload.mutate(f); }
+              if (f) onFilePicked(f);
             }}
           />
-          {photoUrl && (
+          {photoUrl && !status?.once && (
             <button
               type="button"
               disabled={busy}
@@ -116,6 +141,20 @@ export function StudentPhotoUploader({ userId, name, photoUrl, avatarClassName =
           )}
         </>
       )}
+      <AlertDialog open={lockedOpen} onOpenChange={setLockedOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Foto profil tidak dapat diubah</AlertDialogTitle>
+            <AlertDialogDescription>
+              Foto profil hanya dapat diunggah 1 kali dan Anda sudah pernah mengunggahnya.
+              Untuk mengubah foto, silakan hubungi admin sekolah.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>Mengerti</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

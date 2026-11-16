@@ -2,6 +2,7 @@
 // Akun Siswa untuk admin / kesiswaan: seperti tampilan wali kelas, tetapi cakupannya satu sekolah.
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import { useStudentIntake } from "@/hooks/useStudentIntake";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { DataPagination } from "@/components/ui/data-pagination";
-import { Users, Plus, Search, MoreHorizontal, Edit2, KeyRound, Trash2, UserCheck, UserX, Zap, FileDown } from "lucide-react";
+import { Users, Plus, Search, MoreHorizontal, Edit2, KeyRound, Trash2, UserCheck, UserX, Zap, FileDown, ImagePlus } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAcademicYear } from "@/contexts/AcademicYearContext";
@@ -143,6 +144,12 @@ export default function SchoolStudentTab() {
   const { allowDirect } = useStudentIntake();
   const handleEdit = (r: AdminStudentRow) => { setEditing(toStudent(r)); setFormOpen(true); };
   const handleManageAccount = (r: AdminStudentRow) => { setAccountRow(r); setAccountOpen(true); };
+  const handleResetPhoto = async (r: AdminStudentRow) => {
+    if (!confirm(`Izinkan ${r.full_name} mengunggah ulang foto profilnya?`)) return;
+    const { error } = await supabase.rpc("admin_reset_student_photo_upload" as never, { p_student_id: r.id } as never);
+    if (error) toast.error(error.message || "Gagal membuka kunci unggah foto.");
+    else toast.success(`${r.full_name} dapat mengunggah foto profil lagi.`);
+  };
   const handleDelete = async (r: AdminStudentRow) => {
     if (!confirm(`Nonaktifkan siswa ${r.full_name}?`)) return;
     await deleteStudentMut.mutateAsync(r.id);
@@ -340,6 +347,11 @@ export default function SchoolStudentTab() {
                             <KeyRound className="h-4 w-4 mr-2" />
                             {r.account_user_id ? "Kelola Akun" : "Buat Akun"}
                           </DropdownMenuItem>
+                          {r.account_user_id && (
+                            <DropdownMenuItem onClick={() => handleResetPhoto(r)}>
+                              <ImagePlus className="h-4 w-4 mr-2" /> Izinkan ganti foto
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuSeparator />
                           <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(r)}>
                             <Trash2 className="h-4 w-4 mr-2" /> Nonaktifkan

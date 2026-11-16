@@ -92,6 +92,7 @@ const Settings = () => {
     complaint_status_check_color: 'outline',
     enable_captcha: true,
     allow_student_photo_upload: true,
+    student_photo_upload_once: false,
     wakasek_sarpras_teacher_id: '' as string | null,
     wakasek_kesiswaan_teacher_id: '' as string | null,
   });
@@ -264,6 +265,7 @@ const Settings = () => {
         complaint_status_check_color: (settings as any).complaint_status_check_color || 'outline',
         enable_captcha: (settings as any).enable_captcha !== false,
         allow_student_photo_upload: (settings as any).allow_student_photo_upload !== false,
+        student_photo_upload_once: (settings as any).student_photo_upload_once === true,
         wakasek_sarpras_teacher_id: (settings as any).wakasek_sarpras_teacher_id || null,
         wakasek_kesiswaan_teacher_id: (settings as any).wakasek_kesiswaan_teacher_id || null,
       });
@@ -1744,6 +1746,23 @@ const Settings = () => {
                   }
                 />
               </div>
+              <div className="flex items-center justify-between gap-4 border-t border-border pt-3">
+                <div>
+                  <Label className="text-sm font-medium">Batasi unggah foto hanya 1 kali per siswa</Label>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Setelah siswa mengunggah foto, ia tidak bisa menggantinya lagi dan muncul peringatan untuk menghubungi admin.
+                    Admin dapat membuka kunci per siswa lewat menu Akun Siswa → titik tiga → "Izinkan ganti foto". Siswa yang
+                    sudah pernah mengunggah sebelum opsi ini diaktifkan juga dianggap sudah memakai kesempatannya.
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.student_photo_upload_once}
+                  disabled={!formData.allow_student_photo_upload}
+                  onCheckedChange={(checked) =>
+                    setFormData({ ...formData, student_photo_upload_once: checked })
+                  }
+                />
+              </div>
             </div>
 
             <div className="flex justify-end pt-4">
@@ -1766,6 +1785,7 @@ const Settings = () => {
                   complaint_status_check_color: formData.complaint_status_check_color,
                   enable_captcha: formData.enable_captcha,
                   allow_student_photo_upload: formData.allow_student_photo_upload,
+                  student_photo_upload_once: formData.student_photo_upload_once,
                 })} 
                 disabled={updateMutation.isPending}
                 className="w-full sm:w-auto"
