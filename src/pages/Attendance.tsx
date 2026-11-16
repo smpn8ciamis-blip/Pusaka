@@ -38,6 +38,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { addLetterheadToPDF, addSignatureToPDF } from '@/lib/pdfLetterhead';
 import { notifyBotIfAttendanceComplete } from '@/lib/waBot';
+import { fetchAttendanceChunked } from '@/lib/fetchAttendanceRange';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
 import {
   generateSecureToken,
@@ -627,7 +628,7 @@ const Attendance = () => {
     }
   }, [existingAttendance]);
 
-  const { data: attendanceRecords } = useQuery({
+  const { data: attendanceRecords, error: attendanceError } = useQuery({
     queryKey: ['attendance-records', filterStartDate, filterEndDate, filterClass, filterSubject, userRole, user?.id],
     queryFn: async () => {
       let scheduleIds: string[] = [];
@@ -650,33 +651,39 @@ const Attendance = () => {
         if (studentIds.length === 0) return [];
       }
 
-      // PostgREST membatasi 1000 baris per permintaan. Rentang panjang (mis. sebulan) berisi ribuan baris,
-      // sehingga tanpa paginasi hanya hari-hari terbaru yang terhitung. Ambil semua halaman.
-      const PAGE = 1000;
-      const MAX_PAGES = 200;
-      const rows: any[] = [];
-      for (let page = 0; page < MAX_PAGES; page++) {
+      // Rentang panjang (berbulan-bulan) berisi puluhan ribu baris. Diambil per potongan 3 hari dengan paginasi
+      // kecil + percobaan ulang (lihat fetchAttendanceRange.ts) agar tidak kena batas waktu server.
+      const teacherFilter = userRole === 'teacher' && scheduleIds.length > 0
+        ? `schedule_id.in.(${scheduleIds.join(',')}),and(schedule_id.is.null,sched_teacher_id.eq.${user?.id})`
+        : null;
+      const rows: any[] = await fetchAttendanceChunked<any>(filterStartDate, filterEndDate, async (cs, ce, from, to) => {
         let query = supabase
           .from('attendance')
           .select(`*, students!inner(id, full_name, nis, class_id, status, gender, classes(name)), schedules(subject)`)
-          .gte('date', filterStartDate).lte('date', filterEndDate).eq('students.status', 'aktif');
+          .gte('date', cs).lte('date', ce).eq('students.status', 'aktif');
 
-        if (userRole === 'teacher' && scheduleIds.length > 0) query = query.or(`schedule_id.in.(${scheduleIds.join(',')}),and(schedule_id.is.null,sched_teacher_id.eq.${user?.id})`);
+        if (teacherFilter) query = query.or(teacherFilter);
         if (studentIds) query = query.in('student_id', studentIds);
         // id sebagai pengurut kedua agar urutan antarhalaman stabil (tidak ada baris ganda/hilang)
         const { data, error } = await query
           .order('date', { ascending: false }).order('id', { ascending: true })
-          .range(page * PAGE, page * PAGE + PAGE - 1);
+          .range(from, to);
         if (error) throw error;
-        rows.push(...(data || []));
-        if (!data || data.length < PAGE) break;
-      }
+        return data || [];
+      });
 
       if (filterSubject !== 'all') return rows.filter((r) => (r.schedules?.subject || (r as any).sched_subject) === filterSubject);
       return rows;
     },
     enabled: !!userRole && (isFullAccessRole || !!user?.id),
   });
+
+  React.useEffect(() => {
+    if (attendanceError) {
+      toast.error('Gagal memuat data absensi untuk rentang tanggal ini. Periksa koneksi lalu coba lagi, atau persempit rentang tanggal.');
+      console.error('Gagal memuat absensi:', attendanceError);
+    }
+  }, [attendanceError]);
 
   const filteredStudents = useMemo(() => {
     if (!students) return [];

@@ -63,6 +63,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
+import { fetchAttendanceChunked } from '@/lib/fetchAttendanceRange';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ImportAttendance } from '@/components/ImportAttendance';
@@ -382,7 +383,7 @@ const HomeroomAttendance = () => {
   });
 
   // Get attendance records for the homeroom class
-  const { data: attendanceRecords } = useQuery({
+  const { data: attendanceRecords, error: attendanceError } = useQuery({
     queryKey: ['homeroom-attendance', homeroomClass?.id, filterStartDate, filterEndDate],
     queryFn: async () => {
       if (!homeroomClass?.id) return [];
@@ -390,10 +391,8 @@ const HomeroomAttendance = () => {
       const studentIds = students?.map((s) => s.id) || [];
       if (studentIds.length === 0) return [];
 
-      // PostgREST membatasi 1000 baris per permintaan; satu kelas sebulan bisa ribuan baris. Ambil semua halaman.
-      const PAGE = 1000;
-      const rows: any[] = [];
-      for (let page = 0; page < 200; page++) {
+      // Rentang panjang diambil per potongan 3 hari + percobaan ulang (lihat fetchAttendanceRange.ts).
+      const rows: any[] = await fetchAttendanceChunked<any>(filterStartDate, filterEndDate, async (cs, ce, from, to) => {
         const { data, error } = await supabase
           .from('attendance')
           .select(
@@ -407,19 +406,25 @@ const HomeroomAttendance = () => {
         `
           )
           .in('student_id', studentIds)
-          .gte('date', filterStartDate)
-          .lte('date', filterEndDate)
+          .gte('date', cs)
+          .lte('date', ce)
           .order('date', { ascending: false })
           .order('id', { ascending: true })
-          .range(page * PAGE, page * PAGE + PAGE - 1);
+          .range(from, to);
         if (error) throw error;
-        rows.push(...(data || []));
-        if (!data || data.length < PAGE) break;
-      }
+        return data || [];
+      });
       return rows;
     },
     enabled: !!homeroomClass?.id && !!students,
   });
+
+  React.useEffect(() => {
+    if (attendanceError) {
+      toast.error('Gagal memuat data absensi untuk rentang tanggal ini. Periksa koneksi lalu coba lagi, atau persempit rentang tanggal.');
+      console.error('Gagal memuat absensi:', attendanceError);
+    }
+  }, [attendanceError]);
 
   const { data: schoolSettings } = useQuery({
     queryKey: ['school-settings-letterhead'],
