@@ -91,6 +91,7 @@ const Settings = () => {
     complaint_status_check_text: 'Cek Status Pengaduan',
     complaint_status_check_color: 'outline',
     enable_captcha: true,
+    allow_student_photo_upload: true,
     wakasek_sarpras_teacher_id: '' as string | null,
     wakasek_kesiswaan_teacher_id: '' as string | null,
   });
@@ -262,6 +263,7 @@ const Settings = () => {
         complaint_status_check_text: (settings as any).complaint_status_check_text || 'Cek Status Pengaduan',
         complaint_status_check_color: (settings as any).complaint_status_check_color || 'outline',
         enable_captcha: (settings as any).enable_captcha !== false,
+        allow_student_photo_upload: (settings as any).allow_student_photo_upload !== false,
         wakasek_sarpras_teacher_id: (settings as any).wakasek_sarpras_teacher_id || null,
         wakasek_kesiswaan_teacher_id: (settings as any).wakasek_kesiswaan_teacher_id || null,
       });
@@ -1724,6 +1726,26 @@ const Settings = () => {
               </div>
             </div>
 
+            {/* Foto profil siswa */}
+            <div className="space-y-3 p-4 border border-border rounded-lg">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <Label className="text-base font-semibold">Siswa boleh mengunggah foto profil</Label>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Bila aktif, siswa dapat mengganti foto profilnya sendiri dari tab Profil di dashboard siswa
+                    (foto otomatis dikompres di perangkat siswa). Bila dimatikan, tombol unggah hilang dan server menolak
+                    unggahan baru dari akun siswa; foto yang sudah ada tetap tampil.
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.allow_student_photo_upload}
+                  onCheckedChange={(checked) =>
+                    setFormData({ ...formData, allow_student_photo_upload: checked })
+                  }
+                />
+              </div>
+            </div>
+
             <div className="flex justify-end pt-4">
               <Button 
                 onClick={() => updateMutation.mutate({
@@ -1743,6 +1765,7 @@ const Settings = () => {
                   complaint_status_check_text: formData.complaint_status_check_text,
                   complaint_status_check_color: formData.complaint_status_check_color,
                   enable_captcha: formData.enable_captcha,
+                  allow_student_photo_upload: formData.allow_student_photo_upload,
                 })} 
                 disabled={updateMutation.isPending}
                 className="w-full sm:w-auto"

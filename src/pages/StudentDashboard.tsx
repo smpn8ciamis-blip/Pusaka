@@ -37,6 +37,7 @@ import AttendanceTrendChart from "@/components/dashboard/AttendanceTrendChart";
 import StudentIdCardTab from "@/components/dashboard/StudentIdCardTab";
 import AttendanceLogList from "@/components/dashboard/AttendanceLogList";
 import { DesktopShell } from "@/components/student-dashboard/DesktopShell";
+import { StudentPhotoUploader } from "@/components/student-dashboard/StudentPhotoUploader";
 import { DesktopOverview, type DesktopStat } from "@/components/student-dashboard/DesktopOverview";
 import { useStudentDashboardView } from "@/hooks/useStudentDashboardView";
 import {
@@ -1090,13 +1091,7 @@ const StudentDashboardPage = () => {
       <div className="space-y-4 p-4">
         <div className="bg-[#1E6FE0] rounded-2xl p-5 text-white shadow-sm">
           <div className="flex items-center gap-4">
-            {student?.photo_url ? (
-              <img src={student.photo_url} alt="Foto" className="w-16 h-16 rounded-full object-cover border-4 border-white/30" />
-            ) : (
-              <div className="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center text-2xl font-bold border-4 border-white/30">
-                {student?.full_name?.charAt(0) || 'S'}
-              </div>
-            )}
+            <StudentPhotoUploader userId={user?.id || ''} name={student?.full_name} photoUrl={student?.photo_url} />
             <div className="flex-1 min-w-0">
               <h2 className="text-lg font-bold truncate">{student?.full_name || 'Siswa'}</h2>
               <p className="text-blue-100 text-sm">{classInfo?.name || 'Kelas belum diatur'}</p>
