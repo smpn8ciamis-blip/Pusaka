@@ -20,6 +20,8 @@ import {
 } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { DuplicateAttendanceManager } from '@/components/DuplicateAttendanceManager';
+import { AttendanceInfographicDialog } from '@/components/attendance/AttendanceInfographicDialog';
+import type { InfoRecord } from '@/lib/attendanceInfographic';
 import {
   useAttendanceDaySettings,
   isAttendanceAllowedForDate,
@@ -418,6 +420,7 @@ const Attendance = () => {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [infographicOpen, setInfographicOpen] = useState(false);
   const [selectedSchedule, setSelectedSchedule] = useState('');
   const [selectedDate, setSelectedDate] = useState(toISODate(new Date()));
   const [filterStartDate, setFilterStartDate] = useState(toISODate(new Date()));
@@ -655,7 +658,7 @@ const Attendance = () => {
       for (let page = 0; page < MAX_PAGES; page++) {
         let query = supabase
           .from('attendance')
-          .select(`*, students!inner(id, full_name, nis, class_id, status, classes(name)), schedules(subject)`)
+          .select(`*, students!inner(id, full_name, nis, class_id, status, gender, classes(name)), schedules(subject)`)
           .gte('date', filterStartDate).lte('date', filterEndDate).eq('students.status', 'aktif');
 
         if (userRole === 'teacher' && scheduleIds.length > 0) query = query.or(`schedule_id.in.(${scheduleIds.join(',')}),and(schedule_id.is.null,sched_teacher_id.eq.${user?.id})`);
@@ -802,6 +805,26 @@ const Attendance = () => {
     sakit: deduplicatedRecords.filter((r) => r.status === 'sakit').length,
     alpa: deduplicatedRecords.filter((r) => r.status === 'alpa').length,
   }), [deduplicatedRecords]);
+
+  /** Data untuk infografis (sesuai filter aktif) */
+  const infographicRecords = React.useMemo<InfoRecord[]>(() => deduplicatedRecords.map((r) => ({
+    student_id: r.student_id,
+    date: r.date,
+    status: r.status,
+    name: toTitleCase(r.students?.full_name || ''),
+    className: r.students?.classes?.name ? shortClass(r.students.classes.name) : 'Tanpa Kelas',
+    gender: normGender(r.students),
+  })), [deduplicatedRecords]);
+  const infographicClasses = React.useMemo(() => {
+    const list = filterClass !== 'all'
+      ? (classes || []).filter((c: any) => c.id === filterClass)
+      : (classes || []);
+    return list.map((c: any) => shortClass(c.name));
+  }, [classes, filterClass]);
+  const infographicScope = [
+    filterClass !== 'all' ? `Kelas ${shortClass(classes?.find((c: any) => c.id === filterClass)?.name)}` : 'Semua kelas',
+    filterSubject !== 'all' ? filterSubject : 'Semua mapel',
+  ].join(' · ');
 
   const absentByReason = React.useMemo(() => ({
     izin: deduplicatedRecords.filter((r) => r.status === 'izin'),
@@ -1646,6 +1669,10 @@ const Attendance = () => {
             <Button variant="outline" onClick={handleExport} className="gap-2" size="sm">
               <Download className="h-4 w-4" />
               <span className="hidden sm:inline">CSV</span>
+            </Button>
+            <Button variant="outline" onClick={() => setInfographicOpen(true)} className="gap-2" size="sm">
+              <BarChart3 className="h-4 w-4" />
+              <span className="hidden sm:inline">Infografis</span>
             </Button>
             {(userRole === 'teacher' || userRole === 'guru_piket' || userRole === 'kesiswaan' || userRole === 'admin') && (
               <>
@@ -2504,6 +2531,16 @@ const Attendance = () => {
           </CardContent>
         </Card>
       </div>
+      <AttendanceInfographicDialog
+        open={infographicOpen}
+        onClose={() => setInfographicOpen(false)}
+        records={infographicRecords}
+        allClasses={infographicClasses}
+        startDate={filterStartDate}
+        endDate={filterEndDate}
+        scopeLabel={infographicScope}
+        schoolName={(schoolSettings as any)?.school_name || 'SMP Negeri 8 Ciamis'}
+      />
     </DashboardLayout>
   );
 };
