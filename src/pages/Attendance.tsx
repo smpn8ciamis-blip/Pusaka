@@ -436,6 +436,7 @@ const Attendance = () => {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedMonth, setSelectedMonth] = useState<string>('');
+  const [loadProgress, setLoadProgress] = useState<{ done: number; total: number } | null>(null);
   const itemsPerPage = 50;
 
   const { data: attendanceDaySettings } = useAttendanceDaySettings();
@@ -628,7 +629,7 @@ const Attendance = () => {
     }
   }, [existingAttendance]);
 
-  const { data: attendanceRecords, error: attendanceError } = useQuery({
+  const { data: attendanceRecords, error: attendanceError, isFetching: attendanceFetching } = useQuery({
     queryKey: ['attendance-records', filterStartDate, filterEndDate, filterClass, filterSubject, userRole, user?.id],
     queryFn: async () => {
       let scheduleIds: string[] = [];
@@ -656,6 +657,7 @@ const Attendance = () => {
       const teacherFilter = userRole === 'teacher' && scheduleIds.length > 0
         ? `schedule_id.in.(${scheduleIds.join(',')}),and(schedule_id.is.null,sched_teacher_id.eq.${user?.id})`
         : null;
+      setLoadProgress(null);
       const rows: any[] = await fetchAttendanceChunked<any>(filterStartDate, filterEndDate, async (cs, ce, from, to) => {
         let query = supabase
           .from('attendance')
@@ -670,7 +672,7 @@ const Attendance = () => {
           .range(from, to);
         if (error) throw error;
         return data || [];
-      });
+      }, { concurrency: 6, onProgress: (done, total) => setLoadProgress({ done, total }) });
 
       if (filterSubject !== 'all') return rows.filter((r) => (r.schedules?.subject || (r as any).sched_subject) === filterSubject);
       return rows;
@@ -791,6 +793,20 @@ const Attendance = () => {
     const today = new Date();
     setFilterStartDate(toISODate(startOfMonth(today)));
     setFilterEndDate(toISODate(endOfMonth(today)));
+    setSelectedMonth('');
+    setCurrentPage(1);
+  };
+
+  // Satu tahun pelajaran penuh (1 Juli – 30 Juni) mengikuti Tahun Pelajaran yang dipilih di bilah atas.
+  // Akhir rentang dibatasi sampai hari ini agar tidak meminta data hari yang belum terjadi.
+  const handleSchoolYear = () => {
+    const today = new Date();
+    const m = /^(\d{4})/.exec(selectedYear || '');
+    const startYear = m ? parseInt(m[1], 10) : (today.getMonth() >= 6 ? today.getFullYear() : today.getFullYear() - 1);
+    const start = new Date(startYear, 6, 1);
+    const end = new Date(startYear + 1, 5, 30);
+    setFilterStartDate(toISODate(start));
+    setFilterEndDate(toISODate(end > today ? today : end));
     setSelectedMonth('');
     setCurrentPage(1);
   };
@@ -949,6 +965,10 @@ const Attendance = () => {
      ============================================================ */
   const handleExportPDF = async () => {
     if (!deduplicatedRecords) return;
+    if (deduplicatedRecords.length > 20000) {
+      toast.error(`Laporan terlalu besar untuk PDF (${deduplicatedRecords.length.toLocaleString('id-ID')} baris). Gunakan Export CSV, Rekap per mapel, atau persempit rentang tanggal.`);
+      return;
+    }
     const doc = new jsPDF();
     const startY = await addLetterheadToPDF(doc, schoolSettings);
 
@@ -1068,7 +1088,10 @@ const Attendance = () => {
     for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
       dates.push(toISODate(d));
     }
-    const dayNumbers = dates.map((date) => parseInt(date.slice(8, 10), 10));
+    // Rentang > 62 hari: kolom per tanggal tidak muat di kertas, jadi hanya total H/T/S/I/A per siswa.
+    const showDayColumns = dates.length <= 62;
+    if (!showDayColumns) toast.info('Rentang lebih dari 62 hari: rekap dicetak sebagai total per siswa (tanpa kolom per tanggal).');
+    const dayNumbers = showDayColumns ? dates.map((date) => parseInt(date.slice(8, 10), 10)) : [];
     const headers = ['No', 'NISN', 'Nama Siswa', ...dayNumbers.map((d) => d.toString()), 'H', 'T', 'S', 'I', 'A'];
 
     const attendanceMap = new Map<string, Map<string, string>>();
@@ -1081,8 +1104,13 @@ const Attendance = () => {
       attendanceMap.get(record.student_id)?.set(record.date, statusCode);
     });
 
+    const recordsByStudent = new Map<string, any[]>();
+    deduplicatedRecords.forEach((r) => {
+      const list = recordsByStudent.get(r.student_id);
+      if (list) list.push(r); else recordsByStudent.set(r.student_id, [r]);
+    });
     const studentStats = studentsList.map((student: any) => {
-      const studentRecords = deduplicatedRecords.filter((r) => r.student_id === student.id);
+      const studentRecords = recordsByStudent.get(student.id) || [];
       return {
         id: student.id, nisn: student.nisn || student.nis, nis: student.nis,
         full_name: student.full_name,
@@ -1097,7 +1125,7 @@ const Attendance = () => {
     const tableData = studentStats.map((student, index) => {
       const studentAttendance = attendanceMap.get(student.id) || new Map();
       const row: any[] = [index + 1, student.nisn, toTitleCase(student.full_name)];
-      dates.forEach((date) => { row.push(studentAttendance.get(date) || '-'); });
+      if (showDayColumns) dates.forEach((date) => { row.push(studentAttendance.get(date) || '-'); });
       row.push(
         student.hadir.toString(), student.terlambat.toString(),
         student.sakit.toString(), student.izin.toString(), student.alpa.toString(),
@@ -2139,6 +2167,9 @@ const Attendance = () => {
                 <Button variant="outline" size="sm" onClick={handleThisMonth} className="gap-1 h-8 text-[11px] px-2 md:h-9 md:text-sm md:px-3">
                   <Calendar className="h-3 w-3 md:h-3.5 md:w-3.5" /> Bulan Ini
                 </Button>
+                <Button variant="outline" size="sm" onClick={handleSchoolYear} className="gap-1 h-8 text-[11px] px-2 md:h-9 md:text-sm md:px-3">
+                  <Calendar className="h-3 w-3 md:h-3.5 md:w-3.5" /> Tahun Pelajaran{selectedYear ? ` ${selectedYear}` : ''}
+                </Button>
                 <Select value={selectedMonth} onValueChange={handleMonthSelect}>
                   <SelectTrigger className="w-[110px] md:w-[180px] h-8 md:h-9 text-[11px] md:text-sm">
                     <SelectValue placeholder="Pilih Bulan" />
@@ -2432,7 +2463,9 @@ const Attendance = () => {
                 <ClipboardCheck className="h-4 w-4 md:h-5 md:w-5 text-primary" /> Rekap Detail Absensi
               </div>
               <p className="text-xs md:text-sm text-muted-foreground font-normal">
-                Menampilkan {paginatedRecords.length} dari {sortedRecords.length} data
+                {attendanceFetching
+                  ? `Memuat data… ${loadProgress ? `${Math.round((loadProgress.done / Math.max(1, loadProgress.total)) * 100)}% (${loadProgress.done}/${loadProgress.total} potongan)` : ''}`
+                  : `Menampilkan ${paginatedRecords.length} dari ${sortedRecords.length} data`}
               </p>
             </CardTitle>
           </CardHeader>
