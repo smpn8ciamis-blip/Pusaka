@@ -390,10 +390,14 @@ const HomeroomAttendance = () => {
       const studentIds = students?.map((s) => s.id) || [];
       if (studentIds.length === 0) return [];
 
-      const { data, error } = await supabase
-        .from('attendance')
-        .select(
-          `
+      // PostgREST membatasi 1000 baris per permintaan; satu kelas sebulan bisa ribuan baris. Ambil semua halaman.
+      const PAGE = 1000;
+      const rows: any[] = [];
+      for (let page = 0; page < 200; page++) {
+        const { data, error } = await supabase
+          .from('attendance')
+          .select(
+            `
           *,
           students (
             id,
@@ -401,14 +405,18 @@ const HomeroomAttendance = () => {
             nis
           )
         `
-        )
-        .in('student_id', studentIds)
-        .gte('date', filterStartDate)
-        .lte('date', filterEndDate)
-        .order('date', { ascending: false });
-
-      if (error) throw error;
-      return data;
+          )
+          .in('student_id', studentIds)
+          .gte('date', filterStartDate)
+          .lte('date', filterEndDate)
+          .order('date', { ascending: false })
+          .order('id', { ascending: true })
+          .range(page * PAGE, page * PAGE + PAGE - 1);
+        if (error) throw error;
+        rows.push(...(data || []));
+        if (!data || data.length < PAGE) break;
+      }
+      return rows;
     },
     enabled: !!homeroomClass?.id && !!students,
   });
