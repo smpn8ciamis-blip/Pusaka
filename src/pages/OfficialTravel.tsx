@@ -29,6 +29,7 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DataPagination } from "@/components/ui/data-pagination";
 import { usePagination } from "@/hooks/usePagination";
 import { notifyBotTravelCreated } from "@/lib/waBot";
+import { selectInChunks } from "@/lib/inChunks";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -172,7 +173,7 @@ export default function OfficialTravel() {
   // -------------------------------------------------------------------------
 
   // Surat tugas + pelaksana (di-batch: 4 query total, bukan N+1)
-  const { data: assignmentLetters, isLoading: loadingAssignmentLetters } = useQuery({
+  const { data: assignmentLetters, isLoading: loadingAssignmentLetters, error: assignmentLettersError } = useQuery({
     queryKey: ["assignment-letters-for-sppd"],
     queryFn: async () => {
       const { data: letters, error: lettersError } = await supabase
@@ -184,26 +185,26 @@ export default function OfficialTravel() {
 
       const ids = letters.map((l) => l.id);
 
-      const { data: letterTeachers, error: ltError } = await supabase
+      // Daftar id dipecah per 40 agar URL tidak kepanjangan (gerbang menjawab 502 bila ratusan id sekaligus)
+      const letterTeachers = await selectInChunks<any>(ids, (chunk) => supabase
         .from("assignment_letter_teachers")
         .select(`assignment_letter_id, teacher_id, order_index, teachers (id, nip, subject, user_id, pangkat_golongan, jabatan)`)
-        .in("assignment_letter_id", ids)
-        .order("order_index", { ascending: true });
-      if (ltError) throw ltError;
+        .in("assignment_letter_id", chunk)
+        .order("order_index", { ascending: true }));
 
       const userIds = unique((letterTeachers || []).map((lt: any) => lt.teachers?.user_id));
       let profileMap: Record<string, any> = {};
       if (userIds.length > 0) {
-        const { data: profiles } = await supabase.from("profiles_public").select("id, full_name").in("id", userIds);
+        const profiles = await selectInChunks<any>(userIds as string[], (chunk) =>
+          supabase.from("profiles_public").select("id, full_name").in("id", chunk)).catch(() => []);
         profileMap = Object.fromEntries((profiles || []).map((p: any) => [p.id, p]));
       }
 
-      const { data: manualRows, error: manualError } = await supabase
+      const manualRows = await selectInChunks<any>(ids, (chunk) => supabase
         .from("assignment_letter_manual_executors")
         .select("id, assignment_letter_id, full_name, nip, pangkat_golongan, jabatan, order_index")
-        .in("assignment_letter_id", ids)
-        .order("order_index", { ascending: true });
-      if (manualError) throw manualError;
+        .in("assignment_letter_id", chunk)
+        .order("order_index", { ascending: true }));
 
       const teachersByLetter = groupBy(
         (letterTeachers || []).map((lt: any) => ({
@@ -223,6 +224,13 @@ export default function OfficialTravel() {
       }));
     },
   });
+
+  useEffect(() => {
+    if (assignmentLettersError) {
+      console.error('Gagal memuat surat tugas:', assignmentLettersError);
+      toast.error('Gagal memuat daftar surat tugas. Muat ulang halaman; bila berulang hubungi admin.');
+    }
+  }, [assignmentLettersError]);
 
   const selectedLetterData = assignmentLetters?.find((al: any) => al.id === selectedAssignmentLetter);
 
@@ -310,32 +318,31 @@ export default function OfficialTravel() {
 
       const ids = letters.map((l) => l.id);
 
-      const { data: travelTeachers, error: ttError } = await supabase
+      const travelTeachers = await selectInChunks<any>(ids, (chunk) => supabase
         .from("official_travel_teachers")
         .select(`official_travel_id, teacher_id, order_index, teachers (id, nip, subject, user_id, pangkat_golongan, jabatan)`)
-        .in("official_travel_id", ids)
-        .order("order_index", { ascending: true });
-      if (ttError) throw ttError;
+        .in("official_travel_id", chunk)
+        .order("order_index", { ascending: true }));
 
       const userIds = unique((travelTeachers || []).map((tt: any) => tt.teachers?.user_id));
       let profileMap: Record<string, any> = {};
       if (userIds.length > 0) {
-        const { data: profiles } = await supabase.from("profiles_public").select("id, full_name").in("id", userIds);
+        const profiles = await selectInChunks<any>(userIds as string[], (chunk) =>
+          supabase.from("profiles_public").select("id, full_name").in("id", chunk)).catch(() => []);
         profileMap = Object.fromEntries((profiles || []).map((p: any) => [p.id, p]));
       }
 
-      const { data: followers, error: followerError } = await supabase
+      const followers = await selectInChunks<any>(ids, (chunk) => supabase
         .from("official_travel_followers")
         .select("id, official_travel_id, follower_type, teacher_id, student_id, manual_executor_name, manual_executor_nip, manual_executor_pangkat, manual_executor_jabatan, order_index")
-        .in("official_travel_id", ids)
-        .order("order_index", { ascending: true });
-      if (followerError) throw followerError;
+        .in("official_travel_id", chunk)
+        .order("order_index", { ascending: true }));
 
       const studentIds = unique((followers || []).filter((f) => f.follower_type === "student").map((f) => f.student_id));
       let studentMap: Record<string, any> = {};
       if (studentIds.length > 0) {
-        const { data: studentRows } = await supabase
-          .from("students").select("id, nis, nisn, full_name, class_id").in("id", studentIds);
+        const studentRows = await selectInChunks<any>(studentIds as string[], (chunk) => supabase
+          .from("students").select("id, nis, nisn, full_name, class_id").in("id", chunk)).catch(() => []);
 
         const classIds = unique((studentRows || []).map((s) => s.class_id)) as string[];
         let classMap: Record<string, string> = {};
