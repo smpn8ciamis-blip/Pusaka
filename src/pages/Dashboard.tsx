@@ -44,6 +44,8 @@ const ROLE_REDIRECTS: Record<string, string> = {
   guru_piket: '/guru-piket-dashboard',
   admin_web: '/web-admin',
   pembina_ekskul: '/ekskul-journal',
+  bendahara_komite: '/komite-dashboard',
+  korlas: '/korlas-dashboard',
 };
 
 const LOW_ATTENDANCE_THRESHOLD = 80;

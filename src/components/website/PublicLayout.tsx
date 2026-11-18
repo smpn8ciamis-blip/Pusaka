@@ -17,6 +17,7 @@ const ALL_NAV: { to: string; label: string; end?: boolean; key?: string }[] = [
   { to: "/website/agenda", label: "Agenda" },
   { to: "/website/galeri", label: "Galeri" },
   { to: "/website/guru", label: "Guru & Staff", key: "show_guru_page" },
+  { to: "/website/komite", label: "Komite" },
   { to: "/website/kontak", label: "Kontak" },
 ];
 
@@ -120,7 +121,7 @@ export default function PublicLayout() {
                 to={n.to}
                 end={n.end}
                 className={({ isActive }) =>
-                  `px-3 py-2 text-[13px] font-semibold rounded-full transition ${
+                  `px-2 xl:px-3 py-2 text-[13px] font-semibold rounded-full transition ${
                     isActive ? "text-white bg-[#1E40AF] shadow-sm" : "text-slate-600 hover:text-[#1E40AF] hover:bg-blue-50"
                   }`
                 }
@@ -202,6 +203,7 @@ export default function PublicLayout() {
               <li><Link to="/website/berita" className="hover:text-white text-slate-400">Berita</Link></li>
               <li><Link to="/website/agenda" className="hover:text-white text-slate-400">Agenda</Link></li>
               <li><Link to="/website/galeri" className="hover:text-white text-slate-400">Galeri</Link></li>
+              <li><Link to="/website/komite" className="hover:text-white text-slate-400">Komite &amp; Penggalangan Dana</Link></li>
               <li><Link to="/daftar-siswa" className="hover:text-white text-slate-400">Pendaftaran Siswa</Link></li>
               <li><Link to="/layanan-publik" className="hover:text-white text-slate-400">Layanan Publik</Link></li>
               <li><Link to="/pengaduan" className="hover:text-white text-slate-400">Pengaduan</Link></li>

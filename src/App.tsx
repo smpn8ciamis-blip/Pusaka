@@ -58,6 +58,8 @@ const AssignmentLetters = lazy(() => import("./pages/AssignmentLetters"));
 const OfficialTravel = lazy(() => import("./pages/OfficialTravel"));
 const MyLetters = lazy(() => import("./pages/MyLetters"));
 const StaffRegistration = lazy(() => import("./pages/StaffRegistration"));
+const KomiteBendahara = lazy(() => import("./pages/KomiteBendahara"));
+const KorlasDashboard = lazy(() => import("./pages/KorlasDashboard"));
 const BendaharaDashboard = lazy(() => import("./pages/BendaharaDashboard"));
 const BulkDataEditor = lazy(() => import("./pages/BulkDataEditor"));
 const BendaharaSettings = lazy(() => import("./pages/BendaharaSettings"));
@@ -143,6 +145,7 @@ const WebGaleri = lazy(() => import("./pages/website/Galeri"));
 const WebAgenda = lazy(() => import("./pages/website/Agenda"));
 const WebGuru = lazy(() => import("./pages/website/Guru"));
 const WebKontak = lazy(() => import("./pages/website/Kontak"));
+const WebKomite = lazy(() => import("./pages/website/Komite"));
 // Web admin
 const AdminLayout = lazy(() => import("./pages/web-admin/AdminLayout"));
 const AdminDashboard = lazy(() => import("./pages/web-admin/AdminDashboard"));
@@ -237,6 +240,7 @@ const App = () => (
                 <Route path="website/agenda" element={<WebAgenda />} />
                 <Route path="website/galeri" element={<WebGaleri />} />
                 <Route path="website/guru" element={<WebGuru />} />
+                <Route path="website/komite" element={<WebKomite />} />
                 <Route path="website/kontak" element={<WebKontak />} />
               </Route>
               {/* Web admin panel */}
@@ -334,6 +338,8 @@ const App = () => (
               } />
               {/* ===================================================== */}
 
+              <Route path="/komite-dashboard" element={<ProtectedRoute allowedRoles={['bendahara_komite', 'admin', 'super_admin']}><KomiteBendahara /></ProtectedRoute>} />
+              <Route path="/korlas-dashboard" element={<ProtectedRoute allowedRoles={['korlas']}><KorlasDashboard /></ProtectedRoute>} />
               <Route path="/bendahara-dashboard" element={<ProtectedRoute><BendaharaDashboard /></ProtectedRoute>} />
               <Route path="/staff-registration" element={<ProtectedRoute requireRole="admin"><StaffRegistration /></ProtectedRoute>} />
               <Route path="/staff-accounts" element={<ProtectedRoute requireRole="admin"><StaffAccounts /></ProtectedRoute>} />

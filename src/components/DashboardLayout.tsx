@@ -13,7 +13,7 @@ import {
   Award, FileSignature, Plane, Receipt, FileSpreadsheet, Wallet, FileBarChart,
   Inbox, Send, Hammer, Vote, Upload, Bell, Lock, Landmark, Server, UserMinus,
   Sunrise, Sparkles, CreditCard, ScanLine, LayoutDashboard, Search, Star, Moon, CalendarDays, KeyRound, Fingerprint, Briefcase, HeartHandshake,
-  Gauge, Images, Phone, UserPlus, Printer,
+  Gauge, Images, Phone, UserPlus, Printer, Globe,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -59,6 +59,8 @@ const roleLabels: Record<string, string> = {
   polling: 'Polling',
   billing: 'Billing',
   staf: 'Staf',
+  bendahara_komite: 'Bendahara Komite',
+  korlas: 'Korlas',
   teacher: 'Guru',
 };
 
@@ -627,6 +629,23 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: Settings, label: 'Pengaturan', href: '/settings' },
   ];
 
+  const bendaharaKomiteMenuItems: MenuItem[] = [
+    { icon: LayoutDashboard, label: 'Dashboard Komite', href: '/komite-dashboard' },
+    { icon: Wallet, label: 'Pendapatan', href: '/komite-dashboard?tab=pendapatan' },
+    { icon: Landmark, label: 'Rekening Komite', href: '/komite-dashboard?tab=rekening' },
+    { icon: Users, label: 'Korlas', href: '/komite-dashboard?tab=korlas' },
+    { icon: Settings, label: 'Target & Pengaturan', href: '/komite-dashboard?tab=pengaturan' },
+    { icon: Globe, label: 'Halaman Publik Komite', href: '/website/komite' },
+  ];
+
+  const korlasMenuItems: MenuItem[] = [
+    { icon: LayoutDashboard, label: 'Dashboard Korlas', href: '/korlas-dashboard' },
+    { icon: Wallet, label: 'Input Sumbangan', href: '/korlas-dashboard?tab=input' },
+    { icon: Users, label: 'Daftar Siswa', href: '/korlas-dashboard?tab=siswa' },
+    { icon: FileText, label: 'Riwayat', href: '/korlas-dashboard?tab=riwayat' },
+    { icon: Globe, label: 'Halaman Publik Komite', href: '/website/komite' },
+  ];
+
   const pembinaEkskulMenuItems: MenuItem[] = [
     { icon: BookOpen, label: 'Jurnal Ekskul', href: '/ekskul-journal' },
     { icon: Inbox, label: 'Disposisi Saya', href: '/disposisi-saya' },
@@ -667,6 +686,10 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
               ? osisMenuItems
               : userRole === 'guru_piket'
                 ? guruPiketMenuItems
+                : userRole === 'bendahara_komite'
+                  ? bendaharaKomiteMenuItems
+                : userRole === 'korlas'
+                  ? korlasMenuItems
                 : userRole === 'pembina_ekskul'
                   ? pembinaEkskulMenuItems
                   : userRole === 'polling'
