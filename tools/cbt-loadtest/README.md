@@ -50,6 +50,8 @@ export SERVICE_ROLE_KEY="<service role key>"   # hanya untuk seed & cleanup
 - **galat** harus 0 atau sangat kecil (< 1%).
 - **p95 ms** untuk `cbt_heartbeat` dan `cbt_submit_session` sebaiknya di bawah 2000 ms. `cbt_exam_paper` boleh lebih lambat saat serentak karena membawa seluruh soal (lihat kolom KB/resp).
 - Hasil `LOLOS` berarti galat < 1% dan p95 < 2 detik.
+- Skrip ini memanggil API langsung, jadi **tidak meniru jeda acak di aplikasi siswa** (setelah token: 2-20 detik sebelum soal diunduh; saat Selesai 0-8 detik dan saat waktu habis 0-15 detik sebelum jawaban dikirim). Karena itu `--sync-start` dan `--sync-submit` tetap mewakili skenario terburuk; di hari ujian sebenarnya lonjakannya lebih landai.
+- Setelah migrasi `20261118100000_cbt_paket_soal.sql`, `cbt_exam_paper` memakai paket soal yang disimpan per ujian (dirakit sekali, dibagi ke semua siswa). Bandingkan p95 `cbt_exam_paper` sebelum dan sesudah migrasi bila ingin melihat dampaknya.
 - Bila `login` banyak gagal: GoTrue membatasi laju masuk per IP. Turunkan `--login-rate`, atau naikkan `GOTRUE_RATE_LIMIT_TOKEN_REFRESH`/`GOTRUE_RATE_LIMIT_SIGN_IN_SIGN_UPS` di pengaturan Supabase Anda untuk sementara. Token login berlaku sekitar 1 jam, jadi jalankan `run` tidak lebih dari 1 jam setelah login.
 
 ## Bila ada yang gagal di tengah `seed`

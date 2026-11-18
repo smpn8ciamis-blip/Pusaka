@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { Clock, CheckCircle, FileText, Play, KeyRound, RotateCcw, AlertTriangle, Shield, ShieldAlert, HardDriveDownload, Maximize } from 'lucide-react';
+import { Clock, CheckCircle, FileText, Play, KeyRound, RotateCcw, AlertTriangle, Shield, ShieldAlert, HardDriveDownload, Maximize, Send, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { id as idLocale } from 'date-fns/locale';
@@ -24,6 +24,10 @@ import {
   releaseTabLock, resumeTimeLeft, rewriteImages, saveProgress, tryAcquireTabLock,
   type LocalProgress, type PrefetchProgress, type StoredPaper,
 } from '@/lib/cbtLocal';
+import {
+  CBT_DOWNLOAD_DELAY, CBT_DOWNLOAD_RETRY_DELAY, CBT_SUBMIT_DELAY_MANUAL, CBT_SUBMIT_DELAY_TIMEOUT,
+  randomDelaySeconds, retryDelayMs, waitWithCountdown,
+} from '@/lib/cbtJitter';
 
 // Urutan acak yang stabil per sesi (tetap sama saat siswa melanjutkan ujian)
 const seededShuffle = <T,>(arr: T[], seedStr: string): T[] => {
@@ -35,7 +39,6 @@ const seededShuffle = <T,>(arr: T[], seedStr: string): T[] => {
   for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
   return a;
 };
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const isFinished = (st: string) => st === 'completed' || st === 'timeout';
 const isMissingRpc = (e: any) => e?.code === 'PGRST202' || e?.code === '42883' || /could not find the function/i.test(e?.message || '');
 
@@ -46,8 +49,30 @@ const HEARTBEAT_MS = 45000;
 const HEARTBEAT_PAUSED_MS = 15000;
 const LOCAL_SAVE_DEBOUNCE_MS = 300;
 
-interface PrepState { open: boolean; percent: number; label: string; imagesDone: number; imagesTotal: number; error: string | null; examTitle: string; canRetry: boolean }
-const PREP_CLOSED: PrepState = { open: false, percent: 0, label: '', imagesDone: 0, imagesTotal: 0, error: null, examTitle: '', canRetry: false };
+// waitLeft/waitTotal: hitung mundur acak sebelum soal diunduh (agar ratusan siswa tidak mengunduh serentak)
+interface PrepState { open: boolean; percent: number; label: string; imagesDone: number; imagesTotal: number; error: string | null; examTitle: string; canRetry: boolean; waitLeft: number; waitTotal: number }
+const PREP_CLOSED: PrepState = { open: false, percent: 0, label: '', imagesDone: 0, imagesTotal: 0, error: null, examTitle: '', canRetry: false, waitLeft: 0, waitTotal: 0 };
+
+// Progres pengumpulan jawaban: antre (jeda acak) -> kirim -> (coba lagi) -> selesai
+interface SubmitState { open: boolean; phase: 'wait' | 'send' | 'retry' | 'error'; waitLeft: number; waitTotal: number; attempt: number; maxAttempts: number; retryLeft: number; error: string | null; timeout: boolean }
+const SUBMIT_CLOSED: SubmitState = { open: false, phase: 'wait', waitLeft: 0, waitTotal: 0, attempt: 0, maxAttempts: 0, retryLeft: 0, error: null, timeout: false };
+
+function SubmitStep({ state, label, detail }: { state: 'done' | 'active' | 'todo' | 'error'; label: string; detail?: string }) {
+  return (
+    <li className="flex items-start gap-2.5">
+      <span className="mt-0.5 shrink-0">
+        {state === 'done' ? <CheckCircle className="h-4 w-4 text-emerald-600" />
+          : state === 'active' ? <Loader2 className="h-4 w-4 animate-spin text-primary" />
+          : state === 'error' ? <AlertTriangle className="h-4 w-4 text-destructive" />
+          : <span className="block h-4 w-4 rounded-full border border-muted-foreground/40" />}
+      </span>
+      <span className={state === 'todo' ? 'text-muted-foreground' : state === 'error' ? 'text-destructive' : ''}>
+        {label}
+        {detail && <span className="block text-xs text-muted-foreground">{detail}</span>}
+      </span>
+    </li>
+  );
+}
 
 export default function CbtStudentExam() {
   const { user } = useAuth();
@@ -58,6 +83,7 @@ export default function CbtStudentExam() {
   const [orderedQuestions, setOrderedQuestions] = useState<any[]>([]);
   const [imageMap, setImageMap] = useState<Record<string, string>>({});
   const [prep, setPrep] = useState<PrepState>(PREP_CLOSED);
+  const [submitState, setSubmitState] = useState<SubmitState>(SUBMIT_CLOSED);
   const [paused, setPaused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -140,6 +166,7 @@ export default function CbtStudentExam() {
     answersRef.current = {}; essaysRef.current = {}; violationsRef.current = 0; localRef.current = emptyProgress();
     if (localTimerRef.current) { clearTimeout(localTimerRef.current); localTimerRef.current = null; }
     sessionRef.current = null; examRef.current = null;
+    setSubmitState(SUBMIT_CLOSED);
   };
 
   /** Ujian selesai / diakhiri: hapus soal dan jawaban dari perangkat. */
@@ -173,14 +200,22 @@ export default function CbtStudentExam() {
     if (list.length) persistLocalNow();
   };
 
-  // Kumpulkan: kirim SEMUA jawaban sekaligus (idempotent), nilai dihitung di server; coba ulang bila jaringan bermasalah
-  const handleSubmitExam = useCallback(async (timeout = false) => {
+  // Kumpulkan: kirim SEMUA jawaban sekaligus (idempotent), nilai dihitung di server.
+  // Urutan: jeda acak (antre) -> kirim -> bila gagal, coba lagi dengan jeda acak. Progres tampil di dialog "Mengumpulkan jawaban".
+  // Jeda acak mencegah ratusan siswa mengirim di detik yang sama (terutama saat waktu habis); jawaban sudah aman di perangkat.
+  const handleSubmitExam = useCallback(async (timeout = false, opts?: { noDelay?: boolean }) => {
     const sess = sessionRef.current;
     if (!sess || submittingRef.current) return;
     submittingRef.current = true; setSubmitting(true);
     persistLocalNow();
+    const maxAttempts = timeout ? 12 : 5;
+    const delay = opts?.noDelay ? 0 : randomDelaySeconds(timeout ? CBT_SUBMIT_DELAY_TIMEOUT : CBT_SUBMIT_DELAY_MANUAL);
+    setSubmitState({ ...SUBMIT_CLOSED, open: true, phase: delay > 0 ? 'wait' : 'send', waitLeft: delay, waitTotal: delay, maxAttempts, timeout });
+    if (delay > 0) await waitWithCountdown(delay * 1000, (left) => setSubmitState((st) => ({ ...st, waitLeft: left })));
+    persistLocalNow();
     let lastErr: any = null;
-    for (let attempt = 0; attempt < (timeout ? 12 : 5); attempt++) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      setSubmitState((st) => ({ ...st, phase: 'send', attempt: attempt + 1, error: null }));
       try {
         const { data, error } = await (supabase as any).rpc('cbt_submit_session', {
           p_session_id: sess.id, p_answers: answersRef.current, p_essays: essaysRef.current, p_timeout: timeout,
@@ -192,10 +227,18 @@ export default function CbtStudentExam() {
         finishLocally(data?.grading_status === 'pending_essay' ? 'Ujian selesai! Menunggu koreksi essay.'
           : showScore ? `Ujian selesai! Nilai: ${Number(data?.score ?? 0).toFixed(1)}` : 'Ujian selesai!', sess.id);
         return;
-      } catch (e: any) { lastErr = e; await sleep(Math.min(8000, 1000 * 2 ** attempt)); }
+      } catch (e: any) {
+        lastErr = e;
+        if (attempt + 1 >= maxAttempts) break;
+        const wait = retryDelayMs(attempt);
+        setSubmitState((st) => ({ ...st, phase: 'retry', retryLeft: Math.ceil(wait / 1000), error: e?.message || 'koneksi bermasalah' }));
+        await waitWithCountdown(wait, (left) => setSubmitState((st) => ({ ...st, retryLeft: left })));
+      }
     }
-    submittingRef.current = false; setSubmitting(false);
-    toast.error('Jawaban belum terkirim: ' + (lastErr?.message || 'koneksi bermasalah') + '. Jawaban tetap aman di perangkat ini, tekan Selesai lagi saat koneksi pulih.');
+    // Gagal setelah semua percobaan: dialog tetap terbuka (submitting tetap true agar timer tidak memulai ulang sendiri);
+    // siswa menekan "Kirim Lagi". Jawaban tetap aman di perangkat.
+    submittingRef.current = false;
+    setSubmitState((st) => ({ ...st, phase: 'error', error: lastErr?.message || 'koneksi bermasalah' }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [persistLocalNow, userId]);
 
@@ -381,6 +424,14 @@ export default function CbtStudentExam() {
     toast.success(paper.failedImages.length ? `Ujian dimulai. ${paper.failedImages.length} gambar dimuat dari tautan asli.` : 'Ujian dimulai!');
   };
 
+  /** Hitung mundur acak sebelum unduh soal; sisa detik tampil di tombol "Unduh Soal" pada dialog. */
+  const waitBeforeDownload = async (sec: number) => {
+    if (sec <= 0) return;
+    setPrep((s) => ({ ...s, open: true, error: null, canRetry: false, percent: 0, label: 'Menunggu giliran unduh', waitLeft: sec, waitTotal: sec }));
+    await waitWithCountdown(sec * 1000, (left) => setPrep((s) => ({ ...s, waitLeft: left })));
+    setPrep((s) => ({ ...s, waitLeft: 0, waitTotal: 0, percent: 2, label: 'Mulai mengunduh…' }));
+  };
+
   const beginExam = async (exam: any, token: string | null) => {
     if (beginningRef.current) return;
     beginningRef.current = true;
@@ -394,7 +445,10 @@ export default function CbtStudentExam() {
       const { session, exam: pubExam } = data as { session: any; exam: any };
       ctx = { exam, token, session, pubExam };
       prepCtxRef.current = ctx;
-      // 2. unduh semua soal ke perangkat, lalu mulai
+      // 2. jeda acak (tampil di tombol "Unduh Soal") supaya ratusan siswa tidak mengunduh soal serentak.
+      //    Dilewati bila soal sudah ada di perangkat (melanjutkan ujian).
+      if (!(await loadPaper(session.id).catch(() => null))) await waitBeforeDownload(randomDelaySeconds(CBT_DOWNLOAD_DELAY));
+      // 3. unduh semua soal ke perangkat, lalu mulai
       await loadAndStart(ctx);
     } catch (e: any) {
       setPrep((s) => ({ ...s, open: true, error: e?.message || 'Gagal mengunduh soal', canRetry: !!ctx }));
@@ -406,7 +460,10 @@ export default function CbtStudentExam() {
     if (!ctx || beginningRef.current) return;
     beginningRef.current = true;
     setPrep((s) => ({ ...s, error: null, percent: 2, label: 'Mencoba lagi…' }));
-    try { await loadAndStart(ctx); }
+    try {
+      if (!(await loadPaper(ctx.session.id).catch(() => null))) await waitBeforeDownload(randomDelaySeconds(CBT_DOWNLOAD_RETRY_DELAY));
+      await loadAndStart(ctx);
+    }
     catch (e: any) { setPrep((s) => ({ ...s, error: e?.message || 'Gagal mengunduh soal', canRetry: true })); }
     finally { beginningRef.current = false; }
   };
@@ -414,6 +471,50 @@ export default function CbtStudentExam() {
 
   const formatTime = (s: number) => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
   const sessionsForExam = (id: string) => existingSessions.filter((s: any) => s.exam_id === id);
+
+  // Dialog progres pengumpulan jawaban (tampil di layar ujian)
+  const submitAnswered = orderedQuestions.filter((q: any) => (q.question_type === 'essay' ? !!essayAnswers[q.id] : !!answers[q.id])).length;
+  const submitPct = submitState.phase === 'wait'
+    ? 5 + (submitState.waitTotal > 0 ? (1 - submitState.waitLeft / submitState.waitTotal) * 25 : 0)
+    : 60;
+  const submitDialog = (
+    <Dialog open={submitState.open}>
+      <DialogContent onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><Send className="h-5 w-5" /> {submitState.timeout ? 'Waktu habis, mengumpulkan jawaban' : 'Mengumpulkan jawaban'}</DialogTitle>
+          <DialogDescription className="pt-1">{submitAnswered} dari {orderedQuestions.length} soal terjawab. Jawaban Anda tersimpan aman di perangkat ini.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <Progress value={submitPct} className="h-3" />
+          <ol className="space-y-2.5 text-sm">
+            <SubmitStep
+              state={submitState.phase === 'wait' ? 'active' : 'done'}
+              label="Antre pengumpulan"
+              detail={submitState.phase === 'wait' ? `Giliran Anda dalam ${submitState.waitLeft} dtk (agar tidak berebut dengan siswa lain)` : undefined} />
+            <SubmitStep
+              state={submitState.phase === 'wait' ? 'todo' : submitState.phase === 'error' ? 'error' : 'active'}
+              label={submitState.phase === 'error' ? 'Jawaban belum terkirim' : 'Mengirim jawaban ke server'}
+              detail={submitState.phase === 'send' ? `Percobaan ${Math.max(1, submitState.attempt)} dari ${submitState.maxAttempts}`
+                : submitState.phase === 'retry' ? `Koneksi bermasalah, mencoba lagi dalam ${submitState.retryLeft} dtk (percobaan ${submitState.attempt} dari ${submitState.maxAttempts})`
+                : submitState.phase === 'error' ? 'Periksa koneksi internet, lalu tekan Kirim Lagi.' : undefined} />
+            <SubmitStep state="todo" label="Nilai dihitung dan ujian selesai" />
+          </ol>
+          {submitState.phase === 'wait' && <p className="text-[11px] text-muted-foreground">Jangan tutup halaman ini sampai proses selesai.</p>}
+          {(submitState.phase === 'retry' || submitState.phase === 'error') && submitState.error && (
+            <p className="text-[11px] text-destructive break-words">{submitState.error}</p>
+          )}
+        </div>
+        {submitState.phase === 'error' && (
+          <DialogFooter>
+            {!submitState.timeout && (
+              <Button variant="outline" onClick={() => { setSubmitState(SUBMIT_CLOSED); setSubmitting(false); }}>Kembali ke soal</Button>
+            )}
+            <Button onClick={() => handleSubmitExam(submitState.timeout, { noDelay: true })}>Kirim Lagi</Button>
+          </DialogFooter>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
 
   // ===== ACTIVE EXAM VIEW =====
   if (activeSession && orderedQuestions.length > 0) {
@@ -579,6 +680,8 @@ export default function CbtStudentExam() {
           </DialogContent>
         </Dialog>
 
+        {submitDialog}
+
         {/* Exit token dialog */}
         <Dialog open={exitTokenOpen} onOpenChange={setExitTokenOpen}>
           <DialogContent>
@@ -731,11 +834,19 @@ export default function CbtStudentExam() {
         <Dialog open={prep.open}>
           <DialogContent onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><HardDriveDownload className="h-5 w-5" /> {prep.error ? 'Soal belum siap' : 'Mengunduh soal ke perangkat'}</DialogTitle>
+              <DialogTitle className="flex items-center gap-2"><HardDriveDownload className="h-5 w-5" /> {prep.error ? 'Soal belum siap' : prep.waitLeft > 0 ? 'Bersiap mengunduh soal' : 'Mengunduh soal ke perangkat'}</DialogTitle>
               <DialogDescription className="pt-1">{prep.examTitle}</DialogDescription>
             </DialogHeader>
             {prep.error ? (
               <p className="text-sm text-destructive">{prep.error}</p>
+            ) : prep.waitLeft > 0 ? (
+              <div className="space-y-3">
+                <p className="text-sm">Agar tidak berebut dengan siswa lain, soal akan diunduh otomatis setelah hitung mundur selesai. Jangan tutup halaman ini.</p>
+                <Progress value={prep.waitTotal > 0 ? (1 - prep.waitLeft / prep.waitTotal) * 100 : 0} className="h-2" />
+                <Button className="w-full gap-2" disabled>
+                  <HardDriveDownload className="h-4 w-4" /> Unduh Soal ({prep.waitLeft} dtk)
+                </Button>
+              </div>
             ) : (
               <div className="space-y-2">
                 <Progress value={prep.percent} className="h-3" />
