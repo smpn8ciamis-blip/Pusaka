@@ -2,11 +2,24 @@
 
 Mensimulasikan banyak siswa mengerjakan ujian CBT bersamaan, lalu menampilkan waktu respons (p50/p95/p99) dan jumlah galat tiap langkah. Hanya butuh **Node 18+**, tanpa paket tambahan.
 
+## Cara termudah: satu skrip di server (`uji-beban.sh`)
+Dijalankan **di server lewat SSH**. Skrip mengambil kunci API sendiri dari `.env` Supabase, menolak jalan bila ada ujian sungguhan berlangsung, membuat siswa uji, menjalankan uji, merekam CPU/RAM/swap/koneksi database/container, menghapus data uji, lalu mencetak ringkasan dan kesimpulan (hasil lengkap di `hasil-uji/<tanggal-jam>/`).
+
+```bash
+cd /srv/app/app/tools/cbt-loadtest
+bash uji-beban.sh --cek                    # periksa kesiapan saja, tidak membuat data
+bash uji-beban.sh 50                       # tahap 1
+bash uji-beban.sh 200                      # tahap 2
+bash uji-beban.sh 650 --serentak --hemat   # tahap 3: skenario terburuk, Studio/meta/vector dihentikan sementara
+```
+Opsi: `--durasi N`, `--login-rate N`, `--url ALAMAT` (mis. alamat publik agar lewat nginx/TLS), `--simpan-data`, `--paksa`. Ctrl+C aman: data uji tetap dihapus dan container yang dihentikan `--hemat` dinyalakan lagi.
+Keterbatasan: uji berjalan di server yang sama lewat jaringan lokal, jadi skripnya ikut memakai CPU (angka CPU cenderung sedikit lebih tinggi dari kenyataan) dan internet/Cloudflare sekolah tidak ikut teruji. Untuk mengujinya dari luar, pakai langkah manual di bawah dari komputer lain.
+
 ## Peringatan
 - Skrip membuat **data uji di database sungguhan**: kelas `LOADTEST-CBT`, ujian "LOADTEST ujian uji beban", dan siswa "Siswa Uji N". Hapus dengan `cleanup` setelah selesai. Jalankan di luar jam pelajaran/ujian.
 - `SERVICE_ROLE_KEY` memberi akses penuh ke database. Jangan di-commit dan jangan dibagikan. Isi hanya di terminal Anda.
 - Nilai uji tidak masuk menu Nilai (ujian uji tidak memilih komponen nilai).
-- Untuk hasil yang mewakili, jalankan dari **komputer/jaringan lain** (bukan dari server itu sendiri) agar jaringan ikut terukur.
+- Langkah manual di bawah paling mewakili bila dijalankan dari **komputer/jaringan lain** (bukan dari server itu sendiri) agar jaringan ikut terukur.
 
 ## Persiapan
 Isi variabel lingkungan (contoh Linux/macOS; di Windows PowerShell pakai `$env:NAMA="nilai"`):
