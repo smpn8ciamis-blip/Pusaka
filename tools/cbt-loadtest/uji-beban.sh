@@ -32,7 +32,8 @@ Pemakaian: bash uji-beban.sh [JUMLAH_SISWA] [opsi]
   --url ALAMAT      alamat API (default: http://127.0.0.1:<port Kong> di server ini)
   --cek             hanya periksa kesiapan, tidak membuat data uji
   --simpan-data     jangan hapus data uji di akhir (default: dihapus otomatis)
-  --paksa           tetap jalan walau terdeteksi ujian sungguhan (HATI-HATI)
+  --paksa           tetap jalan walau terdeteksi ujian sungguhan (HATI-HATI). Tulis di perintah yang sama:
+                    bash uji-beban.sh 50 --paksa
 EOF
 }
 
@@ -83,15 +84,22 @@ code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' -H "apikey: $ANON_KEY" "$SUP
 echo "  ✔ API di $SUPABASE_URL menjawab"
 
 psqlq() { docker exec -i supabase-db psql -U postgres -d postgres -tAX -c "$1" 2>/dev/null | tr -d '[:space:]'; }
-AKTIF=$(psqlq "select count(*) from cbt_exam_sessions s join cbt_exams e on e.id=s.exam_id where s.status='in_progress' and e.title not like 'LOADTEST%'")
+# "Ujian sungguhan berlangsung" = sesi in_progress yang masih aktif dalam 15 menit terakhir (heartbeat ~45-60 dtk).
+# Sesi lama yang menggantung (siswa menutup browser tanpa mengumpulkan) tidak memblokir uji.
+BASE_SQL="from cbt_exam_sessions s join cbt_exams e on e.id=s.exam_id where s.status='in_progress' and e.title not like 'LOADTEST%'"
+AKTIF=$(psqlq "select count(*) $BASE_SQL and coalesce(s.last_activity_at, s.created_at) > now() - interval '15 minutes'")
 case "$AKTIF" in
   ''|*[!0-9]*)
     [ "$PAKSA" -eq 1 ] || die "Tidak bisa memeriksa ujian yang sedang berlangsung (container supabase-db tidak terbaca). Pastikan tidak ada ujian sungguhan, lalu ulangi dengan --paksa." ;;
   *)
     if [ "$AKTIF" -gt 0 ] && [ "$PAKSA" -eq 0 ]; then
-      die "Ada $AKTIF sesi ujian sungguhan berstatus 'in_progress'. Uji beban DIBATALKAN supaya tidak mengganggu siswa. Bila sesi itu hanya sisa lama yang tidak aktif, ulangi dengan --paksa."
+      echo "✖ Ada $AKTIF sesi ujian sungguhan yang aktif dalam 15 menit terakhir (kemungkinan ujian sedang berlangsung):" >&2
+      docker exec -i supabase-db psql -U postgres -d postgres -tAX -F ' | ' -c "select '   - ' || e.title || ' | aktif terakhir ' || to_char(coalesce(s.last_activity_at, s.created_at) at time zone 'Asia/Jakarta', 'DD/MM HH24:MI') $BASE_SQL and coalesce(s.last_activity_at, s.created_at) > now() - interval '15 minutes' order by 1 limit 5" >&2 2>/dev/null
+      die "Uji beban DIBATALKAN supaya tidak mengganggu siswa. Bila ternyata bukan ujian yang sedang berjalan, ulangi dengan --paksa."
     fi
-    echo "  ✔ Tidak ada ujian sungguhan yang sedang berlangsung" ;;
+    LAMA=$(psqlq "select count(*) $BASE_SQL and coalesce(s.last_activity_at, s.created_at) <= now() - interval '15 minutes'")
+    echo "  ✔ Tidak ada ujian sungguhan yang sedang aktif"
+    case "$LAMA" in ''|0|*[!0-9]*) ;; *) echo "    (ada $LAMA sesi lama berstatus in_progress yang tidak aktif >15 menit; diabaikan, tidak mengganggu uji)" ;; esac ;;
 esac
 MAXCONN=$(psqlq "show max_connections"); case "$MAXCONN" in ''|*[!0-9]*) MAXCONN=100 ;; esac
 
