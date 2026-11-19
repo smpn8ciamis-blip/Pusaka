@@ -1,8 +1,10 @@
 import { useToast } from "@/hooks/use-toast";
+import { useExamFocus } from "@/lib/examFocus";
 import { Toast, ToastClose, ToastDescription, ToastProvider, ToastTitle, ToastViewport } from "@/components/ui/toast";
 
 export function Toaster() {
   const { toasts } = useToast();
+  const examFocus = useExamFocus(); // popup umum disembunyikan saat siswa mengerjakan ujian
 
   return (
     <ToastProvider>
@@ -18,7 +20,7 @@ export function Toaster() {
           </Toast>
         );
       })}
-      <ToastViewport />
+      <ToastViewport className={examFocus ? "hidden" : undefined} />
     </ToastProvider>
   );
 }

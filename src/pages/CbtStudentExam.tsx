@@ -29,6 +29,8 @@ import {
   CBT_DASHBOARD_DELAY, CBT_HEARTBEAT_MS, CBT_HEARTBEAT_JITTER_MS, CBT_HEARTBEAT_PAUSED_MS,
   randomDelaySeconds, retryDelayMs, waitWithCountdown,
 } from '@/lib/cbtJitter';
+import { setExamFocus } from '@/lib/examFocus';
+import { useScreenWakeLock } from '@/hooks/useScreenWakeLock';
 import { CBT_PLEDGE_HONEST, CBT_PLEDGE_SUBMIT, matchesPhrase, typedOnlyInputProps } from '@/lib/cbtPledge';
 
 // Jeda acak hanya pada pemuatan PERTAMA daftar ujian sejak halaman dibuka (bukan tiap refetch).
@@ -396,6 +398,19 @@ export default function CbtStudentExam() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handleSubmitExam, persistLocalNow]);
+
+  // Mode fokus selama mengerjakan soal: tanpa menu samping/logout/kembali/popup umum, layar tetap menyala, tombol kembali browser diredam
+  const inExam = !!activeSession;
+  useEffect(() => {
+    if (!inExam) return;
+    setExamFocus(true);
+    const url = window.location.href;
+    try { window.history.pushState({ cbtLock: true }, '', url); } catch { /* abaikan */ }
+    const onPop = () => { try { window.history.pushState({ cbtLock: true }, '', url); } catch { /* abaikan */ } };
+    window.addEventListener('popstate', onPop);
+    return () => { window.removeEventListener('popstate', onPop); setExamFocus(false); };
+  }, [inExam]);
+  useScreenWakeLock(inExam);
 
   const antiCheatOn = !!activeExam?.anti_cheat_enabled && !!activeSession && !paused && !submitting;
   useCbtAntiCheat({ enabled: antiCheatOn, onViolation: handleViolation });

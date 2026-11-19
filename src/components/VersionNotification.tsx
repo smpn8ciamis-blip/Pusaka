@@ -4,6 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { X, Sparkles, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
+import { useExamFocus } from '@/lib/examFocus';
 
 const LAST_SEEN_VERSION_KEY = 'app_last_seen_version';
 const LAST_SEEN_REVISION_KEY = 'app_last_seen_revision';
@@ -20,6 +21,7 @@ export const VersionNotification = () => {
   const navigate = useNavigate();
   const [isVisible, setIsVisible] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const examFocus = useExamFocus();
 
   const { data: currentVersion } = useQuery({
     queryKey: ['current-version-notification'],
@@ -66,7 +68,7 @@ export const VersionNotification = () => {
     navigate('/changelog');
   };
 
-  if (!isVisible || !currentVersion) return null;
+  if (!isVisible || !currentVersion || examFocus) return null; // tidak mengganggu siswa yang sedang ujian
 
   return (
     <div className="fixed bottom-4 right-4 z-50 max-w-sm animate-in slide-in-from-bottom-4 fade-in duration-300">
