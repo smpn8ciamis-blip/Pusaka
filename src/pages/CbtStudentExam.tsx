@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Progress } from '@/components/ui/progress';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
@@ -92,6 +93,7 @@ export default function CbtStudentExam() {
   const [timeLeft, setTimeLeft] = useState(0);
   const [tokenInputOpen, setTokenInputOpen] = useState(false);
   const [tokenInput, setTokenInput] = useState('');
+  const [honestyChecked, setHonestyChecked] = useState(false);
   const [pendingExam, setPendingExam] = useState<any>(null);
   const [violations, setViolations] = useState(0);
   const [exitTokenOpen, setExitTokenOpen] = useState(false);
@@ -115,6 +117,9 @@ export default function CbtStudentExam() {
   const violationsRef = useRef(0);
   const revokeImagesRef = useRef<(() => void) | null>(null);
   const prepCtxRef = useRef<{ exam: any; token: string | null; session: any; pubExam: any } | null>(null);
+  // Percobaan mulai terakhir (untuk "Coba Lagi" bila panggilan mulai gagal karena jaringan) + penanda putaran agar "Batal" saat antre bisa dibatalkan
+  const startArgsRef = useRef<{ exam: any; token: string | null } | null>(null);
+  const beginRunRef = useRef(0);
   const tabIdRef = useRef(Math.random().toString(36).slice(2));
 
   useEffect(() => { sessionRef.current = activeSession; examRef.current = activeExam; }, [activeSession, activeExam]);
@@ -443,7 +448,7 @@ export default function CbtStudentExam() {
     setAnswers(mergedA); setEssayAnswers(mergedE);
     setPaused(serverStatus === 'paused');
     setActiveSession(session); setActiveExam(pubExam);
-    setTimeLeft(left); setCurrentIdx(0); setTokenInputOpen(false); setTokenInput(''); setViolations(vCount);
+    setTimeLeft(left); setCurrentIdx(0); setTokenInputOpen(false); setTokenInput(''); setHonestyChecked(false); setViolations(vCount);
     setPrep(PREP_CLOSED);
     prepCtxRef.current = null;
     queryClient.invalidateQueries({ queryKey: ['cbt-student-overview'] });
@@ -453,46 +458,64 @@ export default function CbtStudentExam() {
   /** Hitung mundur acak sebelum unduh soal; sisa detik tampil di tombol "Unduh Soal" pada dialog. */
   const waitBeforeDownload = async (sec: number) => {
     if (sec <= 0) return;
-    setPrep((s) => ({ ...s, open: true, error: null, canRetry: false, percent: 0, label: 'Menunggu giliran unduh', waitLeft: sec, waitTotal: sec }));
+    setPrep((s) => ({ ...s, open: true, error: null, canRetry: false, percent: 0, label: 'Menunggu giliran mulai', waitLeft: sec, waitTotal: sec }));
     await waitWithCountdown(sec * 1000, (left) => setPrep((s) => ({ ...s, waitLeft: left })));
     setPrep((s) => ({ ...s, waitLeft: 0, waitTotal: 0, percent: 2, label: 'Mulai mengunduh…' }));
   };
 
-  const beginExam = async (exam: any, token: string | null) => {
+  const beginExam = async (exam: any, token: string | null, opts?: { noDelay?: boolean }) => {
     if (beginningRef.current) return;
     beginningRef.current = true;
+    const run = ++beginRunRef.current;
+    startArgsRef.current = { exam, token };
     enterFullscreenFor(exam);
-    setPrep({ ...PREP_CLOSED, open: true, percent: 2, label: token !== null || exam.require_token ? 'Memeriksa token…' : 'Menyiapkan ujian…', examTitle: exam.title });
+    setPrep({ ...PREP_CLOSED, open: true, percent: 2, label: 'Menyiapkan ujian…', examTitle: exam.title });
     let ctx: { exam: any; token: string | null; session: any; pubExam: any } | null = null;
     try {
-      // 1. token & batas percobaan diperiksa di server (satu panggilan)
+      // 1. jeda acak SEBELUM menghubungi server (cbt_start_session, cek token, lalu unduh soal), supaya ratusan siswa
+      //    yang menekan Mulai bersamaan tersebar. Dilewati bila ini melanjutkan ujian dan soalnya sudah ada di perangkat.
+      if (!opts?.noDelay) {
+        const resumable = sessionsForExam(exam.id).find((x: any) => x.status === 'in_progress' || x.status === 'paused');
+        const hasLocalPaper = resumable ? !!(await loadPaper(resumable.id).catch(() => null)) : false;
+        if (!hasLocalPaper) await waitBeforeDownload(randomDelaySeconds(CBT_DOWNLOAD_DELAY));
+        if (beginRunRef.current !== run) return; // dibatalkan siswa saat antre
+        setPrep((st) => ({ ...st, open: true, percent: 2, label: token !== null || exam.require_token ? 'Memeriksa token…' : 'Menyiapkan ujian…' }));
+      }
+      // 2. token & batas percobaan diperiksa di server (satu panggilan)
       const { data, error } = await (supabase as any).rpc('cbt_start_session', { p_exam_id: exam.id, p_token: token });
       if (error) { setPrep(PREP_CLOSED); exitFullscreen(); toast.error(error.message); return; }
       const { session, exam: pubExam } = data as { session: any; exam: any };
       ctx = { exam, token, session, pubExam };
       prepCtxRef.current = ctx;
-      // 2. jeda acak (tampil di tombol "Unduh Soal") supaya ratusan siswa tidak mengunduh soal serentak.
-      //    Dilewati bila soal sudah ada di perangkat (melanjutkan ujian).
-      if (!(await loadPaper(session.id).catch(() => null))) await waitBeforeDownload(randomDelaySeconds(CBT_DOWNLOAD_DELAY));
-      // 3. unduh semua soal ke perangkat, lalu mulai
+      // 3. unduh semua soal ke perangkat, lalu mulai (tanpa jeda lagi: jeda sudah dilakukan di langkah 1)
       await loadAndStart(ctx);
     } catch (e: any) {
-      setPrep((s) => ({ ...s, open: true, error: e?.message || 'Gagal mengunduh soal', canRetry: !!ctx }));
-    } finally { beginningRef.current = false; }
+      if (beginRunRef.current === run) setPrep((s) => ({ ...s, open: true, error: e?.message || 'Gagal mengunduh soal', canRetry: true }));
+    } finally { if (beginRunRef.current === run) beginningRef.current = false; }
   };
 
   const retryPrep = async () => {
+    if (beginningRef.current) return;
     const ctx = prepCtxRef.current;
-    if (!ctx || beginningRef.current) return;
+    // gagal sebelum sesi terbentuk (jaringan putus saat memulai): ulangi dari awal tanpa jeda lagi
+    if (!ctx) {
+      const a = startArgsRef.current;
+      if (a) beginExam(a.exam, a.token, { noDelay: true });
+      return;
+    }
     beginningRef.current = true;
+    const run = ++beginRunRef.current;
     setPrep((s) => ({ ...s, error: null, percent: 2, label: 'Mencoba lagi…' }));
     try {
       if (!(await loadPaper(ctx.session.id).catch(() => null))) await waitBeforeDownload(randomDelaySeconds(CBT_DOWNLOAD_RETRY_DELAY));
+      if (beginRunRef.current !== run) return;
       await loadAndStart(ctx);
     }
-    catch (e: any) { setPrep((s) => ({ ...s, error: e?.message || 'Gagal mengunduh soal', canRetry: true })); }
-    finally { beginningRef.current = false; }
+    catch (e: any) { if (beginRunRef.current === run) setPrep((s) => ({ ...s, error: e?.message || 'Gagal mengunduh soal', canRetry: true })); }
+    finally { if (beginRunRef.current === run) beginningRef.current = false; }
   };
+  /** Siswa menekan Batal saat antre: hentikan putaran ini (belum ada panggilan ke server bila masih di antrean awal). */
+  const cancelPrepWait = () => { beginRunRef.current++; beginningRef.current = false; closePrep(); };
   const closePrep = () => { setPrep(PREP_CLOSED); prepCtxRef.current = null; exitFullscreen(); queryClient.invalidateQueries({ queryKey: ['cbt-student-overview'] }); };
 
   const formatTime = (s: number) => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
@@ -813,8 +836,8 @@ export default function CbtStudentExam() {
                       )}
                       {canStart && (
                         <Button className="w-full gap-1" size="sm" onClick={() => {
-                          if (exam.require_token) { setPendingExam(exam); setTokenInputOpen(true); }
-                          else if (confirm('Mulai ujian? Semua soal akan diunduh ke perangkat ini lebih dulu, lalu timer berjalan.')) beginExam(exam, null);
+                          // semua ujian baru: pernyataan kejujuran dulu (dan token bila diminta)
+                          setPendingExam(exam); setTokenInput(''); setHonestyChecked(false); setTokenInputOpen(true);
                         }}>
                           <Play className="h-3.5 w-3.5" /> {exam.remedial ? `Mulai Remidial (${attemptsUsed + 1}/${exam.max_attempts})` : attemptsUsed > 0 ? `Coba Lagi (${attemptsUsed + 1}/${exam.max_attempts})` : 'Mulai Ujian'}
                         </Button>
@@ -851,13 +874,35 @@ export default function CbtStudentExam() {
         <Dialog open={tokenInputOpen} onOpenChange={setTokenInputOpen}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><KeyRound className="h-5 w-5" /> Masukkan Token Ujian</DialogTitle>
-              <DialogDescription>Token diberikan oleh guru pengawas</DialogDescription>
+              <DialogTitle className="flex items-center gap-2">
+                {pendingExam?.require_token ? <KeyRound className="h-5 w-5" /> : <Shield className="h-5 w-5" />}
+                {pendingExam?.require_token ? 'Token & Pernyataan Kejujuran' : 'Pernyataan Kejujuran'}
+              </DialogTitle>
+              <DialogDescription>{pendingExam?.title}</DialogDescription>
             </DialogHeader>
-            <Input value={tokenInput} onChange={e => setTokenInput(e.target.value.toUpperCase())} placeholder="Token (6 karakter)" className="font-mono text-center text-lg" maxLength={12} autoFocus />
+            {pendingExam?.require_token && (
+              <div className="space-y-1.5">
+                <label htmlFor="cbt-token" className="text-sm font-medium">Token ujian <span className="font-normal text-muted-foreground">(diberikan guru pengawas)</span></label>
+                <Input id="cbt-token" value={tokenInput} onChange={e => setTokenInput(e.target.value.toUpperCase())} placeholder="Token (6 karakter)" className="font-mono text-center text-lg" maxLength={12} autoFocus />
+              </div>
+            )}
+            <label htmlFor="cbt-honesty" className="flex items-start gap-3 rounded-lg border bg-muted/40 p-3 cursor-pointer">
+              <Checkbox id="cbt-honesty" className="mt-0.5" checked={honestyChecked} onCheckedChange={(v) => setHonestyChecked(v === true)} />
+              <span className="text-sm leading-snug">
+                <b>Saya Mengerjakan Soal Dengan Jujur</b>
+                <span className="block text-xs text-muted-foreground mt-0.5">Tanpa menyontek dan tanpa bantuan yang tidak diizinkan guru.</span>
+              </span>
+            </label>
+            <p className="text-[11px] text-muted-foreground">
+              Setelah menekan Mulai, Anda menunggu giliran beberapa detik (agar server tidak kewalahan), lalu soal diunduh ke perangkat ini. Timer ujian baru berjalan setelah semua soal selesai diunduh.
+            </p>
             <DialogFooter>
-              <Button variant="outline" onClick={() => { setTokenInputOpen(false); setTokenInput(''); }}>Batal</Button>
-              <Button onClick={() => beginExam(pendingExam, tokenInput.trim() || null)} disabled={!tokenInput || prep.open}>Mulai</Button>
+              <Button variant="outline" onClick={() => { setTokenInputOpen(false); setTokenInput(''); setHonestyChecked(false); }}>Batal</Button>
+              <Button
+                onClick={() => beginExam(pendingExam, pendingExam?.require_token ? (tokenInput.trim() || null) : null)}
+                disabled={!honestyChecked || (!!pendingExam?.require_token && !tokenInput.trim()) || prep.open}>
+                Mulai
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -873,11 +918,12 @@ export default function CbtStudentExam() {
               <p className="text-sm text-destructive">{prep.error}</p>
             ) : prep.waitLeft > 0 ? (
               <div className="space-y-3">
-                <p className="text-sm">Agar tidak berebut dengan siswa lain, soal akan diunduh otomatis setelah hitung mundur selesai. Jangan tutup halaman ini.</p>
+                <p className="text-sm">Agar server tidak kewalahan saat banyak siswa mulai bersamaan, ujian dimulai otomatis setelah hitung mundur selesai (token diperiksa dan soal diunduh setelah itu). Jangan tutup halaman ini.</p>
                 <Progress value={prep.waitTotal > 0 ? (1 - prep.waitLeft / prep.waitTotal) * 100 : 0} className="h-2" />
                 <Button className="w-full gap-2" disabled>
-                  <HardDriveDownload className="h-4 w-4" /> Unduh Soal ({prep.waitLeft} dtk)
+                  <HardDriveDownload className="h-4 w-4" /> Mulai Ujian ({prep.waitLeft} dtk)
                 </Button>
+                <Button className="w-full" variant="ghost" size="sm" onClick={cancelPrepWait}>Batal</Button>
               </div>
             ) : (
               <div className="space-y-2">
