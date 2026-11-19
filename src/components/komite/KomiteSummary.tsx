@@ -22,7 +22,7 @@ export function KomiteSummary({ data, onlyGrade }: { data: KomitePublik; onlyGra
           <div className="text-xs text-slate-500">{persenTeks(g.total, total)} dari seluruh pendapatan</div>
           <div className="mt-4 space-y-3">
             <KomiteBar
-              label="Siswa yang sudah menyumbang"
+              label="Orang Tua /Wali Siswa yang sudah menyumbang"
               value={g.siswa_penyumbang}
               total={g.siswa_total}
               color={GRADE_COLOR[g.grade] ?? 'bg-emerald-500'}
