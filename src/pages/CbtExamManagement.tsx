@@ -400,6 +400,16 @@ export default function CbtExamManagement() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  // Siswa dianggap offline bila denyut terakhir > 90 dtk lalu atau belum pernah mengirim denyut sama sekali.
+  // Hanya untuk konfirmasi di UI; logika server (cbt_finish_or_request) tidak berubah.
+  const OFFLINE_WARNING = 'Siswa ini offline, jawabannya mungkin belum terkirim. Tunggu atau lanjutkan akhiri?';
+  const isOfflineSession = (r: any) => {
+    if (!r?.last_activity_at) return true;
+    const t = new Date(r.last_activity_at).getTime();
+    return !Number.isFinite(t) || Date.now() - t > 90_000;
+  };
+  const confirmFinalize = (r: any) => (isOfflineSession(r) ? confirm(OFFLINE_WARNING) : confirm('Akhiri ujian siswa ini?'));
+
   // Control panel actions
   const sessionActionMutation = useMutation({
     mutationFn: async ({ id, action }: { id: string; action: 'pause' | 'resume' | 'finalize' | 'reset' }) => {
@@ -1081,7 +1091,9 @@ export default function CbtExamManagement() {
                 <Button size="sm" variant="destructive" onClick={() => {
                   const active = (examResults || []).filter((r: any) => r.status !== 'completed');
                   if (!active.length) return toast.info('Tidak ada sesi aktif');
-                  if (confirm(`Akhiri ${active.length} sesi? Perangkat siswa diminta mengumpulkan jawabannya; siswa yang tidak aktif diakhiri langsung. Tidak bisa dibatalkan.`)) {
+                  const offline = active.filter(isOfflineSession).length;
+                  const warn = offline > 0 ? `\n\n${offline} siswa offline (tidak ada denyut > 90 dtk atau belum pernah mengirim). Jawaban mereka mungkin belum terkirim. Tunggu atau lanjutkan akhiri?` : '';
+                  if (confirm(`Akhiri ${active.length} sesi? Perangkat siswa diminta mengumpulkan jawabannya; siswa yang tidak aktif diakhiri langsung. Tidak bisa dibatalkan.${warn}`)) {
                     active.forEach((r: any) => sessionActionMutation.mutate({ id: r.id, action: 'finalize' }));
                   }
                 }}><Power className="h-3 w-3 mr-1" /> Akhiri Semua</Button>
@@ -1161,7 +1173,7 @@ export default function CbtExamManagement() {
                             <div className="flex gap-1">
                               {r.status === 'in_progress' && <Button size="icon" variant="ghost" className="h-7 w-7" title="Jeda" onClick={() => sessionActionMutation.mutate({ id: r.id, action: 'pause' })}><Pause className="h-3 w-3" /></Button>}
                               {r.status === 'paused' && <Button size="icon" variant="ghost" className="h-7 w-7" title="Resume" onClick={() => sessionActionMutation.mutate({ id: r.id, action: 'resume' })}><Play className="h-3 w-3" /></Button>}
-                              {r.status !== 'completed' && <Button size="icon" variant="ghost" className="h-7 w-7" title="Akhiri" onClick={() => { if (confirm('Akhiri ujian siswa ini?')) sessionActionMutation.mutate({ id: r.id, action: 'finalize' }); }}><Power className="h-3 w-3" /></Button>}
+                              {r.status !== 'completed' && <Button size="icon" variant="ghost" className="h-7 w-7" title="Akhiri" onClick={() => { if (confirmFinalize(r)) sessionActionMutation.mutate({ id: r.id, action: 'finalize' }); }}><Power className="h-3 w-3" /></Button>}
                               <Button size="icon" variant="ghost" className="h-7 w-7" title="Reset" onClick={() => { if (confirm('Reset sesi ini? Semua jawaban akan dihapus.')) sessionActionMutation.mutate({ id: r.id, action: 'reset' }); }}><RefreshCcw className="h-3 w-3 text-destructive" /></Button>
                             </div>
                           </div>

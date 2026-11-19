@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { Clock, CheckCircle, FileText, Play, KeyRound, RotateCcw, AlertTriangle, Shield, ShieldAlert, HardDriveDownload, Maximize, Send, Loader2 } from 'lucide-react';
+import { Clock, CheckCircle, FileText, Play, KeyRound, RotateCcw, AlertTriangle, Shield, ShieldAlert, HardDriveDownload, Maximize, Send, Loader2, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { id as idLocale } from 'date-fns/locale';
@@ -26,6 +26,7 @@ import {
 } from '@/lib/cbtLocal';
 import {
   CBT_DOWNLOAD_DELAY, CBT_DOWNLOAD_RETRY_DELAY, CBT_SUBMIT_DELAY_MANUAL, CBT_SUBMIT_DELAY_TIMEOUT,
+  CBT_HEARTBEAT_MS, CBT_HEARTBEAT_JITTER_MS, CBT_HEARTBEAT_PAUSED_MS,
   randomDelaySeconds, retryDelayMs, waitWithCountdown,
 } from '@/lib/cbtJitter';
 
@@ -45,8 +46,7 @@ const isMissingRpc = (e: any) => e?.code === 'PGRST202' || e?.code === '42883' |
 // Mode ringan: semua soal diunduh sekali ke perangkat, jawaban disimpan di perangkat (localStorage) dan
 // HANYA dikirim ke server saat siswa menekan Selesai / waktu habis. Selama ujian server hanya menerima
 // denyut kecil (jumlah soal terjawab + sisa waktu, tanpa isi jawaban) yang juga membawa status jeda/akhiri dari pengawas.
-const HEARTBEAT_MS = 45000;
-const HEARTBEAT_PAUSED_MS = 15000;
+// Interval denyut ada di cbtJitter.ts (CBT_HEARTBEAT_*): batas "tidak aktif 3 menit" di cbt_finish_or_request bergantung padanya.
 const LOCAL_SAVE_DEBOUNCE_MS = 300;
 
 // waitLeft/waitTotal: hitung mundur acak sebelum soal diunduh (agar ratusan siswa tidak mengunduh serentak)
@@ -224,7 +224,8 @@ export default function CbtStudentExam() {
         const showScore = examRef.current?.show_result_to_student !== false && data?.grading_status !== 'pending_essay';
         await flushViolations().catch(() => {});
         submittingRef.current = false; setSubmitting(false);
-        finishLocally(data?.grading_status === 'pending_essay' ? 'Ujian selesai! Menunggu koreksi essay.'
+        finishLocally(data?.late ? 'Ujian diakhiri pengawas. Jawaban susulan Anda sudah diterima.'
+          : data?.grading_status === 'pending_essay' ? 'Ujian selesai! Menunggu koreksi essay.'
           : showScore ? `Ujian selesai! Nilai: ${Number(data?.score ?? 0).toFixed(1)}` : 'Ujian selesai!', sess.id);
         return;
       } catch (e: any) {
@@ -241,6 +242,26 @@ export default function CbtStudentExam() {
     setSubmitState((st) => ({ ...st, phase: 'error', error: lastErr?.message || 'koneksi bermasalah' }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [persistLocalNow, userId]);
+
+  // Cadangan bila internet putus: unduh jawaban dari perangkat sebagai berkas JSON untuk diserahkan ke pengawas/guru.
+  const downloadAnswersFile = useCallback(() => {
+    const sess = sessionRef.current;
+    const payload = {
+      sessionId: sess?.id ?? null,
+      examId: examRef.current?.id ?? sess?.exam_id ?? null,
+      savedAt: new Date().toISOString(),
+      answers: answersRef.current,
+      essays: essaysRef.current,
+    };
+    try {
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `jawaban-${String(payload.sessionId || 'ujian').slice(0, 8)}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch { toast.error('Gagal membuat berkas jawaban.'); }
+  }, []);
 
   // Denyut ringan ke server: jumlah soal terjawab + sisa waktu (TANPA isi jawaban). Balasan memuat status sesi.
   const heartbeat = useCallback(async () => {
@@ -263,7 +284,12 @@ export default function CbtStudentExam() {
       if (data?.finish_requested && !submittingRef.current) { beatingRef.current = false; toast.info('Pengawas meminta ujian dikumpulkan.'); handleSubmitExam(false); return; }
       if (data && data.ok === false) {
         if (data.status === 'paused') setPaused(true);
-        else if (isFinished(data.status)) finishLocally('Ujian telah diakhiri oleh pengawas.');
+        else if (isFinished(data.status)) {
+          // Diakhiri paksa pengawas: bila masih ada jawaban di perangkat, kirim sebagai jawaban susulan
+          // (server menerimanya sekali, dalam 30 menit). Tanpa jawaban lokal, cukup tutup ujian.
+          if (countAnswered() > 0) { beatingRef.current = false; handleSubmitExam(false, { noDelay: true }); }
+          else finishLocally('Ujian telah diakhiri oleh pengawas.');
+        }
         return;
       }
       if (pausedRef.current) { setPaused(false); deadlineRef.current = createDeadline(timeLeftRef.current); }
@@ -306,7 +332,7 @@ export default function CbtStudentExam() {
     const loop = async () => {
       if (stop) return;
       await heartbeat();
-      timer = setTimeout(loop, (pausedRef.current ? HEARTBEAT_PAUSED_MS : HEARTBEAT_MS) + Math.random() * 15000);
+      timer = setTimeout(loop, (pausedRef.current ? CBT_HEARTBEAT_PAUSED_MS : CBT_HEARTBEAT_MS) + Math.random() * CBT_HEARTBEAT_JITTER_MS);
     };
     timer = setTimeout(loop, 3000 + Math.random() * 5000);
     const onHide = () => { persistLocalNow(); if (document.hidden) heartbeat(); };
@@ -503,9 +529,15 @@ export default function CbtStudentExam() {
           {(submitState.phase === 'retry' || submitState.phase === 'error') && submitState.error && (
             <p className="text-[11px] text-destructive break-words">{submitState.error}</p>
           )}
+          {submitState.phase === 'error' && (
+            <p className="text-xs rounded-md border bg-muted/50 p-2.5 text-muted-foreground">
+              Bila internet tetap bermasalah, tekan <b>Unduh file jawaban</b> lalu serahkan berkas tersebut kepada pengawas/guru agar jawaban Anda tidak hilang.
+            </p>
+          )}
         </div>
         {submitState.phase === 'error' && (
-          <DialogFooter>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={downloadAnswersFile}><Download className="h-4 w-4 mr-1.5" /> Unduh file jawaban</Button>
             {!submitState.timeout && (
               <Button variant="outline" onClick={() => { setSubmitState(SUBMIT_CLOSED); setSubmitting(false); }}>Kembali ke soal</Button>
             )}

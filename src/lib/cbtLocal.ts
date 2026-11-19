@@ -243,12 +243,19 @@ export async function prefetchPaper(sessionId: string, deps: PrefetchDeps): Prom
       while (next < urls.length) {
         aborted();
         const u = urls[next++];
-        try { images[u] = await getImg(u); } catch { failed.push(u); }
+        try { images[u] = await getImg(u); } catch {
+          // satu kali percobaan ulang (jeda singkat acak) sebelum dianggap gagal; gagal tetap jatuh ke URL asli
+          try {
+            await new Promise((r) => setTimeout(r, 500 + Math.random() * 1000));
+            aborted();
+            images[u] = await getImg(u);
+          } catch (e2) { if (deps.signal?.aborted) throw e2; failed.push(u); }
+        }
         done++;
         report('images', 30 + (done / total) * 65, `Mengunduh gambar soal (${done}/${total})…`, done, total);
       }
     };
-    await Promise.all(Array.from({ length: Math.min(deps.concurrency ?? 4, total) }, worker));
+    await Promise.all(Array.from({ length: Math.min(deps.concurrency ?? 3, total) }, worker));
   }
   report('save', 96, 'Menyimpan soal di perangkat…', done, total);
   const paper: StoredPaper = { sessionId, questions, images, failedImages: failed, savedAt: Date.now() };
