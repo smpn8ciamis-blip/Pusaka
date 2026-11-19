@@ -289,7 +289,7 @@ export function BendaharaPendapatan() {
                   <div className="font-medium">{r.nama}</div>
                   {r.keterangan && <div className="text-xs text-muted-foreground">{r.keterangan}</div>}
                 </TableCell>
-                <TableCell>{r.kategori === 'siswa' ? `Siswa kelas ${r.grade}` : KATEGORI_LABEL.donatur_lain}</TableCell>
+                <TableCell>{r.kategori === 'siswa' ? `Siswa ${r.kelas_nama ?? `kelas ${r.grade}`}` : KATEGORI_LABEL.donatur_lain}</TableCell>
                 <TableCell><Badge variant={r.sumber === 'rekening' ? 'default' : 'secondary'}>{SUMBER_LABEL[r.sumber]}</Badge></TableCell>
                 <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums">{formatRupiah(r.jumlah)}</TableCell>
                 <TableCell className="text-right">

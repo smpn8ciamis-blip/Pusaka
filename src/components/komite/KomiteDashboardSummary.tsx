@@ -1,11 +1,12 @@
 import { Banknote, Landmark } from 'lucide-react';
 import { KomiteBar, KomiteMainProgress } from '@/components/komite/KomiteBars';
 import { KomiteSummary } from '@/components/komite/KomiteSummary';
+import { KomitePerKelas } from '@/components/komite/KomitePerKelas';
 import { useKomiteRingkasan } from '@/hooks/useKomite';
 import { useAuth } from '@/contexts/AuthContext';
 
-/** Ringkasan progres untuk dashboard (bendahara komite: semua; korlas: kartu tingkat kelasnya). */
-export function KomiteDashboardSummary({ onlyGrade }: { onlyGrade?: number | null }) {
+/** Ringkasan progres untuk dashboard (bendahara komite: per tingkat + per rombel; korlas: kartu rombelnya). */
+export function KomiteDashboardSummary({ korlas = false }: { korlas?: boolean }) {
   const { schoolId } = useAuth();
   const { data, isLoading, isError } = useKomiteRingkasan();
 
@@ -35,7 +36,17 @@ export function KomiteDashboardSummary({ onlyGrade }: { onlyGrade?: number | nul
           </div>
         </div>
       </div>
-      <KomiteSummary data={data} onlyGrade={onlyGrade} />
+      {korlas ? (
+        <KomitePerKelas single />
+      ) : (
+        <>
+          <KomiteSummary data={data} />
+          <div>
+            <h3 className="mb-2 font-semibold">Per rombel</h3>
+            <KomitePerKelas />
+          </div>
+        </>
+      )}
     </div>
   );
 }

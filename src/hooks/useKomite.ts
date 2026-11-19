@@ -131,6 +131,8 @@ export interface KomiteDonasiRow {
   sumber: 'rekening' | 'tunai';
   kategori: 'siswa' | 'donatur_lain';
   grade: number | null;
+  class_id: string | null;
+  kelas_nama: string | null;
   student_id: string | null;
   nama: string;
   rekening_id: string | null;
@@ -222,6 +224,7 @@ export interface KomiteSiswa {
   grade: number;
   total: number;
   jumlah_kali: number;
+  class_id: string;
 }
 
 /** Daftar siswa aktif untuk dipilih. Korlas hanya menerima siswa tingkat kelasnya (dibatasi di server). */
@@ -238,16 +241,45 @@ export function useKomiteStudents(enabled = true) {
   });
 }
 
-/** Tingkat kelas (7/8/9) milik korlas yang login; null bila belum ditetapkan. */
-export function useKorlasGrade() {
+/** Rombel milik korlas yang login; null bila belum ditetapkan bendahara komite. */
+export function useKorlasKelas() {
   const { user, userRole } = useAuth();
   return useQuery({
-    queryKey: [KOMITE_KEY, 'my-grade', user?.id],
+    queryKey: [KOMITE_KEY, 'my-kelas', user?.id],
     enabled: !!user && userRole === 'korlas',
-    queryFn: async (): Promise<number | null> => {
-      const { data, error } = await db.rpc('komite_my_grade');
+    queryFn: async (): Promise<{ class_id: string; kelas: string; grade: number } | null> => {
+      const { data, error } = await db.rpc('komite_my_kelas');
       if (error) throw error;
-      return data ?? null;
+      return (data ?? [])[0] ?? null;
+    },
+  });
+}
+
+export interface KomitePerKelasRow {
+  class_id: string;
+  kelas: string;
+  grade: number;
+  siswa_total: number;
+  siswa_penyumbang: number;
+  jumlah: number;
+  total: number;
+  rekening: number;
+  tunai: number;
+}
+
+/** Ringkasan per rombel. Bendahara komite: semua rombel; korlas: hanya rombelnya (dibatasi di server). */
+export function useKomitePerKelas() {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: [KOMITE_KEY, 'per-kelas', user?.id],
+    enabled: !!user,
+    refetchInterval: 60_000,
+    queryFn: async (): Promise<KomitePerKelasRow[]> => {
+      const { data, error } = await db.rpc('komite_per_kelas');
+      if (error) throw error;
+      return ((data ?? []) as KomitePerKelasRow[]).map((r) => ({
+        ...r, total: Number(r.total), rekening: Number(r.rekening), tunai: Number(r.tunai),
+      }));
     },
   });
 }
@@ -274,8 +306,8 @@ export interface KomiteKorlasRow {
   user_id: string;
   email: string;
   nama: string;
-  grade: number | null;
-  asal: 'manual' | 'email' | null;
+  class_id: string | null;
+  kelas: string | null;
 }
 
 export function useKomiteKorlasList() {
@@ -291,11 +323,33 @@ export function useKomiteKorlasList() {
   });
 }
 
-export function useSetKorlasGrade() {
+export interface KomiteKelasRow {
+  class_id: string;
+  kelas: string;
+  grade: number;
+  siswa_total: number;
+  korlas_email: string | null;
+}
+
+/** Rombel kelas 7/8/9 yang punya siswa aktif, beserta akun korlas-nya (untuk tab Korlas bendahara). */
+export function useKomiteKelasList() {
+  const { schoolId } = useAuth();
+  return useQuery({
+    queryKey: [KOMITE_KEY, 'kelas', schoolId],
+    enabled: !!schoolId,
+    queryFn: async (): Promise<KomiteKelasRow[]> => {
+      const { data, error } = await db.rpc('komite_kelas_list');
+      if (error) throw error;
+      return ((data ?? []) as KomiteKelasRow[]).map((r) => ({ ...r, siswa_total: Number(r.siswa_total) }));
+    },
+  });
+}
+
+export function useSetKorlasKelas() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (v: { user_id: string; grade: number | null }) => {
-      const { error } = await db.rpc('komite_set_korlas', { p_user: v.user_id, p_grade: v.grade });
+    mutationFn: async (v: { user_id: string; class_id: string | null }) => {
+      const { error } = await db.rpc('komite_set_korlas', { p_user: v.user_id, p_class: v.class_id });
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: [KOMITE_KEY] }),
