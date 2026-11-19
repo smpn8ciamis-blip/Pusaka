@@ -22,6 +22,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { AppFooter } from '@/components/AppFooter';
 import { useQuery } from '@tanstack/react-query';
 import { NotificationBell } from '@/components/NotificationBell';
+import { useExamFocus } from '@/lib/examFocus';
 import { EnablePushButton } from '@/components/EnablePushButton';
 import { AcademicYearSelector } from '@/components/AcademicYearSelector';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -66,6 +67,7 @@ const roleLabels: Record<string, string> = {
 
 export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const { user, userRole, signOut } = useAuth();
+  const examFocus = useExamFocus(); // sedang mengerjakan ujian CBT: sembunyikan menu samping, header/logout, footer
   const location = useLocation();
   const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -920,6 +922,15 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   // ============================
   // RENDER
   // ============================
+  // Mode fokus ujian: hanya isi halaman (tanpa menu samping, tombol logout/kembali, banner, footer)
+  if (examFocus) {
+    return (
+      <div className="min-h-screen flex flex-col bg-background">
+        <main className="flex-1 min-w-0 overflow-auto p-3 sm:p-4 md:p-6">{children}</main>
+      </div>
+    );
+  }
+
   return (
     <TooltipProvider delayDuration={200}>
       <div className="flex min-h-screen bg-slate-50 dark:bg-slate-950">
