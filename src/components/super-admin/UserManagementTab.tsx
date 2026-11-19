@@ -44,6 +44,7 @@ const ROLE_LABELS: Record<string, string> = {
   staf: 'Staf',
   bendahara_komite: 'Bendahara Komite',
   korlas: 'Korlas',
+  panitia_ujian: 'Panitia Ujian',
 };
 
 const ROLE_COLORS: Record<string, string> = {
@@ -60,9 +61,10 @@ const ROLE_COLORS: Record<string, string> = {
   staf: 'bg-indigo-500',
   bendahara_komite: 'bg-rose-500',
   korlas: 'bg-sky-600',
+  panitia_ujian: 'bg-violet-600',
 };
 
-const ALL_ROLES = ['super_admin', 'admin', 'teacher', 'bendahara', 'tata_usaha', 'kesiswaan', 'polling', 'billing', 'siswa', 'pembina_ekskul', 'staf', 'bendahara_komite', 'korlas'];
+const ALL_ROLES = ['super_admin', 'admin', 'teacher', 'bendahara', 'tata_usaha', 'kesiswaan', 'polling', 'billing', 'siswa', 'pembina_ekskul', 'staf', 'bendahara_komite', 'korlas', 'panitia_ujian'];
 
 async function callManageUsers(action: string, params: any) {
   const res = await supabase.functions.invoke('manage-users', {

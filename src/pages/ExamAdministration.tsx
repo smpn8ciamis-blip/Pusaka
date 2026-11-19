@@ -1,3 +1,4 @@
+import { useAuth } from '@/contexts/AuthContext';
 import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -156,9 +157,17 @@ const ExamAdministration = () => {
 
 
   // Fetch school settings
+  const { userRole } = useAuth();
+  // Panitia ujian tidak membaca tabel school_settings langsung: lewat fungsi server yang hanya memuat kolom ujian.
+  const viaRpc = userRole === 'panitia_ujian';
   const { data: settings } = useQuery({
-    queryKey: ['school-settings'],
+    queryKey: [viaRpc ? 'exam-settings' : 'school-settings'],
     queryFn: async () => {
+      if (viaRpc) {
+        const { data, error } = await (supabase as any).rpc('exam_settings_get');
+        if (error) throw error;
+        return data as any;
+      }
       const { data, error } = await supabase
         .from('school_settings')
         .select('*')
@@ -187,10 +196,9 @@ const ExamAdministration = () => {
   const saveExamCardSettings = async () => {
     try {
       const payload = { cardSize, customCardWidth, customCardHeight, fontScale, seatingMode, showPhotoOnCard };
-      const { error } = await supabase
-        .from('school_settings')
-        .update({ exam_card_settings: payload } as any)
-        .eq('id', (settings as any).id);
+      const { error } = viaRpc
+        ? await (supabase as any).rpc('exam_settings_save', { p_exam_card_settings: payload })
+        : await supabase.from('school_settings').update({ exam_card_settings: payload } as any).eq('id', (settings as any).id);
       if (error) throw error;
       toast.success("Pengaturan kartu ujian disimpan");
     } catch (e) {

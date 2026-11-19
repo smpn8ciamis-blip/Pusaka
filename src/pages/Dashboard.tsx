@@ -46,6 +46,7 @@ const ROLE_REDIRECTS: Record<string, string> = {
   pembina_ekskul: '/ekskul-journal',
   bendahara_komite: '/komite-dashboard',
   korlas: '/korlas-dashboard',
+  panitia_ujian: '/panitia-ujian-dashboard',
 };
 
 const LOW_ATTENDANCE_THRESHOLD = 80;
