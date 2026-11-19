@@ -62,6 +62,7 @@ const roleLabels: Record<string, string> = {
   staf: 'Staf',
   bendahara_komite: 'Bendahara Komite',
   korlas: 'Korlas',
+  panitia_ujian: 'Panitia Ujian',
   teacher: 'Guru',
 };
 
@@ -640,6 +641,12 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: Globe, label: 'Halaman Publik Komite', href: '/website/komite' },
   ];
 
+  const panitiaUjianMenuItems: MenuItem[] = [
+    { icon: LayoutDashboard, label: 'Dashboard Panitia Ujian', href: '/panitia-ujian-dashboard' },
+    { icon: CalendarClock, label: 'Nama & Jadwal Ujian', href: '/panitia-ujian/jadwal' },
+    { icon: FileCheck, label: 'Administrasi Ujian', href: '/exam-administration' },
+  ];
+
   const korlasMenuItems: MenuItem[] = [
     { icon: LayoutDashboard, label: 'Dashboard Korlas', href: '/korlas-dashboard' },
     { icon: Wallet, label: 'Input Sumbangan', href: '/korlas-dashboard?tab=input' },
@@ -690,6 +697,8 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
                 ? guruPiketMenuItems
                 : userRole === 'bendahara_komite'
                   ? bendaharaKomiteMenuItems
+                : userRole === 'panitia_ujian'
+                  ? panitiaUjianMenuItems
                 : userRole === 'korlas'
                   ? korlasMenuItems
                 : userRole === 'pembina_ekskul'

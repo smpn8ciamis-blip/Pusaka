@@ -59,6 +59,8 @@ const OfficialTravel = lazy(() => import("./pages/OfficialTravel"));
 const MyLetters = lazy(() => import("./pages/MyLetters"));
 const StaffRegistration = lazy(() => import("./pages/StaffRegistration"));
 const KomiteBendahara = lazy(() => import("./pages/KomiteBendahara"));
+const PanitiaUjianDashboard = lazy(() => import("./pages/PanitiaUjianDashboard"));
+const PanitiaUjianJadwal = lazy(() => import("./pages/PanitiaUjianJadwal"));
 const KorlasDashboard = lazy(() => import("./pages/KorlasDashboard"));
 const BendaharaDashboard = lazy(() => import("./pages/BendaharaDashboard"));
 const BulkDataEditor = lazy(() => import("./pages/BulkDataEditor"));
@@ -339,6 +341,8 @@ const App = () => (
               {/* ===================================================== */}
 
               <Route path="/komite-dashboard" element={<ProtectedRoute allowedRoles={['bendahara_komite', 'admin', 'super_admin']}><KomiteBendahara /></ProtectedRoute>} />
+              <Route path="/panitia-ujian-dashboard" element={<ProtectedRoute allowedRoles={['panitia_ujian', 'admin', 'super_admin']}><PanitiaUjianDashboard /></ProtectedRoute>} />
+              <Route path="/panitia-ujian/jadwal" element={<ProtectedRoute allowedRoles={['panitia_ujian', 'admin', 'super_admin']}><PanitiaUjianJadwal /></ProtectedRoute>} />
               <Route path="/korlas-dashboard" element={<ProtectedRoute allowedRoles={['korlas']}><KorlasDashboard /></ProtectedRoute>} />
               <Route path="/bendahara-dashboard" element={<ProtectedRoute><BendaharaDashboard /></ProtectedRoute>} />
               <Route path="/staff-registration" element={<ProtectedRoute requireRole="admin"><StaffRegistration /></ProtectedRoute>} />
