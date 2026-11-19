@@ -2,10 +2,20 @@
 // (saat mengunduh soal, mengumpulkan jawaban, dan mencoba ulang setelah gagal).
 
 /** Batas jeda (detik). Diubah di sini bila perlu. */
-export const CBT_DOWNLOAD_DELAY = { min: 2, max: 20 } as const;       // setelah token dimasukkan, sebelum soal diunduh
+export const CBT_DOWNLOAD_DELAY = { min: 2, max: 45 } as const;       // setelah token dimasukkan, sebelum soal diunduh
 export const CBT_DOWNLOAD_RETRY_DELAY = { min: 1, max: 6 } as const;  // sebelum "Coba Lagi" mengunduh soal
-export const CBT_SUBMIT_DELAY_MANUAL = { min: 0, max: 8 } as const;   // siswa menekan Selesai / diakhiri pengawas
-export const CBT_SUBMIT_DELAY_TIMEOUT = { min: 0, max: 15 } as const; // waktu habis (semua siswa selesai di detik yang sama)
+export const CBT_SUBMIT_DELAY_MANUAL = { min: 0, max: 10 } as const;  // siswa menekan Selesai / diakhiri pengawas
+export const CBT_SUBMIT_DELAY_TIMEOUT = { min: 0, max: 45 } as const; // waktu habis (semua siswa selesai di detik yang sama)
+
+/**
+ * Denyut (heartbeat) ujian. PENTING: batas "tidak aktif 3 menit" pada fungsi SQL cbt_finish_or_request
+ * (lalu cbt_force_finish) dihitung dari denyut terakhir, jadi bergantung pada interval ini.
+ * Interval + jeda acak harus tetap jauh di bawah 3 menit (sekarang 60 dtk + maks 10 dtk = ~70 dtk);
+ * bila diperbesar, siswa yang masih online bisa dianggap tidak aktif dan dipaksa selesai.
+ */
+export const CBT_HEARTBEAT_MS = 60000;
+export const CBT_HEARTBEAT_JITTER_MS = 10000;
+export const CBT_HEARTBEAT_PAUSED_MS = 15000; // saat dijeda pengawas: cek status lebih sering
 
 /** Bilangan bulat acak antara min dan max (keduanya ikut). */
 export function randomDelaySeconds(range: { min: number; max: number }, rand: () => number = Math.random): number {
