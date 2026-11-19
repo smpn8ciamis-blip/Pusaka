@@ -99,6 +99,7 @@ export default function CbtStudentExam() {
   const [tokenInputOpen, setTokenInputOpen] = useState(false);
   const [tokenInput, setTokenInput] = useState('');
   const [honestyText, setHonestyText] = useState('');
+  const [pledgeGate, setPledgeGate] = useState(false); // pernyataan kejujuran: tampil SETELAH layar penuh/anti curang aktif, sebelum soal & timer dimulai
   const [finishOpen, setFinishOpen] = useState(false);
   const [finishText, setFinishText] = useState('');
   const [overviewWait, setOverviewWait] = useState(0);
@@ -128,6 +129,7 @@ export default function CbtStudentExam() {
   // Percobaan mulai terakhir (untuk "Coba Lagi" bila panggilan mulai gagal karena jaringan) + penanda putaran agar "Batal" saat antre bisa dibatalkan
   const startArgsRef = useRef<{ exam: any; token: string | null } | null>(null);
   const beginRunRef = useRef(0);
+  const needPledgeRef = useRef(false);
   const tabIdRef = useRef(Math.random().toString(36).slice(2));
 
   useEffect(() => { sessionRef.current = activeSession; examRef.current = activeExam; }, [activeSession, activeExam]);
@@ -333,7 +335,7 @@ export default function CbtStudentExam() {
 
   // Timer: jam monoton + jam dinding (memundurkan jam perangkat tidak menambah waktu) – hanya berjalan saat tidak dijeda
   useEffect(() => {
-    if (!activeSession || paused || submitting) return;
+    if (!activeSession || paused || submitting || pledgeGate) return;
     if (!deadlineRef.current) deadlineRef.current = createDeadline(timeLeftRef.current);
     let n = 0;
     const t = setInterval(() => {
@@ -344,7 +346,7 @@ export default function CbtStudentExam() {
       if (left <= 0) { clearInterval(t); handleSubmitExam(true); }
     }, 1000);
     return () => clearInterval(t);
-  }, [activeSession?.id, paused, submitting, handleSubmitExam, persistLocalNow]);
+  }, [activeSession?.id, paused, submitting, pledgeGate, handleSubmitExam, persistLocalNow]);
 
   // Denyut berkala (jeda acak agar ratusan siswa tidak serentak); saat dijeda: cek status tiap ~15 dtk.
   // Juga simpan lokal saat halaman disembunyikan / ditutup.
@@ -464,8 +466,11 @@ export default function CbtStudentExam() {
     setImageMap(map); setOrderedQuestions(qs); questionsRef.current = qs;
     setAnswers(mergedA); setEssayAnswers(mergedE);
     setPaused(serverStatus === 'paused');
+    // ujian baru (bukan melanjutkan): timer belum jalan sampai siswa mengetik pernyataan kejujuran
+    const gate = needPledgeRef.current && !local;
+    setHonestyText(''); setPledgeGate(gate);
     setActiveSession(session); setActiveExam(pubExam);
-    setTimeLeft(left); setCurrentIdx(0); setTokenInputOpen(false); setTokenInput(''); setHonestyText(''); setViolations(vCount);
+    setTimeLeft(left); setCurrentIdx(0); setTokenInputOpen(false); setTokenInput(''); setViolations(vCount);
     setPrep(PREP_CLOSED);
     prepCtxRef.current = null;
     queryClient.invalidateQueries({ queryKey: ['cbt-student-overview'] });
@@ -480,9 +485,10 @@ export default function CbtStudentExam() {
     setPrep((s) => ({ ...s, waitLeft: 0, waitTotal: 0, percent: 2, label: 'Mulai mengunduh…' }));
   };
 
-  const beginExam = async (exam: any, token: string | null, opts?: { noDelay?: boolean }) => {
+  const beginExam = async (exam: any, token: string | null, opts?: { noDelay?: boolean; pledge?: boolean }) => {
     if (beginningRef.current) return;
     beginningRef.current = true;
+    if (opts?.pledge !== undefined) needPledgeRef.current = opts.pledge; // Mulai baru = minta pernyataan; Lanjutkan = tidak
     const run = ++beginRunRef.current;
     startArgsRef.current = { exam, token };
     enterFullscreenFor(exam);
@@ -601,7 +607,7 @@ export default function CbtStudentExam() {
     return (
       <DashboardLayout>
         {antiCheat && <style>{'@media print { body * { display: none !important; } }'}</style>}
-        <div className={`space-y-3 max-w-3xl mx-auto px-2 ${antiCheat ? 'select-none' : ''}`} style={antiCheat ? ({ WebkitTouchCallout: 'none' } as CSSProperties) : undefined}>
+        <div className={`space-y-3 max-w-3xl mx-auto px-2 ${antiCheat ? 'select-none' : ''} ${pledgeGate ? 'invisible' : ''}`} style={antiCheat ? ({ WebkitTouchCallout: 'none' } as CSSProperties) : undefined}>
           {/* Modern sticky header */}
           <Card className="sticky top-2 z-20 shadow-md border-primary/20 bg-gradient-to-r from-primary/5 via-background to-primary/5 backdrop-blur">
             <CardContent className="p-3 flex items-center justify-between flex-wrap gap-2">
@@ -724,6 +730,32 @@ export default function CbtStudentExam() {
             </DialogHeader>
             <DialogFooter>
               <Button onClick={() => { document.documentElement.requestFullscreen?.().catch(() => {}); setNeedFullscreen(false); }}>Masuk Layar Penuh</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Pernyataan kejujuran: muncul setelah layar penuh/anti curang aktif; soal disembunyikan dan timer belum berjalan */}
+        <Dialog open={pledgeGate && !needFullscreen && !paused}>
+          <DialogContent onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><Shield className="h-5 w-5" /> Pernyataan Kejujuran</DialogTitle>
+              <DialogDescription>Soal sudah siap. Timer ujian berjalan setelah Anda mengetik pernyataan berikut.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-1.5 rounded-lg border bg-muted/40 p-3">
+              <label htmlFor="cbt-honesty" className="text-sm font-medium">Ketik pernyataan berikut untuk memulai:</label>
+              <p className="text-sm font-semibold select-none">“{CBT_PLEDGE_HONEST}”</p>
+              <div className="relative">
+                <Input id="cbt-honesty" value={honestyText} onChange={(e) => setHonestyText(e.target.value)}
+                  placeholder="Ketik pernyataan di sini" className="pr-9" autoFocus {...typedOnlyInputProps} />
+                {matchesPhrase(honestyText, CBT_PLEDGE_HONEST) && <CheckCircle className="h-4 w-4 text-emerald-600 absolute right-3 top-1/2 -translate-y-1/2" />}
+              </div>
+              <p className="text-[11px] text-muted-foreground">Harus diketik sendiri (tidak bisa ditempel). Huruf besar/kecil tidak berpengaruh.</p>
+            </div>
+            <DialogFooter>
+              <Button disabled={!matchesPhrase(honestyText, CBT_PLEDGE_HONEST)}
+                onClick={() => { deadlineRef.current = createDeadline(timeLeftRef.current); setPledgeGate(false); setHonestyText(''); }}>
+                Mulai Mengerjakan
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -878,14 +910,14 @@ export default function CbtStudentExam() {
                         <div className="p-1.5 rounded bg-amber-50 dark:bg-amber-950/30 text-[11px] text-center">Menunggu koreksi essay</div>
                       )}
                       {inProgress && exam.allow_resume !== false && (
-                        <Button className="w-full gap-1" size="sm" variant="secondary" onClick={() => beginExam(exam, null)} disabled={prep.open}>
+                        <Button className="w-full gap-1" size="sm" variant="secondary" onClick={() => beginExam(exam, null, { pledge: false })} disabled={prep.open}>
                           <RotateCcw className="h-3.5 w-3.5" /> Lanjutkan
                         </Button>
                       )}
                       {canStart && (
                         <Button className="w-full gap-1" size="sm" onClick={() => {
-                          // semua ujian baru: pernyataan kejujuran dulu (dan token bila diminta)
-                          setPendingExam(exam); setTokenInput(''); setHonestyText(''); setTokenInputOpen(true);
+                          if (exam.require_token) { setPendingExam(exam); setTokenInput(''); setTokenInputOpen(true); }
+                          else if (confirm('Mulai ujian? Semua soal akan diunduh ke perangkat ini lebih dulu. Setelah itu Anda diminta mengetik pernyataan kejujuran, lalu timer berjalan.')) beginExam(exam, null, { pledge: true });
                         }}>
                           <Play className="h-3.5 w-3.5" /> {exam.remedial ? `Mulai Remidial (${attemptsUsed + 1}/${exam.max_attempts})` : attemptsUsed > 0 ? `Coba Lagi (${attemptsUsed + 1}/${exam.max_attempts})` : 'Mulai Ujian'}
                         </Button>
@@ -922,38 +954,16 @@ export default function CbtStudentExam() {
         <Dialog open={tokenInputOpen} onOpenChange={setTokenInputOpen}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                {pendingExam?.require_token ? <KeyRound className="h-5 w-5" /> : <Shield className="h-5 w-5" />}
-                {pendingExam?.require_token ? 'Token & Pernyataan Kejujuran' : 'Pernyataan Kejujuran'}
-              </DialogTitle>
-              <DialogDescription>{pendingExam?.title}</DialogDescription>
+              <DialogTitle className="flex items-center gap-2"><KeyRound className="h-5 w-5" /> Masukkan Token Ujian</DialogTitle>
+              <DialogDescription>Token diberikan oleh guru pengawas. {pendingExam?.title}</DialogDescription>
             </DialogHeader>
-            {pendingExam?.require_token && (
-              <div className="space-y-1.5">
-                <label htmlFor="cbt-token" className="text-sm font-medium">Token ujian <span className="font-normal text-muted-foreground">(diberikan guru pengawas)</span></label>
-                <Input id="cbt-token" value={tokenInput} onChange={e => setTokenInput(e.target.value.toUpperCase())} placeholder="Token (6 karakter)" className="font-mono text-center text-lg" maxLength={12} autoFocus />
-              </div>
-            )}
-            <div className="space-y-1.5 rounded-lg border bg-muted/40 p-3">
-              <label htmlFor="cbt-honesty" className="text-sm font-medium">Ketik pernyataan berikut untuk melanjutkan:</label>
-              <p className="text-sm font-semibold select-none">“{CBT_PLEDGE_HONEST}”</p>
-              <div className="relative">
-                <Input id="cbt-honesty" value={honestyText} onChange={(e) => setHonestyText(e.target.value)}
-                  placeholder="Ketik pernyataan di sini" className="pr-9" {...typedOnlyInputProps} />
-                {matchesPhrase(honestyText, CBT_PLEDGE_HONEST) && <CheckCircle className="h-4 w-4 text-emerald-600 absolute right-3 top-1/2 -translate-y-1/2" />}
-              </div>
-              <p className="text-[11px] text-muted-foreground">Harus diketik sendiri (tidak bisa ditempel). Huruf besar/kecil tidak berpengaruh.</p>
-            </div>
+            <Input value={tokenInput} onChange={e => setTokenInput(e.target.value.toUpperCase())} placeholder="Token (6 karakter)" className="font-mono text-center text-lg" maxLength={12} autoFocus />
             <p className="text-[11px] text-muted-foreground">
-              Setelah menekan Mulai, Anda menunggu giliran beberapa detik (agar server tidak kewalahan), lalu soal diunduh ke perangkat ini. Timer ujian baru berjalan setelah semua soal selesai diunduh.
+              Setelah menekan Mulai, Anda menunggu giliran beberapa detik (agar server tidak kewalahan), lalu soal diunduh ke perangkat ini. Selanjutnya Anda diminta mengetik pernyataan kejujuran sebelum timer berjalan.
             </p>
             <DialogFooter>
-              <Button variant="outline" onClick={() => { setTokenInputOpen(false); setTokenInput(''); setHonestyText(''); }}>Batal</Button>
-              <Button
-                onClick={() => beginExam(pendingExam, pendingExam?.require_token ? (tokenInput.trim() || null) : null)}
-                disabled={!matchesPhrase(honestyText, CBT_PLEDGE_HONEST) || (!!pendingExam?.require_token && !tokenInput.trim()) || prep.open}>
-                Mulai
-              </Button>
+              <Button variant="outline" onClick={() => { setTokenInputOpen(false); setTokenInput(''); }}>Batal</Button>
+              <Button onClick={() => beginExam(pendingExam, tokenInput.trim() || null, { pledge: true })} disabled={!tokenInput.trim() || prep.open}>Mulai</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

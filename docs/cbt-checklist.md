@@ -258,7 +258,7 @@ Tujuan: memastikan server, jaringan sekolah, dan perangkat siswa kuat. Ini **buk
 1. Kumpulkan 100 siswa di satu atau dua lab/kelas dengan perangkat dan wifi yang akan dipakai saat ujian sungguhan. Rencanakan ujian uji **di luar jam ujian sungguhan**.
 2. Jalankan `VACUUM (ANALYZE) public.cbt_exam_sessions;` (C1).
 3. Buka halaman monitoring server (htop/`docker stats`) dan halaman monitoring ujian guru.
-4. Semua siswa login, masuk token, dan menekan Mulai **hampir bersamaan** (aba-aba "sekarang"). Jeda acak di aplikasi (2–45 detik) akan menyebar unduhannya; catat berapa lama hingga **semua** soal terunduh.
+4. Semua siswa login, masuk token, dan menekan Mulai **hampir bersamaan** (aba-aba "sekarang"). Jeda acak di aplikasi (2–45 detik) akan menyebar unduhannya; catat berapa lama hingga **semua** soal terunduh. Setelah soal terunduh, layar penuh/anti curang aktif dan siswa mengetik pernyataan "Saya Mengerjakan Soal Dengan Jujur" sebelum timer berjalan. Tombol **Selesai** hanya muncul di 5 menit terakhir (dan butuh semua soal terjawab); mengirim jawaban meminta siswa mengetik "Saya yakin mengirim jawaban".
 5. Siswa mengerjakan beberapa menit. Guru mengamati kolom "terakhir aktif" (denyut ±60–70 detik).
 6. **Uji tiga skenario (minta sebagian siswa):**
    - ±70 siswa menekan **Selesai** biasa.
