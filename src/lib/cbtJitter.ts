@@ -3,6 +3,7 @@
 
 /** Batas jeda (detik). Diubah di sini bila perlu. */
 export const CBT_DOWNLOAD_DELAY = { min: 2, max: 45 } as const;       // setelah token dimasukkan, sebelum soal diunduh
+export const CBT_DASHBOARD_DELAY = { min: 0, max: 15 } as const;      // pemuatan pertama daftar ujian (cbt_student_exams) setelah halaman dibuka
 export const CBT_DOWNLOAD_RETRY_DELAY = { min: 1, max: 6 } as const;  // sebelum "Coba Lagi" mengunduh soal
 export const CBT_SUBMIT_DELAY_MANUAL = { min: 0, max: 10 } as const;  // siswa menekan Selesai / diakhiri pengawas
 export const CBT_SUBMIT_DELAY_TIMEOUT = { min: 0, max: 45 } as const; // waktu habis (semua siswa selesai di detik yang sama)

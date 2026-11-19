@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Progress } from '@/components/ui/progress';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
@@ -27,9 +26,15 @@ import {
 } from '@/lib/cbtLocal';
 import {
   CBT_DOWNLOAD_DELAY, CBT_DOWNLOAD_RETRY_DELAY, CBT_SUBMIT_DELAY_MANUAL, CBT_SUBMIT_DELAY_TIMEOUT,
-  CBT_HEARTBEAT_MS, CBT_HEARTBEAT_JITTER_MS, CBT_HEARTBEAT_PAUSED_MS,
+  CBT_DASHBOARD_DELAY, CBT_HEARTBEAT_MS, CBT_HEARTBEAT_JITTER_MS, CBT_HEARTBEAT_PAUSED_MS,
   randomDelaySeconds, retryDelayMs, waitWithCountdown,
 } from '@/lib/cbtJitter';
+import { CBT_PLEDGE_HONEST, CBT_PLEDGE_SUBMIT, matchesPhrase, typedOnlyInputProps } from '@/lib/cbtPledge';
+
+// Jeda acak hanya pada pemuatan PERTAMA daftar ujian sejak halaman dibuka (bukan tiap refetch).
+let dashboardJitterDone = false;
+// Tombol Selesai baru muncul pada sisa waktu ini (detik).
+const FINISH_VISIBLE_SECONDS = 300;
 
 // Urutan acak yang stabil per sesi (tetap sama saat siswa melanjutkan ujian)
 const seededShuffle = <T,>(arr: T[], seedStr: string): T[] => {
@@ -93,7 +98,10 @@ export default function CbtStudentExam() {
   const [timeLeft, setTimeLeft] = useState(0);
   const [tokenInputOpen, setTokenInputOpen] = useState(false);
   const [tokenInput, setTokenInput] = useState('');
-  const [honestyChecked, setHonestyChecked] = useState(false);
+  const [honestyText, setHonestyText] = useState('');
+  const [finishOpen, setFinishOpen] = useState(false);
+  const [finishText, setFinishText] = useState('');
+  const [overviewWait, setOverviewWait] = useState(0);
   const [pendingExam, setPendingExam] = useState<any>(null);
   const [violations, setViolations] = useState(0);
   const [exitTokenOpen, setExitTokenOpen] = useState(false);
@@ -125,12 +133,21 @@ export default function CbtStudentExam() {
   useEffect(() => { sessionRef.current = activeSession; examRef.current = activeExam; }, [activeSession, activeExam]);
   useEffect(() => { questionsRef.current = orderedQuestions; }, [orderedQuestions]);
   useEffect(() => { pausedRef.current = paused; }, [paused]);
+  // Waktu habis / diminta pengawas / pelanggaran: dialog konfirmasi ketik ditutup, dialog pengumpulan yang tampil
+  useEffect(() => { if (submitting) { setFinishOpen(false); setFinishText(''); } }, [submitting]);
   useEffect(() => { purgeOldPapers(); purgeOldProgress(); }, []);
 
   // Satu panggilan: ujian yang boleh diikuti + riwayat sesi siswa (kunci jawaban & token tidak ikut terkirim)
   const { data: overview, isLoading: overviewLoading } = useQuery({
     queryKey: ['cbt-student-overview'],
     queryFn: async () => {
+      // jeda acak sebelum pemuatan pertama agar ratusan siswa yang membuka halaman bersamaan tidak menembak server serentak
+      if (!dashboardJitterDone) {
+        dashboardJitterDone = true;
+        const sec = randomDelaySeconds(CBT_DASHBOARD_DELAY);
+        if (sec > 0) await waitWithCountdown(sec * 1000, (left) => setOverviewWait(left));
+        setOverviewWait(0);
+      }
       const { data, error } = await (supabase as any).rpc('cbt_student_exams');
       if (error) throw error;
       return data as { student_id: string | null; exams: any[]; sessions: any[] };
@@ -448,7 +465,7 @@ export default function CbtStudentExam() {
     setAnswers(mergedA); setEssayAnswers(mergedE);
     setPaused(serverStatus === 'paused');
     setActiveSession(session); setActiveExam(pubExam);
-    setTimeLeft(left); setCurrentIdx(0); setTokenInputOpen(false); setTokenInput(''); setHonestyChecked(false); setViolations(vCount);
+    setTimeLeft(left); setCurrentIdx(0); setTokenInputOpen(false); setTokenInput(''); setHonestyText(''); setViolations(vCount);
     setPrep(PREP_CLOSED);
     prepCtxRef.current = null;
     queryClient.invalidateQueries({ queryKey: ['cbt-student-overview'] });
@@ -603,10 +620,12 @@ export default function CbtStudentExam() {
                 <Progress value={progress} className="h-2" />
                 <span className="text-xs font-medium tabular-nums whitespace-nowrap">{answeredCount}/{orderedQuestions.length}</span>
               </div>
-              {allAnswered ? (
+              {timeLeft > FINISH_VISIBLE_SECONDS ? (
+                <span className="text-[11px] text-muted-foreground max-w-[150px] text-right leading-tight">Tombol Selesai muncul di 5 menit terakhir</span>
+              ) : allAnswered ? (
                 <Button size="sm" variant="default" className="bg-emerald-600 hover:bg-emerald-700"
                   disabled={submitting}
-                  onClick={() => { if (confirm('Semua soal sudah dijawab. Selesaikan ujian?')) handleSubmitExam(); }}>
+                  onClick={() => { setFinishText(''); setFinishOpen(true); }}>
                   <CheckCircle className="h-4 w-4 mr-1" /> Selesai
                 </Button>
               ) : (
@@ -736,6 +755,32 @@ export default function CbtStudentExam() {
         </Dialog>
 
         {submitDialog}
+        {/* Konfirmasi kirim jawaban: siswa mengetik pernyataan (validasi di perangkat saja) */}
+        <Dialog open={finishOpen} onOpenChange={(o) => { setFinishOpen(o); if (!o) setFinishText(''); }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><Send className="h-5 w-5" /> Kirim jawaban?</DialogTitle>
+              <DialogDescription>Semua soal sudah dijawab. Setelah dikirim, ujian selesai dan jawaban tidak bisa diubah.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-1.5">
+              <label htmlFor="cbt-finish-confirm" className="text-sm font-medium">Ketik pernyataan berikut untuk mengirim:</label>
+              <p className="text-sm font-semibold select-none">“{CBT_PLEDGE_SUBMIT}”</p>
+              <div className="relative">
+                <Input id="cbt-finish-confirm" value={finishText} onChange={(e) => setFinishText(e.target.value)}
+                  placeholder="Ketik pernyataan di sini" className="pr-9" {...typedOnlyInputProps} />
+                {matchesPhrase(finishText, CBT_PLEDGE_SUBMIT) && <CheckCircle className="h-4 w-4 text-emerald-600 absolute right-3 top-1/2 -translate-y-1/2" />}
+              </div>
+              <p className="text-[11px] text-muted-foreground">Harus diketik sendiri (tidak bisa ditempel). Huruf besar/kecil tidak berpengaruh.</p>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setFinishOpen(false); setFinishText(''); }}>Kembali ke soal</Button>
+              <Button className="bg-emerald-600 hover:bg-emerald-700" disabled={!matchesPhrase(finishText, CBT_PLEDGE_SUBMIT) || submitting}
+                onClick={() => { setFinishOpen(false); setFinishText(''); handleSubmitExam(); }}>
+                Kirim Jawaban
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Exit token dialog */}
         <Dialog open={exitTokenOpen} onOpenChange={setExitTokenOpen}>
@@ -781,7 +826,10 @@ export default function CbtStudentExam() {
           </div>
 
           {overviewLoading ? (
-            <Card><CardContent className="py-12 text-center text-muted-foreground">Memuat daftar ujian…</CardContent></Card>
+            <Card><CardContent className="py-12 text-center text-muted-foreground">
+              Memuat daftar ujian…
+              {overviewWait > 0 && <span className="block text-xs mt-1">Menunggu giliran ({overviewWait} dtk) agar server tidak kewalahan. Jangan tutup halaman ini.</span>}
+            </CardContent></Card>
           ) : (!availableExams || availableExams.length === 0) ? (
             <Card><CardContent className="py-12 text-center text-muted-foreground"><FileText className="h-12 w-12 mx-auto mb-3 opacity-30" /><p>Tidak ada ujian saat ini</p></CardContent></Card>
           ) : (
@@ -837,7 +885,7 @@ export default function CbtStudentExam() {
                       {canStart && (
                         <Button className="w-full gap-1" size="sm" onClick={() => {
                           // semua ujian baru: pernyataan kejujuran dulu (dan token bila diminta)
-                          setPendingExam(exam); setTokenInput(''); setHonestyChecked(false); setTokenInputOpen(true);
+                          setPendingExam(exam); setTokenInput(''); setHonestyText(''); setTokenInputOpen(true);
                         }}>
                           <Play className="h-3.5 w-3.5" /> {exam.remedial ? `Mulai Remidial (${attemptsUsed + 1}/${exam.max_attempts})` : attemptsUsed > 0 ? `Coba Lagi (${attemptsUsed + 1}/${exam.max_attempts})` : 'Mulai Ujian'}
                         </Button>
@@ -886,21 +934,24 @@ export default function CbtStudentExam() {
                 <Input id="cbt-token" value={tokenInput} onChange={e => setTokenInput(e.target.value.toUpperCase())} placeholder="Token (6 karakter)" className="font-mono text-center text-lg" maxLength={12} autoFocus />
               </div>
             )}
-            <label htmlFor="cbt-honesty" className="flex items-start gap-3 rounded-lg border bg-muted/40 p-3 cursor-pointer">
-              <Checkbox id="cbt-honesty" className="mt-0.5" checked={honestyChecked} onCheckedChange={(v) => setHonestyChecked(v === true)} />
-              <span className="text-sm leading-snug">
-                <b>Saya Mengerjakan Soal Dengan Jujur</b>
-                <span className="block text-xs text-muted-foreground mt-0.5">Tanpa menyontek dan tanpa bantuan yang tidak diizinkan guru.</span>
-              </span>
-            </label>
+            <div className="space-y-1.5 rounded-lg border bg-muted/40 p-3">
+              <label htmlFor="cbt-honesty" className="text-sm font-medium">Ketik pernyataan berikut untuk melanjutkan:</label>
+              <p className="text-sm font-semibold select-none">“{CBT_PLEDGE_HONEST}”</p>
+              <div className="relative">
+                <Input id="cbt-honesty" value={honestyText} onChange={(e) => setHonestyText(e.target.value)}
+                  placeholder="Ketik pernyataan di sini" className="pr-9" {...typedOnlyInputProps} />
+                {matchesPhrase(honestyText, CBT_PLEDGE_HONEST) && <CheckCircle className="h-4 w-4 text-emerald-600 absolute right-3 top-1/2 -translate-y-1/2" />}
+              </div>
+              <p className="text-[11px] text-muted-foreground">Harus diketik sendiri (tidak bisa ditempel). Huruf besar/kecil tidak berpengaruh.</p>
+            </div>
             <p className="text-[11px] text-muted-foreground">
               Setelah menekan Mulai, Anda menunggu giliran beberapa detik (agar server tidak kewalahan), lalu soal diunduh ke perangkat ini. Timer ujian baru berjalan setelah semua soal selesai diunduh.
             </p>
             <DialogFooter>
-              <Button variant="outline" onClick={() => { setTokenInputOpen(false); setTokenInput(''); setHonestyChecked(false); }}>Batal</Button>
+              <Button variant="outline" onClick={() => { setTokenInputOpen(false); setTokenInput(''); setHonestyText(''); }}>Batal</Button>
               <Button
                 onClick={() => beginExam(pendingExam, pendingExam?.require_token ? (tokenInput.trim() || null) : null)}
-                disabled={!honestyChecked || (!!pendingExam?.require_token && !tokenInput.trim()) || prep.open}>
+                disabled={!matchesPhrase(honestyText, CBT_PLEDGE_HONEST) || (!!pendingExam?.require_token && !tokenInput.trim()) || prep.open}>
                 Mulai
               </Button>
             </DialogFooter>
