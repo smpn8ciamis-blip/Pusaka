@@ -8,6 +8,8 @@
  * hanya saja tidak bertahan setelah halaman dimuat ulang.
  */
 
+import { driveFileId, driveFallbackUrl } from '@/lib/driveLinks';
+
 export interface PaperQuestion {
   id: string;
   question_number?: number;
@@ -209,10 +211,17 @@ export interface PrefetchDeps {
   signal?: AbortSignal;
 }
 
-const defaultFetchImage = async (url: string): Promise<Blob> => {
-  const res = await fetch(url, { cache: 'force-cache' });
+const fetchBlob = async (url: string): Promise<Blob> => {
+  const res = await fetch(url, { cache: 'force-cache', referrerPolicy: 'no-referrer' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.blob();
+};
+
+/** Gambar Drive: bila tautan utama gagal, coba tautan cadangan sebelum dianggap gagal. */
+const defaultFetchImage = async (url: string): Promise<Blob> => {
+  const id = driveFileId(url);
+  if (!id) return fetchBlob(url);
+  try { return await fetchBlob(url); } catch { return fetchBlob(driveFallbackUrl(id)); }
 };
 
 /**
