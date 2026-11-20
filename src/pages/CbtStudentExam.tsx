@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { id as idLocale } from 'date-fns/locale';
 import { RichTextDisplay } from '@/components/cbt/RichTextEditor';
+import { OptionDisplay } from '@/components/cbt/OptionDisplay';
 import { useCbtAntiCheat } from '@/hooks/useCbtAntiCheat';
 import { createDeadline, violationLabel } from '@/lib/cbtAntiCheat';
 import {
@@ -703,7 +704,7 @@ export default function CbtStudentExam() {
                       <label key={opt} htmlFor={`opt-${opt}`}
                         className={`flex items-start space-x-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${selected ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40 hover:bg-accent/30'}`}>
                         <RadioGroupItem value={opt} id={`opt-${opt}`} className="mt-0.5" />
-                        <span className="flex-1 text-sm"><strong className="mr-1">{opt}.</strong> {val}</span>
+                        <span className="flex-1 text-sm min-w-0"><strong className="mr-1">{opt}.</strong> <OptionDisplay value={val} imageMap={imageMap} /></span>
                       </label>
                     );
                   })}
