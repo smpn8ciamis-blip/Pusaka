@@ -699,6 +699,8 @@ const ExamAdministration = () => {
     const loadImg = createImageLoader(); // logo dimuat sekali untuk semua ruang
     const [leftLogo, rightLogo] = await Promise.all([loadImg(settings?.logo_url), loadImg(settings?.right_logo_url)]);
     const smallCells: string[] = [];
+    // nama rombel di data berakhiran tahun ajaran (mis. 7A_2026/2027); pada denah cukup "7A"
+    const shortClass = (n: string) => String(n).split('_')[0];
 
     for (let roomIndex = 0; roomIndex < rooms.length; roomIndex++) {
       const room = rooms[roomIndex];
@@ -790,7 +792,7 @@ const ExamAdministration = () => {
       const legendStart = lx;
       doc.setFont("helvetica", "normal");
       classNames.forEach((name) => {
-        const label = `${name} (${classCount[name]})`;
+        const label = `${shortClass(name)} (${classCount[name]})`;
         const w = 5 + 1.5 + doc.getTextWidth(label) + 5;
         if (lx + w > PW - M && lx > legendStart) { lx = legendStart; y += 4.5; }
         const color = getClassColor(name);
@@ -817,8 +819,13 @@ const ExamAdministration = () => {
       const cellW = gridW / columnsCount;
       const cellH = Math.min(24, (PH - M - footerH - y) / rowsCount);
       if (cellH < 11 && !smallCells.includes(room.roomNumber.toString())) smallCells.push(room.roomNumber.toString());
-      const bar = Math.max(3.2, Math.min(4.8, cellH * 0.28));
+      const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+      // semua ukuran huruf mengikuti ukuran kotak (lebar & tinggi), supaya proporsional pada 4 maupun 10 kolom
+      const bar = clamp(cellH * 0.27, 3.4, 6.5);
+      const barNumFs = clamp(bar * 2.0, 6, 13);
+      const barSmallFs = clamp(bar * 1.45, 5, 9);
       const seatByTable = new Map(room.seats.map((s) => [s.tableNumber, s]));
+      const lineH = (fs: number) => fs * 0.3528 * 1.15;
 
       for (let row = 0; row < rowsCount; row++) {
         for (let col = 0; col < columnsCount; col++) {
@@ -832,40 +839,55 @@ const ExamAdministration = () => {
           const color = getClassColor(seat.student.classes.name);
           doc.setFillColor(Math.floor(color.r + (255 - color.r) * 0.82), Math.floor(color.g + (255 - color.g) * 0.82), Math.floor(color.b + (255 - color.b) * 0.82));
           doc.rect(x, cy, cellW, cellH, 'FD');
-          // bilah atas: kelas | nomor meja | L/P
+
+          // bilah atas: kelas (kiri) | nomor meja (tengah) | L/P (kanan)
           doc.setFillColor(color.r, color.g, color.b);
           doc.rect(x, cy, cellW, bar, 'F');
           doc.setTextColor(255, 255, 255);
           doc.setFont("helvetica", "bold");
-          doc.setFontSize(Math.min(8.5, bar * 1.9));
-          doc.text(String(seat.tableNumber), x + cellW / 2, cy + bar * 0.72, { align: "center" });
-          doc.setFontSize(Math.min(6.5, bar * 1.45));
-          doc.text(ellipsize(doc, seat.student.classes.name, cellW * 0.38), x + 1, cy + bar * 0.72);
+          const barBase = cy + bar / 2 + barNumFs * 0.3528 * 0.35;
+          doc.setFontSize(barNumFs);
+          doc.text(String(seat.tableNumber), x + cellW / 2, barBase, { align: "center" });
+          doc.setFontSize(barSmallFs);
+          doc.text(ellipsize(doc, shortClass(seat.student.classes.name), cellW * 0.32), x + 1.5, cy + bar / 2 + barSmallFs * 0.3528 * 0.35);
           const g = (seat.student.gender || '').toUpperCase();
-          doc.text(g === 'L' || g === 'P' ? g : '-', x + cellW - 1, cy + bar * 0.72, { align: "right" });
+          doc.text(g === 'L' || g === 'P' ? g : '-', x + cellW - 1.5, cy + bar / 2 + barSmallFs * 0.3528 * 0.35, { align: "right" });
 
-          // nama: maks. 2 baris (1 baris bila sel pendek), dikecilkan agar muat
+          // baris nomor peserta di dasar kotak
           const body = cy + bar;
           const bodyH = cellH - bar;
-          const lines = bodyH >= 11 ? 2 : 1;
-          const nameFs = Math.min(columnsCount >= 8 ? 6.5 : 7.5, bodyH / (lines + 1.4) * 2.2);
+          const numFs = clamp(Math.min(cellW * 0.09, bodyH * 0.55), 5.5, 9);
+          const numAreaH = lineH(numFs) + 1.2;
+          const nameAreaH = bodyH - numAreaH;
+
+          // nama: huruf sebesar mungkin yang masih muat (1 baris dulu, lalu 2 baris), tidak melebihi batas proporsi
+          const full = toTitleCase(seat.student.full_name);
+          const maxW = cellW - 3;
+          const maxFs = clamp(Math.min(cellW * 0.16, nameAreaH * 2.4), 5, 12);
           doc.setTextColor(0, 0, 0);
           doc.setFont("helvetica", "bold");
-          doc.setFontSize(nameFs);
-          const full = toTitleCase(seat.student.full_name);
-          let nameLines: string[] = doc.splitTextToSize(full, cellW - 2);
-          if (nameLines.length > lines) {
-            nameLines = nameLines.slice(0, lines);
-            nameLines[lines - 1] = ellipsize(doc, nameLines[lines - 1] + ' …', cellW - 2);
+          let nameFs = maxFs;
+          let nameLines: string[] = [full];
+          for (let fs = maxFs; fs >= 5; fs -= 0.5) {
+            doc.setFontSize(fs);
+            const ls: string[] = doc.splitTextToSize(full, maxW);
+            nameFs = fs; nameLines = ls;
+            if (ls.length * lineH(fs) <= nameAreaH + 0.2 && ls.length <= 2) break;
           }
-          const lh = nameFs * 0.42;
-          nameLines.forEach((ln, i) => doc.text(ln, x + cellW / 2, body + lh + 0.4 + i * lh, { align: "center" }));
+          const maxLines = Math.max(1, Math.min(2, Math.floor(nameAreaH / lineH(nameFs))));
+          if (nameLines.length > maxLines) {
+            nameLines = nameLines.slice(0, maxLines);
+            nameLines[maxLines - 1] = ellipsize(doc, nameLines[maxLines - 1] + ' …', maxW);
+          }
+          const blockH = nameLines.length * lineH(nameFs);
+          const firstBase = body + (nameAreaH - blockH) / 2 + lineH(nameFs) * 0.78;
+          nameLines.forEach((ln, i) => doc.text(ln, x + cellW / 2, firstBase + i * lineH(nameFs), { align: "center" }));
 
-          // nomor peserta di dasar sel
+          // nomor peserta
           doc.setFont("helvetica", "normal");
-          doc.setFontSize(Math.min(6.5, Math.max(4.5, bodyH * 0.3)));
+          doc.setFontSize(numFs);
           doc.setTextColor(40, 40, 40);
-          doc.text(ellipsize(doc, `No. ${seat.examNumber}`, cellW - 2), x + cellW / 2, cy + cellH - 1.2, { align: "center" });
+          doc.text(ellipsize(doc, `No. ${seat.examNumber}`, cellW - 3), x + cellW / 2, cy + cellH - 1.4, { align: "center" });
         }
       }
 
