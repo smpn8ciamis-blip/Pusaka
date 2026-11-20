@@ -4,6 +4,7 @@
 //
 //   node loadtest.mjs seed    --students 200 --questions 40
 //   node loadtest.mjs run     --students 200 --duration 180 --save-every 45
+//   node loadtest.mjs run     --students 650 --app-jitter        # meniru jeda acak aplikasi (src/lib/cbtJitter.ts)
 //   node loadtest.mjs cleanup
 //
 // Env: SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY (SERVICE_ROLE_KEY hanya untuk seed & cleanup)
@@ -130,8 +131,10 @@ async function cleanup() {
 // ---------- RUN ----------
 const metrics = new Map(); // nama -> { n, err, ms: [], bytes }
 function rec(name, ms, ok, bytes = 0) {
-  const m = metrics.get(name) || { n: 0, err: 0, ms: [], bytes: 0, firstErr: '' };
-  m.n++; if (!ok) m.err++; m.ms.push(ms); m.bytes += bytes; metrics.set(name, m);
+  const m = metrics.get(name) || { n: 0, err: 0, ms: [], bytes: 0, firstErr: '', per: new Map() };
+  m.n++; if (!ok) m.err++; m.ms.push(ms); m.bytes += bytes;
+  const sec = Math.floor(Date.now() / 1000); m.per.set(sec, (m.per.get(sec) || 0) + 1); // untuk "puncak/dtk"
+  metrics.set(name, m);
 }
 async function timed(name, fn) {
   const t0 = performance.now();
@@ -166,6 +169,64 @@ async function student(u, o) {
   } catch { /* sudah tercatat sebagai error di metrik */ }
 }
 
+// ---------- Jeda acak aplikasi (meniru src/lib/cbtJitter.ts) ----------
+// Nilai dibaca langsung dari src/lib/cbtJitter.ts bila berkasnya ada (ikut berubah bila Anda mengubah batas jeda di aplikasi);
+// bila tidak terbaca, dipakai nilai bawaan di bawah (sama dengan isi berkas itu saat skrip ini ditulis).
+const APP_JITTER_DEFAULT = {
+  dashboard: { min: 0, max: 15 }, download: { min: 2, max: 45 },
+  submitManual: { min: 0, max: 10 }, submitTimeout: { min: 0, max: 45 },
+  heartbeatMs: 60000, heartbeatJitterMs: 10000,
+};
+function loadAppJitter() {
+  const J = JSON.parse(JSON.stringify(APP_JITTER_DEFAULT));
+  const names = { CBT_DASHBOARD_DELAY: 'dashboard', CBT_DOWNLOAD_DELAY: 'download', CBT_SUBMIT_DELAY_MANUAL: 'submitManual', CBT_SUBMIT_DELAY_TIMEOUT: 'submitTimeout' };
+  try {
+    const src = fs.readFileSync(new URL('../../src/lib/cbtJitter.ts', import.meta.url), 'utf8');
+    let found = 0;
+    for (const m of src.matchAll(/export const (CBT_[A-Z_]+)\s*=\s*\{\s*min:\s*(\d+)\s*,\s*max:\s*(\d+)\s*\}/g)) {
+      if (names[m[1]]) { J[names[m[1]]] = { min: Number(m[2]), max: Number(m[3]) }; found++; }
+    }
+    const hb = src.match(/export const CBT_HEARTBEAT_MS\s*=\s*(\d+)/); if (hb) { J.heartbeatMs = Number(hb[1]); found++; }
+    const hj = src.match(/export const CBT_HEARTBEAT_JITTER_MS\s*=\s*(\d+)/); if (hj) { J.heartbeatJitterMs = Number(hj[1]); found++; }
+    J.source = found >= 6 ? 'dibaca dari src/lib/cbtJitter.ts' : 'bawaan skrip (src/lib/cbtJitter.ts tidak terbaca penuh)';
+  } catch { J.source = 'bawaan skrip (src/lib/cbtJitter.ts tidak ditemukan)'; }
+  return J;
+}
+const delayMs = (r) => (r.min + Math.floor(Math.random() * (r.max - r.min + 1))) * 1000;
+const waits = []; // waktu tunggu siswa (ms) dari menekan Mulai sampai soal siap: jeda acak + server
+
+// Siswa meniru alur aplikasi: buka halaman -> jeda acak -> daftar ujian -> mengetik token & pernyataan -> jeda acak unduh
+// -> mulai sesi -> unduh soal -> mengerjakan (denyut tiap ~60 dtk + acak) -> WAKTU HABIS bersamaan -> jeda acak -> kumpul.
+async function studentApp(u, o) {
+  const J = o.app;
+  const rpc = (fn, body, name) => timed(name || fn, () => api('POST', '/rest/v1/rpc/' + fn, { token: u.token, body }));
+  try {
+    await sleep(rand(o.openSpread * 1000 + 1));               // siswa membuka halaman ujian (hampir bersamaan)
+    await sleep(delayMs(J.dashboard));                        // jeda acak sebelum memuat daftar ujian
+    await rpc('cbt_student_exams', {});
+    await sleep(o.thinkMin * 1000 + rand((o.thinkMax - o.thinkMin) * 1000 + 1)); // mengetik token + pernyataan kejujuran
+    const tWait = performance.now();
+    await sleep(delayMs(J.download));                         // jeda acak sebelum menghubungi server
+    const s = await rpc('cbt_start_session', { p_exam_id: o.examId, p_token: null });
+    const sessionId = s.json.session.id;
+    const paper = await rpc('cbt_exam_paper', { p_session_id: sessionId });
+    waits.push(performance.now() - tWait);
+    const qids = paper.json.questions.map((q) => q.id);
+    const answers = {};
+    let nextBeat = Date.now() + J.heartbeatMs + Math.random() * J.heartbeatJitterMs;
+    while (Date.now() < o.deadline) {
+      await sleep(Math.min(1000 + rand(2500), Math.max(0, o.deadline - Date.now())));
+      if (Math.random() < 0.7) { const q = qids[rand(qids.length)]; answers[q] = 'ABCD'[rand(4)]; }
+      if (Date.now() >= nextBeat && Date.now() < o.deadline) {
+        await rpc('cbt_heartbeat', { p_session_id: sessionId, p_answered: Object.keys(answers).length, p_time_remaining: Math.max(0, Math.round((o.deadline - Date.now()) / 1000)) });
+        nextBeat = Date.now() + J.heartbeatMs + Math.random() * J.heartbeatJitterMs;
+      }
+    }
+    await sleep(delayMs(J.submitTimeout));                    // waktu habis: semua siswa selesai di detik yang sama, lalu jeda acak
+    await rpc('cbt_submit_session', { p_session_id: sessionId, p_answers: answers, p_essays: {}, p_timeout: true });
+  } catch { /* sudah tercatat sebagai error di metrik */ }
+}
+
 async function run() {
   need(['SUPABASE_URL', 'ANON_KEY']);
   if (!fs.existsSync(STATE_FILE)) { console.error('Belum ada data uji. Jalankan "seed" dulu.'); process.exit(1); }
@@ -175,6 +236,16 @@ async function run() {
     examId: st.examId, duration: num('duration', 180), saveEvery: num('save-every', 45),
     ramp: args['sync-start'] ? 0 : num('ramp', 20), syncSubmit: !!args['sync-submit'], submitSpread: num('submit-spread', 20),
   };
+  const appMode = !!args['app-jitter'];
+  if (appMode) {
+    if (args['sync-start'] || args['sync-submit']) { console.error('--app-jitter tidak bisa digabung dengan --sync-start/--sync-submit.'); process.exit(1); }
+    o.app = loadAppJitter();
+    o.openSpread = num('open-spread', 3);          // detik: siswa membuka halaman ujian hampir bersamaan
+    o.thinkMin = num('think-min', 8); o.thinkMax = Math.max(o.thinkMin, num('think-max', 30)); // detik: mengetik token + pernyataan
+    // durasi minimal supaya semua siswa sempat mulai (jeda terpanjang) dan mengirim minimal satu denyut sebelum waktu habis
+    const need = Math.ceil(o.openSpread + o.app.dashboard.max + o.thinkMax + o.app.download.max + (o.app.heartbeatMs + o.app.heartbeatJitterMs) / 1000 + 20);
+    if (o.duration < need) { console.log(`Catatan: durasi ${o.duration} dtk terlalu pendek untuk meniru jeda aplikasi; dinaikkan jadi ${need} dtk.`); o.duration = need; }
+  }
   const users = st.users.slice(0, n).map((u) => ({ ...u, token: null }));
   console.log(`Login ${n} siswa uji (maks ${num('login-rate', 5)}/detik)…`);
   const gap = 1000 / num('login-rate', 5);
@@ -188,15 +259,23 @@ async function run() {
   const ready = users.filter((u) => u.token);
   if (!ready.length) { console.error('Semua login gagal. Pesan: ' + (metrics.get('login')?.firstErr || '?')); process.exit(1); }
   if (failedLogin) console.warn(`  ! ${failedLogin} login gagal (kemungkinan batas laju GoTrue); lanjut dengan ${ready.length} siswa.`);
-  console.log(`Mulai uji: ${ready.length} siswa, ${o.duration}s, simpan tiap ~${o.saveEvery}s, ` + (args['sync-start'] ? 'MULAI SERENTAK' : `ramp ${o.ramp}s`) + (o.syncSubmit ? ', KUMPUL SERENTAK' : '') + '\n');
+  if (appMode) {
+    const J = o.app;
+    console.log(`Mulai uji MENIRU JEDA ACAK APLIKASI (${J.source}): ${ready.length} siswa, ${o.duration}s, waktu habis serentak.`);
+    console.log(`  daftar ujian ${J.dashboard.min}-${J.dashboard.max} dtk | mengetik token+pernyataan ${o.thinkMin}-${o.thinkMax} dtk | unduh soal ${J.download.min}-${J.download.max} dtk | ` +
+      `denyut ${J.heartbeatMs / 1000} dtk + 0-${J.heartbeatJitterMs / 1000} dtk | kumpul (waktu habis) ${J.submitTimeout.min}-${J.submitTimeout.max} dtk\n`);
+  } else {
+    console.log(`Mulai uji: ${ready.length} siswa, ${o.duration}s, simpan tiap ~${o.saveEvery}s, ` + (args['sync-start'] ? 'MULAI SERENTAK' : `ramp ${o.ramp}s`) + (o.syncSubmit ? ', KUMPUL SERENTAK' : '') + '\n');
+  }
   const t0 = performance.now();
-  await Promise.all(ready.map((u) => student(u, o)));
+  if (appMode) o.deadline = Date.now() + o.duration * 1000; // waktu habis sama untuk semua siswa
+  await Promise.all(ready.map((u) => (appMode ? studentApp(u, o) : student(u, o))));
   const total = (performance.now() - t0) / 1000;
 
-  const rows = [['Endpoint', 'jumlah', 'galat', 'p50 ms', 'p95 ms', 'p99 ms', 'maks ms', 'KB/resp']];
+  const rows = [['Endpoint', 'jumlah', 'galat', 'p50 ms', 'p95 ms', 'p99 ms', 'maks ms', 'KB/resp', 'puncak/dtk']];
   let verdict = true;
   for (const [name, m] of metrics) {
-    rows.push([name, m.n, m.err, Math.round(pct(m.ms, 50)), Math.round(pct(m.ms, 95)), Math.round(pct(m.ms, 99)), Math.round(Math.max(...m.ms)), (m.bytes / Math.max(1, m.n - m.err) / 1024).toFixed(1)]);
+    rows.push([name, m.n, m.err, Math.round(pct(m.ms, 50)), Math.round(pct(m.ms, 95)), Math.round(pct(m.ms, 99)), Math.round(Math.max(...m.ms)), (m.bytes / Math.max(1, m.n - m.err) / 1024).toFixed(1), Math.max(...m.per.values())]);
     if (m.err / m.n > 0.01 || (name !== 'cbt_exam_paper' && name !== 'login' && pct(m.ms, 95) > 2000)) verdict = false;
   }
   const w = rows[0].map((_, i) => Math.max(...rows.map((r) => String(r[i]).length)));
@@ -204,6 +283,10 @@ async function run() {
   const reqs = [...metrics.values()].reduce((a, m) => a + m.n, 0);
   console.log(`\nTotal ${reqs} permintaan dalam ${total.toFixed(0)} detik (rata-rata ${(reqs / total).toFixed(1)}/detik).`);
   for (const [name, m] of metrics) if (m.firstErr) console.log(`Galat pertama ${name}: ${m.firstErr}`);
+  if (appMode && waits.length) {
+    const sec = (p) => (pct(waits, p) / 1000).toFixed(1);
+    console.log(`\nWaktu tunggu siswa dari menekan Mulai sampai soal siap (jeda acak + server, tanpa waktu mengetik): p50 ${sec(50)} dtk, p95 ${sec(95)} dtk, maks ${(Math.max(...waits) / 1000).toFixed(1)} dtk (${waits.length} siswa).`);
+  }
   console.log(verdict ? '\nHASIL: LOLOS (galat < 1% dan p95 < 2 detik).' : '\nHASIL: PERLU PERHATIAN (galat ≥ 1% atau p95 ≥ 2 detik). Lihat tabel; pantau CPU/RAM server saat uji.');
 }
 
