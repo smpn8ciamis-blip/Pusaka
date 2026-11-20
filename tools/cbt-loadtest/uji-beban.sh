@@ -7,6 +7,7 @@
 #   bash uji-beban.sh 50                       # tahap 1: 50 siswa
 #   bash uji-beban.sh 200                      # tahap 2: 200 siswa
 #   bash uji-beban.sh 650 --serentak --hemat   # tahap 3: skenario terburuk
+#   bash uji-beban.sh 650 --jeda-aplikasi --hemat  # paling mirip ujian nyata: memakai jeda acak aplikasi
 #
 # Skrip ini otomatis: mengambil kunci API dari .env Supabase di server, menolak jalan bila ada
 # ujian sungguhan berlangsung, membuat siswa uji (seed), menjalankan uji, merekam CPU/RAM/swap/
@@ -26,7 +27,9 @@ Pemakaian: bash uji-beban.sh [JUMLAH_SISWA] [opsi]
 
   JUMLAH_SISWA      jumlah siswa uji (default 50)
   --serentak        semua siswa mulai dan kumpul di detik yang sama (skenario terburuk)
-  --durasi N        lama uji dalam detik (default 180)
+  --jeda-aplikasi   meniru jeda acak aplikasi siswa (nilai dibaca dari src/lib/cbtJitter.ts): daftar ujian, unduh soal,
+                    denyut, dan kumpul saat waktu habis serentak. Skenario paling mirip ujian nyata; durasi default 300 dtk
+  --durasi N        lama uji dalam detik (default 180; 300 bila --jeda-aplikasi)
   --hemat           hentikan sementara supabase-studio/meta/vector selama uji (dinyalakan lagi otomatis)
   --login-rate N    login per detik (default 5; turunkan bila banyak login gagal)
   --url ALAMAT      alamat API (default: http://127.0.0.1:<port Kong> di server ini)
@@ -37,15 +40,16 @@ Pemakaian: bash uji-beban.sh [JUMLAH_SISWA] [opsi]
 EOF
 }
 
-SISWA=50; DURASI=180; SERENTAK=0; HEMAT=0; PAKSA=0; SIMPAN=0; CEK=0; LOGIN_RATE=5; URL_OPT=""
+SISWA=50; DURASI=180; DURASI_SET=0; JEDA=0; SERENTAK=0; HEMAT=0; PAKSA=0; SIMPAN=0; CEK=0; LOGIN_RATE=5; URL_OPT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --serentak) SERENTAK=1 ;;
+    --jeda-aplikasi) JEDA=1 ;;
     --hemat) HEMAT=1 ;;
     --paksa) PAKSA=1 ;;
     --simpan-data) SIMPAN=1 ;;
     --cek) CEK=1 ;;
-    --durasi) DURASI="${2:-}"; shift ;;
+    --durasi) DURASI="${2:-}"; DURASI_SET=1; shift ;;
     --login-rate) LOGIN_RATE="${2:-}"; shift ;;
     --url) URL_OPT="${2:-}"; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -59,6 +63,8 @@ die() { echo "✖ $*" >&2; exit 1; }
 case "$SISWA$DURASI$LOGIN_RATE" in *[!0-9]*|'') die "Jumlah siswa, --durasi, dan --login-rate harus berupa angka." ;; esac
 [ "$SISWA" -ge 1 ] && [ "$SISWA" -le 2000 ] || die "Jumlah siswa harus 1-2000."
 [ "$LOGIN_RATE" -ge 1 ] || die "--login-rate minimal 1."
+[ "$JEDA" -eq 1 ] && [ "$SERENTAK" -eq 1 ] && die "--jeda-aplikasi tidak bisa digabung dengan --serentak (pilih salah satu)."
+[ "$JEDA" -eq 1 ] && [ "$DURASI_SET" -eq 0 ] && DURASI=300
 
 # ---------- 1. Pemeriksaan awal ----------
 echo "▶ Pemeriksaan awal…"
@@ -162,6 +168,7 @@ node loadtest.mjs seed --students "$SISWA" --questions 40 2>&1 | tee "$OUT/seed.
 
 ARGS=(run --students "$SISWA" --duration "$DURASI" --login-rate "$LOGIN_RATE")
 MODE="bertahap (ramp 20 dtk)"; if [ "$SERENTAK" -eq 1 ]; then ARGS+=(--sync-start --sync-submit); MODE="SERENTAK (mulai dan kumpul bersamaan)"; fi
+if [ "$JEDA" -eq 1 ]; then ARGS+=(--app-jitter); MODE="meniru jeda acak aplikasi (waktu habis serentak)"; fi
 echo "▶ 2/3 Menjalankan uji: $SISWA siswa, $DURASI dtk, $MODE"
 echo "   Perkiraan total ±$(( (SISWA / LOGIN_RATE + DURASI + 90) / 60 + 1 )) menit (login $SISWA siswa saja ±$(( SISWA / LOGIN_RATE )) dtk). Tekan Ctrl+C untuk membatalkan; data uji tetap dibersihkan."
 
