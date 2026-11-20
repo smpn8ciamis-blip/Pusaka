@@ -1,5 +1,5 @@
 import { useAuth } from '@/contexts/AuthContext';
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,10 @@ import autoTable from "jspdf-autotable";
 import JsBarcode from "jsbarcode";
 import { addLetterheadToPDF, addQRCodeToPDF } from "@/lib/pdfLetterhead";
 import { DashboardLayout } from "@/components/DashboardLayout";
+import { DraftNumberInput } from "@/components/exam/DraftNumberInput";
+import { buildRooms, filterRoomsKeepNumbers, validateStartNumbers, DEFAULT_START_NUMBERS, snakeTableNumber } from "@/lib/examSeating";
+import { buildClassColorMap, createImageLoader, fitText, ellipsize, shortDateLabel } from "@/lib/examPdf";
+import { PAPER_LABEL, paperFormat, type PdfPaper } from "@/lib/pdfPaper";
 
 
 interface Student {
@@ -67,6 +71,10 @@ const ExamAdministration = () => {
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const [showPhotoOnCard, setShowPhotoOnCard] = useState<boolean>(true);
+  const [paper, setPaper] = useState<PdfPaper>('f4');
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [layoutWarnings, setLayoutWarnings] = useState<string[]>([]);
 
   // Print progress state (prevents auto-logout & shows feedback)
   const [printProgress, setPrintProgress] = useState<{ open: boolean; value: number; current: number; total: number; label: string }>({
@@ -143,15 +151,18 @@ const ExamAdministration = () => {
 
       // Exclude any student that has a mutation record (mutasi keluar)
       const ids = (data || []).map((s: any) => s.id);
-      let mutatedIds = new Set<string>();
-      if (ids.length > 0) {
-        const { data: mut } = await supabase
+      const mutatedIds = new Set<string>();
+      // dalam potongan 100 id agar alamat permintaan tidak terlalu panjang (600 id sekaligus bisa ditolak server)
+      for (let i = 0; i < ids.length; i += 100) {
+        const { data: mut, error: mutErr } = await supabase
           .from('student_mutations')
           .select('student_id')
-          .in('student_id', ids);
-        mutatedIds = new Set((mut || []).map((m: any) => m.student_id));
+          .in('student_id', ids.slice(i, i + 100));
+        if (mutErr) throw mutErr;
+        (mut || []).forEach((m: any) => mutatedIds.add(m.student_id));
       }
-      return (data as Student[]).filter((s: any) => !mutatedIds.has(s.id));
+      // siswa tanpa kelas tidak bisa ditempatkan di ruang ujian
+      return (data as Student[]).filter((s: any) => s.classes && !mutatedIds.has(s.id));
     },
   });
 
@@ -180,33 +191,71 @@ const ExamAdministration = () => {
     gcTime: 10 * 60 * 1000, // 10 minutes
   });
 
-  // Load persisted exam card settings
+  // Semua pengaturan yang disimpan (kartu + ruang + nomor peserta) dalam satu objek
+  const startNumbers: Record<string, number> = {
+    '7': startingExamNumberGrade7, '8': startingExamNumberGrade8, '9': startingExamNumberGrade9,
+  };
+  const buildPayload = () => ({
+    cardSize, customCardWidth, customCardHeight, fontScale, seatingMode, showPhotoOnCard,
+    rowsCount, columnsCount, startNumbers, paper, selectedGrades: [...selectedGrades].sort(),
+  });
+  const payloadKey = JSON.stringify(buildPayload());
+  const dirty = savedSnapshot !== null && payloadKey !== savedSnapshot;
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
+  const startNumberErrors = validateStartNumbers(startNumbers, selectedGrades);
+  const hasNumberErrors = Object.keys(startNumberErrors).length > 0;
+
+  // Muat pengaturan tersimpan (sekali per data server; tidak menimpa ketikan yang belum disimpan)
   useEffect(() => {
-    const cfg = (settings as any)?.exam_card_settings;
-    if (cfg && typeof cfg === 'object') {
-      if (cfg.cardSize) setCardSize(cfg.cardSize);
-      if (cfg.customCardWidth) setCustomCardWidth(cfg.customCardWidth);
-      if (cfg.customCardHeight) setCustomCardHeight(cfg.customCardHeight);
-      if (cfg.fontScale) setFontScale(cfg.fontScale);
-      if (cfg.seatingMode) setSeatingMode(cfg.seatingMode);
-      if (typeof cfg.showPhotoOnCard === 'boolean') setShowPhotoOnCard(cfg.showPhotoOnCard);
-    }
+    if (!settings || dirtyRef.current) return; // jangan menimpa perubahan yang belum disimpan
+    const cfg = ((settings as any)?.exam_card_settings && typeof (settings as any).exam_card_settings === 'object')
+      ? (settings as any).exam_card_settings : {};
+    const num = (v: any, d: number, min: number, max: number) => (Number.isFinite(Number(v)) && Number(v) >= min && Number(v) <= max ? Math.floor(Number(v)) : d);
+    const sn = cfg.startNumbers || {};
+    const loaded = {
+      cardSize: ['portrait', 'landscape', '10x8', 'custom'].includes(cfg.cardSize) ? cfg.cardSize : 'portrait',
+      customCardWidth: num(cfg.customCardWidth, 85, 40, 200),
+      customCardHeight: num(cfg.customCardHeight, 54, 30, 200),
+      fontScale: Number.isFinite(Number(cfg.fontScale)) && Number(cfg.fontScale) >= 0.7 && Number(cfg.fontScale) <= 1.6 ? Number(cfg.fontScale) : 1,
+      seatingMode: ['auto', 'alternating', 'by_class'].includes(cfg.seatingMode) ? cfg.seatingMode : 'auto',
+      showPhotoOnCard: typeof cfg.showPhotoOnCard === 'boolean' ? cfg.showPhotoOnCard : true,
+      rowsCount: num(cfg.rowsCount, 8, 1, 20),
+      columnsCount: num(cfg.columnsCount, 4, 1, 12),
+      startNumbers: {
+        '7': num(sn['7'], DEFAULT_START_NUMBERS['7'], 10000, 99999),
+        '8': num(sn['8'], DEFAULT_START_NUMBERS['8'], 10000, 99999),
+        '9': num(sn['9'], DEFAULT_START_NUMBERS['9'], 10000, 99999),
+      },
+      paper: (cfg.paper === 'a4' ? 'a4' : 'f4') as PdfPaper,
+      selectedGrades: Array.isArray(cfg.selectedGrades) && cfg.selectedGrades.length
+        ? cfg.selectedGrades.filter((g: any) => ['7', '8', '9'].includes(String(g))).map(String) : ['7', '8', '9'],
+    };
+    setCardSize(loaded.cardSize as any); setCustomCardWidth(loaded.customCardWidth); setCustomCardHeight(loaded.customCardHeight);
+    setFontScale(loaded.fontScale); setSeatingMode(loaded.seatingMode as any); setShowPhotoOnCard(loaded.showPhotoOnCard);
+    setRowsCount(loaded.rowsCount); setColumnsCount(loaded.columnsCount);
+    setStartingExamNumberGrade7(loaded.startNumbers['7']); setStartingExamNumberGrade8(loaded.startNumbers['8']); setStartingExamNumberGrade9(loaded.startNumbers['9']);
+    setPaper(loaded.paper); setSelectedGrades(loaded.selectedGrades.length ? loaded.selectedGrades : ['7', '8', '9']);
+    setSavedSnapshot(JSON.stringify({ ...loaded, selectedGrades: [...(loaded.selectedGrades.length ? loaded.selectedGrades : ['7', '8', '9'])].sort() }));
   }, [settings]);
 
   const saveExamCardSettings = async () => {
+    if (hasNumberErrors) { toast.error('Perbaiki nomor peserta awal terlebih dahulu.'); return; }
+    if (!settings) { toast.error('Pengaturan sekolah belum dimuat.'); return; }
+    setSaving(true);
     try {
-      const payload = { cardSize, customCardWidth, customCardHeight, fontScale, seatingMode, showPhotoOnCard };
+      const payload = { ...((settings as any)?.exam_card_settings || {}), ...buildPayload() };
       const { error } = viaRpc
         ? await (supabase as any).rpc('exam_settings_save', { p_exam_card_settings: payload })
         : await supabase.from('school_settings').update({ exam_card_settings: payload } as any).eq('id', (settings as any).id);
       if (error) throw error;
-      toast.success("Pengaturan kartu ujian disimpan");
-    } catch (e) {
+      setSavedSnapshot(payloadKey);
+      toast.success("Pengaturan ujian disimpan");
+    } catch (e: any) {
       console.error(e);
-      toast.error("Gagal menyimpan pengaturan");
-    }
+      toast.error(e?.message ? `Gagal menyimpan: ${e.message}` : "Gagal menyimpan pengaturan");
+    } finally { setSaving(false); }
   };
-
 
   const handleGradeToggle = (grade: string) => {
     setSelectedGrades(prev => {
@@ -217,246 +266,47 @@ const ExamAdministration = () => {
     });
   };
 
-  const generateRooms = (): Room[] => {
-    let filteredStudents = students.filter(s => 
-      selectedGrades.includes(s.classes.grade.toString())
-    );
-
-    // Apply additional filters based on filterType
-    if (filterType === 'class' && selectedClasses.length > 0) {
-      filteredStudents = filteredStudents.filter(s => 
-        selectedClasses.includes(s.classes.name)
-      );
-    } else if (filterType === 'student' && selectedStudentIds.length > 0) {
-      filteredStudents = filteredStudents.filter(s => 
-        selectedStudentIds.includes(s.id)
-      );
-    }
-
-    if (filteredStudents.length === 0) {
-      toast.error("Tidak ada siswa untuk kelas yang dipilih");
+  /**
+   * Susun SELURUH siswa tingkat terpilih ke ruang/meja/nomor peserta (deterministik; urutan nama dalam kelas).
+   * Filter kelas/siswa pada cetak kartu TIDAK mengubah susunan ini (lihat filterForCards).
+   */
+  const generateRooms = (silent = false): Room[] => {
+    if (hasNumberErrors) {
+      if (!silent) toast.error('Nomor peserta awal belum valid. Perbaiki isian nomor peserta terlebih dahulu.');
       return [];
     }
-
-    // Group students by class (combining grade + class name)
-    const studentsByClass: Record<string, Student[]> = {};
-    
-    filteredStudents.forEach(student => {
-      const classKey = student.classes.name; // e.g., "7A", "8B", etc.
-      if (!studentsByClass[classKey]) {
-        studentsByClass[classKey] = [];
-      }
-      studentsByClass[classKey].push(student);
+    const { rooms, warnings } = buildRooms(students as any[], {
+      grades: selectedGrades, rows: rowsCount, cols: columnsCount, mode: seatingMode, startNumbers,
     });
-
-    // Sort students within each class by name
-    Object.keys(studentsByClass).forEach(classKey => {
-      studentsByClass[classKey].sort((a, b) => 
-        a.full_name.localeCompare(b.full_name)
-      );
-    });
-
-    // Get all class names sorted
-    const allClassNames = Object.keys(studentsByClass).sort((a, b) => a.localeCompare(b));
-    
-    // Group by class suffix (A, B, C, etc.) and by grade
-    const classesByGrade: Record<string, string[]> = {};
-    allClassNames.forEach(className => {
-      const grade = className.charAt(0); // Get first character (grade number)
-      if (!classesByGrade[grade]) {
-        classesByGrade[grade] = [];
-      }
-      classesByGrade[grade].push(className);
-    });
-
-    // Create groups of 3 classes (one from each grade)
-    // e.g., [7A, 8A, 9A], [7B, 8B, 9B], etc.
-    // Special handling: merge classes from same grade if they're alone
-    const classGroups: string[][] = [];
-    const maxGroupCount = Math.max(
-      ...Object.values(classesByGrade).map(classes => classes.length)
-    );
-    
-    for (let i = 0; i < maxGroupCount; i++) {
-      const group: string[] = [];
-      selectedGrades.forEach(grade => {
-        if (classesByGrade[grade] && classesByGrade[grade][i]) {
-          group.push(classesByGrade[grade][i]);
-        }
-      });
-      if (group.length > 0) {
-        classGroups.push(group);
-      }
+    setLayoutWarnings(warnings);
+    if (rooms.length === 0) {
+      if (!silent) toast.error("Tidak ada siswa untuk kelas yang dipilih");
+      return [];
     }
-    
-    // Merge consecutive single-grade classGroups (e.g., [8F] and [8G] -> [8F, 8G])
-    const mergedClassGroups: string[][] = [];
-    let i = 0;
-    while (i < classGroups.length) {
-      const currentGroup = classGroups[i];
-      
-      // Check if this group has only one class
-      if (currentGroup.length === 1) {
-        const currentGrade = currentGroup[0].charAt(0);
-        const mergedGroup = [...currentGroup];
-        
-        // Look ahead for more single-class groups of the same grade
-        let j = i + 1;
-        while (j < classGroups.length && classGroups[j].length === 1) {
-          const nextGrade = classGroups[j][0].charAt(0);
-          if (nextGrade === currentGrade) {
-            mergedGroup.push(classGroups[j][0]);
-            j++;
-          } else {
-            break;
-          }
-        }
-        
-        mergedClassGroups.push(mergedGroup);
-        i = j;
-      } else {
-        mergedClassGroups.push(currentGroup);
-        i++;
-      }
+    return rooms as unknown as Room[];
+  };
+
+  /** Saring kartu yang dicetak (per kelas / siswa tertentu) tanpa mengubah ruang, meja, dan nomor pesertanya. */
+  const filterForCards = (rooms: Room[]): Room[] => {
+    if (filterType === 'class' && selectedClasses.length > 0) {
+      return filterRoomsKeepNumbers(rooms as any, (st: any) => selectedClasses.includes(st.classes.name)) as unknown as Room[];
     }
-
-    const seatsPerRoom = rowsCount * columnsCount;
-    const rooms: Room[] = [];
-    
-    // Track exam number counters per grade
-    const examNumberCounters: Record<string, number> = {
-      '7': 0,
-      '8': 0,
-      '9': 0
-    };
-
-    // Special case: only one grade selected → 1 rombel per ruang (urut sesuai kelas)
-    // Seating mode: 'auto' = old behavior (1 rombel/ruang only when 1 grade selected),
-    // 'alternating' = always alternate antar kelas, 'by_class' = always 1 rombel per ruang
-    const singleGradeMode = seatingMode === 'by_class'
-      || (seatingMode === 'auto' && selectedGrades.length === 1);
-
-    // Collect ALL students from all class groups in alternating order
-    const allStudentsOrdered: Student[] = [];
-
-    if (singleGradeMode) {
-      // One class per room: just append students class-by-class in order
-      const onlyGrade = selectedGrades[0];
-      const classNamesForGrade = (classesByGrade[onlyGrade] || []).slice().sort((a, b) => a.localeCompare(b));
-      classNamesForGrade.forEach(className => {
-        (studentsByClass[className] || []).forEach(s => allStudentsOrdered.push(s));
-      });
-    } else {
-      mergedClassGroups.forEach(classGroup => {
-        // Create indices for tracking position in each class in this group
-        const classIndices: Record<string, number> = {};
-        classGroup.forEach(className => {
-          classIndices[className] = 0;
-        });
-
-        // Calculate total students in this group
-        const totalGroupStudents = classGroup.reduce((sum, className) =>
-          sum + (studentsByClass[className]?.length || 0), 0
-        );
-
-        // Collect all students from this class group in alternating order
-        let rotationIndex = 0;
-        let studentsCollected = 0;
-
-        while (studentsCollected < totalGroupStudents) {
-          const className = classGroup[rotationIndex % classGroup.length];
-
-          if (classIndices[className] < studentsByClass[className].length) {
-            allStudentsOrdered.push(studentsByClass[className][classIndices[className]]);
-            classIndices[className]++;
-            studentsCollected++;
-          }
-
-          rotationIndex = (rotationIndex + 1) % classGroup.length;
-
-          // Safety check
-          if (rotationIndex > classGroup.length * totalGroupStudents) break;
-        }
-      });
+    if (filterType === 'student' && selectedStudentIds.length > 0) {
+      return filterRoomsKeepNumbers(rooms as any, (st: any) => selectedStudentIds.includes(st.id)) as unknown as Room[];
     }
-    
-    // Now distribute ALL students into rooms, filling each to EXACTLY capacity (32 students)
-    // Only the LAST room is allowed to have fewer than 32 students
-    let currentRoomNumber = 1;
-    let studentIndex = 0;
-    
-    while (studentIndex < allStudentsOrdered.length) {
-      const roomSeats: SeatingArrangement[] = [];
-      const remainingStudents = allStudentsOrdered.length - studentIndex;
-
-      // In single-grade mode, do not mix classes in one room.
-      let maxForThisRoom = seatsPerRoom;
-      if (singleGradeMode) {
-        const startClass = allStudentsOrdered[studentIndex].classes.name;
-        let sameClassCount = 0;
-        for (let k = studentIndex; k < allStudentsOrdered.length && sameClassCount < seatsPerRoom; k++) {
-          if (allStudentsOrdered[k].classes.name === startClass) sameClassCount++;
-          else break;
-        }
-        maxForThisRoom = Math.min(seatsPerRoom, sameClassCount);
-      }
-
-      const studentsForThisRoom = Math.min(remainingStudents, maxForThisRoom);
-      
-      for (let i = 0; i < studentsForThisRoom; i++) {
-        const student = allStudentsOrdered[studentIndex + i];
-        roomSeats.push({
-          tableNumber: i + 1,
-          examNumber: 0,
-          student
-        });
-      }
-      
-      // Apply snake pattern to this room
-      roomSeats.forEach((seat, index) => {
-        const row = Math.floor(index / columnsCount);
-        const col = index % columnsCount;
-        
-        // Snake pattern: even rows (0,2,4...) left-to-right, odd rows (1,3,5...) right-to-left
-        let tableNumber: number;
-        if (row % 2 === 0) {
-          tableNumber = row * columnsCount + col + 1;
-        } else {
-          tableNumber = (row + 1) * columnsCount - col;
-        }
-        
-        seat.tableNumber = tableNumber;
-      });
-      
-      // Sort by table number to reassign exam numbers in correct order
-      roomSeats.sort((a, b) => a.tableNumber - b.tableNumber);
-      
-      // Reassign exam numbers based on table number order
-      roomSeats.forEach((seat) => {
-        const currentGrade = seat.student.classes.grade.toString();
-        const gradeStartingNumber = currentGrade === '7' ? startingExamNumberGrade7 
-          : currentGrade === '8' ? startingExamNumberGrade8 
-          : startingExamNumberGrade9;
-        
-        const examNumber = (gradeStartingNumber * 1000) + (examNumberCounters[currentGrade] + 1);
-        examNumberCounters[currentGrade]++;
-        seat.examNumber = examNumber;
-      });
-      
-      // Add this room if it has seats
-      if (roomSeats.length > 0) {
-        rooms.push({
-          roomNumber: currentRoomNumber,
-          seats: roomSeats
-        });
-        currentRoomNumber++;
-      }
-      
-      studentIndex += studentsForThisRoom;
-    }
-
     return rooms;
   };
+
+  // Pratinjau ikut diperbarui otomatis saat pengaturan/ data siswa berubah, sehingga selalu sama dengan yang dicetak
+  useEffect(() => {
+    if (previewRooms.length === 0) return;
+    const r = generateRooms(true);
+    if (r.length > 0) setPreviewRooms(r);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [students, selectedGrades, rowsCount, columnsCount, seatingMode, startingExamNumberGrade7, startingExamNumberGrade8, startingExamNumberGrade9]);
+
+  // Warna kelas: satu warna per kelas menurut urutan nama (tidak bentrok antar kelas)
+  const classColorMap = useMemo(() => buildClassColorMap(students.map((st) => st.classes.name)), [students]);
 
   // Generate barcode as base64 image
   const generateBarcode = (text: string): string => {
@@ -471,23 +321,9 @@ const ExamAdministration = () => {
     return canvas.toDataURL('image/png');
   };
 
-  // Get color for class based on grade
-  const getClassColor = (className: string): { r: number; g: number; b: number; hex: string } => {
-    const colors = [
-      { r: 79, g: 195, b: 247, hex: '#4FC3F7' },    // Light Blue
-      { r: 129, g: 199, b: 132, hex: '#81C784' },   // Light Green
-      { r: 255, g: 183, b: 77, hex: '#FFB74D' },    // Orange
-      { r: 240, g: 98, b: 146, hex: '#F06292' },    // Pink
-      { r: 171, g: 71, b: 188, hex: '#AB47BC' },    // Purple
-      { r: 77, g: 182, b: 172, hex: '#4DB6AC' },    // Teal
-      { r: 255, g: 138, b: 101, hex: '#FF8A65' },   // Deep Orange
-      { r: 149, g: 117, b: 205, hex: '#9575CD' },   // Deep Purple
-    ];
-    
-    // Use class name hash to consistently assign colors
-    const hash = className.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    return colors[hash % colors.length];
-  };
+  // Warna kelas (peta dihitung dari seluruh kelas, lihat classColorMap)
+  const getClassColor = (className: string): { r: number; g: number; b: number; hex: string } =>
+    classColorMap.get(className) || { r: 71, g: 85, b: 105, hex: '#475569' };
 
   const handlePrintExamCards = async () => {
     if (selectedGrades.length === 0) {
@@ -495,18 +331,21 @@ const ExamAdministration = () => {
       return;
     }
 
-    const rooms = previewRooms.length > 0 ? previewRooms : generateRooms();
-    if (rooms.length === 0) return;
+    const allRooms = generateRooms();
+    if (allRooms.length === 0) return;
+    // filter kelas/siswa hanya menyaring kartu; ruang, meja, dan nomor peserta tetap sesuai susunan lengkap
+    const rooms = filterForCards(allRooms);
+    if (rooms.length === 0) { toast.error("Tidak ada kartu yang cocok dengan filter yang dipilih"); return; }
 
     const totalCards = rooms.reduce((s, r) => s + r.seats.length, 0);
     setPrintProgress({ open: true, value: 0, current: 0, total: totalCards, label: 'Menyiapkan kartu ujian...' });
     startKeepAlive();
 
     try {
-      // F4 dimensions: 210mm x 330mm in portrait mode
-      const doc = new jsPDF('portrait', 'mm', [210, 330]);
+      const doc = new jsPDF('portrait', 'mm', paperFormat(paper));
+      const loadImg = createImageLoader(); // logo, tanda tangan, stempel hanya dimuat sekali
+      let scheduleHidden = 0; // jumlah sesi jadwal yang tidak muat pada kartu
 
-      
       // Card layout based on selected size
       let cardsPerPage: number;
       let cardWidth: number;
@@ -517,7 +356,7 @@ const ExamAdministration = () => {
       let gapY: number;
       let cols: number;
       
-      const PAGE_W = 210, PAGE_H = 330;
+      const PAGE_W = doc.internal.pageSize.getWidth(), PAGE_H = doc.internal.pageSize.getHeight();
       if (cardSize === 'portrait') {
         cardWidth = 63; cardHeight = 103; cols = 3;
       } else if (cardSize === 'landscape') {
@@ -566,26 +405,6 @@ const ExamAdministration = () => {
           const cardX = marginX + col * (cardWidth + gapX);
           const cardY = marginY + row * (cardHeight + gapY);
           
-          // Helper: image loader -> dataUrl
-          const loadImg = async (url: string, type: 'png' | 'jpeg' = 'png'): Promise<string | null> => {
-            try {
-              return await new Promise<string | null>((resolve) => {
-                const img = new Image();
-                img.crossOrigin = 'Anonymous';
-                img.onload = () => {
-                  const canvas = document.createElement('canvas');
-                  canvas.width = img.width; canvas.height = img.height;
-                  const ctx = canvas.getContext('2d');
-                  if (!ctx) return resolve(null);
-                  ctx.drawImage(img, 0, 0);
-                  resolve(canvas.toDataURL(type === 'jpeg' ? 'image/jpeg' : 'image/png', 0.85));
-                };
-                img.onerror = () => resolve(null);
-                img.src = url;
-              });
-            } catch { return null; }
-          };
-
           // ---------- LAYOUT CONSTANTS (proportional, scaled by fontScale) ----------
           const fs = (n: number) => Math.max(2.5, n * fontScale);
           const pad = 3;
@@ -611,8 +430,8 @@ const ExamAdministration = () => {
             settings?.logo_url ? loadImg(settings.logo_url) : Promise.resolve(null),
             settings?.right_logo_url ? loadImg(settings.right_logo_url) : Promise.resolve(null),
           ]);
-          if (leftLogo) doc.addImage(leftLogo, 'PNG', cardX + pad, headerStartY, miniLogoSize, miniLogoSize);
-          if (rightLogo) doc.addImage(rightLogo, 'PNG', cardX + cardWidth - pad - miniLogoSize, headerStartY, miniLogoSize, miniLogoSize);
+          if (leftLogo) doc.addImage(leftLogo, 'PNG', cardX + pad, headerStartY, miniLogoSize, miniLogoSize, 'kartuLogoKiri');
+          if (rightLogo) doc.addImage(rightLogo, 'PNG', cardX + cardWidth - pad - miniLogoSize, headerStartY, miniLogoSize, miniLogoSize, 'kartuLogoKanan');
 
           const centerX = cardX + cardWidth / 2;
           const headerTextW = innerW - miniLogoSize * 2 - 4;
@@ -620,21 +439,20 @@ const ExamAdministration = () => {
           doc.setTextColor(30, 41, 59);
 
           if (settings?.district_name) {
-            doc.setFontSize(fs(5.5));
-            doc.text(settings.district_name, centerX, currentY + 2, { align: "center", maxWidth: headerTextW });
+            const t = fitText(doc, settings.district_name, headerTextW, fs(5.5), 3);
+            doc.text(t, centerX, currentY + 2, { align: "center" });
             currentY += fs(2.2);
           }
           if (settings?.school_name) {
-            doc.setFontSize(fs(6.5));
-            doc.text(settings.school_name, centerX, currentY + 2.5, { align: "center", maxWidth: headerTextW });
+            const t = fitText(doc, settings.school_name, headerTextW, fs(6.5), 3.5);
+            doc.text(t, centerX, currentY + 2.5, { align: "center" });
             currentY += fs(3);
           }
           if (settings?.school_address) {
-            doc.setFontSize(fs(4.5));
             doc.setFont("helvetica", "normal");
             doc.setTextColor(71, 85, 105);
-            const addr = doc.splitTextToSize(settings.school_address, headerTextW);
-            doc.text(addr.slice(0, 1), centerX, currentY + 2, { align: "center" });
+            const t = fitText(doc, settings.school_address, headerTextW, fs(4.5), 3);
+            doc.text(t, centerX, currentY + 2, { align: "center" });
             currentY += fs(2);
           }
           // Make sure header doesn't overlap logos
@@ -653,9 +471,8 @@ const ExamAdministration = () => {
           doc.text("KARTU PESERTA UJIAN", centerX, currentY + 1, { align: "center" });
           currentY += fs(3);
           if (settings?.exam_name) {
-            doc.setFontSize(fs(5));
             doc.setTextColor(30, 41, 59);
-            doc.text(settings.exam_name, centerX, currentY, { align: "center", maxWidth: innerW });
+            doc.text(fitText(doc, settings.exam_name, innerW, fs(5), 3), centerX, currentY, { align: "center" });
             currentY += fs(2.5);
           }
           if (settings?.academic_year) {
@@ -730,12 +547,14 @@ const ExamAdministration = () => {
 
 
           // ---------- SCHEDULE TABLE (constrained inside usable area) ----------
+          if (examSchedule && examSchedule.length > 0 && currentY >= cardY + usableH - 4) scheduleHidden = Math.max(scheduleHidden, examSchedule.length);
           if (examSchedule && examSchedule.length > 0 && currentY < cardY + usableH - 4) {
             const remaining = (cardY + usableH) - currentY;
             const rowHeight = Math.max(2.6, fs(3));
             const headerH = rowHeight;
             const maxRows = Math.max(1, Math.floor((remaining - headerH - 4) / rowHeight));
             const showRows = Math.min(examSchedule.length, maxRows);
+            if (showRows < examSchedule.length) scheduleHidden = Math.max(scheduleHidden, examSchedule.length - showRows);
 
             doc.setFontSize(fs(4.5));
             doc.setFont("helvetica", "bold");
@@ -772,17 +591,17 @@ const ExamAdministration = () => {
               const cellY = currentY + rowHeight * 0.7;
               doc.text(schedule.no.toString(), cX + colW[0] / 2, cellY, { align: "center" });
               cX += colW[0];
-              doc.text(`${schedule.day} ${schedule.date}`, cX + 0.5, cellY, { maxWidth: colW[1] - 1 });
+              doc.text(ellipsize(doc, shortDateLabel(schedule.day, schedule.date), colW[1] - 1), cX + 0.5, cellY);
               cX += colW[1];
-              const subj = doc.splitTextToSize(schedule.subject, colW[2] - 1);
-              doc.text(subj.slice(0, 1), cX + 0.5, cellY, { maxWidth: colW[2] - 1 });
+              doc.text(ellipsize(doc, schedule.subject, colW[2] - 1), cX + 0.5, cellY);
               cX += colW[2];
-              doc.text(schedule.time, cX + colW[3] / 2, cellY, { align: "center" });
+              doc.text(ellipsize(doc, (schedule.time || '').replace(/\s*-\s*/, '-'), colW[3] - 0.6), cX + colW[3] / 2, cellY, { align: "center" });
               cX += colW[3];
-              const dur = schedule.duration.includes(':')
-                ? `${parseInt(schedule.duration.split(':')[0]) * 60 + parseInt(schedule.duration.split(':')[1])}'`
-                : schedule.duration;
-              doc.text(dur, cX + colW[4] / 2, cellY, { align: "center" });
+              const durRaw = String(schedule.duration ?? '');
+              const dur = durRaw.includes(':')
+                ? `${parseInt(durRaw.split(':')[0]) * 60 + parseInt(durRaw.split(':')[1])}'`
+                : durRaw;
+              doc.text(ellipsize(doc, dur, colW[4] - 0.6), cX + colW[4] / 2, cellY, { align: "center" });
               currentY += rowHeight;
             });
             doc.setDrawColor(59, 130, 246); doc.setLineWidth(0.4);
@@ -809,14 +628,14 @@ const ExamAdministration = () => {
           const sigImgY = sigTop + fs(3);
           if (settings?.headmaster_signature_url) {
             const sg = await loadImg(settings.headmaster_signature_url);
-            if (sg) doc.addImage(sg, 'PNG', sigCenterX - sigImgW / 2, sigImgY, sigImgW, sigImgH);
+            if (sg) doc.addImage(sg, 'PNG', sigCenterX - sigImgW / 2, sigImgY, sigImgW, sigImgH, 'kartuTtd');
           }
           // Stamp - placed to the LEFT of name signature, half-overlapping signature only
           if (settings?.school_stamp_url) {
             const st = await loadImg(settings.school_stamp_url);
             if (st) {
               const stampSize = Math.min(sigReserved * 0.7, 14);
-              doc.addImage(st, 'PNG', sigCenterX - sigImgW * 0.6 - stampSize * 0.3, sigImgY - stampSize * 0.2, stampSize, stampSize);
+              doc.addImage(st, 'PNG', sigCenterX - sigImgW * 0.6 - stampSize * 0.3, sigImgY - stampSize * 0.2, stampSize, stampSize, 'kartuStempel');
             }
           }
           // Headmaster name + NIP
@@ -847,7 +666,10 @@ const ExamAdministration = () => {
 
       setPrintProgress(p => ({ ...p, value: 100, label: 'Menyimpan PDF...' }));
       doc.save(`kartu-ujian-${rooms.length}-ruangan-${cardCount}-kartu.pdf`);
-      toast.success(`${cardCount} kartu ujian berhasil dicetak (${Math.ceil(cardCount/cardsPerPage)} halaman F4)`);
+      toast.success(`${cardCount} kartu ujian berhasil dicetak (${Math.ceil(cardCount/cardsPerPage)} halaman ${paper.toUpperCase()})`);
+      if (scheduleHidden > 0) {
+        toast.warning(`Jadwal pada kartu tidak muat (${scheduleHidden} sesi tidak tampil). Perbesar ukuran kartu atau kecilkan skala tulisan.`, { duration: 9000 });
+      }
     } catch (error) {
       console.error("Error printing exam cards:", error);
       toast.error("Gagal mencetak kartu ujian. Silakan coba lagi.");
@@ -864,394 +686,200 @@ const ExamAdministration = () => {
       return;
     }
 
-    const rooms = previewRooms.length > 0 ? previewRooms : generateRooms();
+    const rooms = generateRooms();
     if (rooms.length === 0) return;
 
-    const doc = new jsPDF('landscape');
-    
+    const doc = new jsPDF('landscape', 'mm', paperFormat(paper));
+    const PW = doc.internal.pageSize.getWidth();
+    const PH = doc.internal.pageSize.getHeight();
+    const M = 12; // margin halaman
+    const cx = PW / 2;
+    const BLUE: [number, number, number] = [41, 128, 185];
+    const loadImg = createImageLoader(); // logo dimuat sekali untuk semua ruang
+    const [leftLogo, rightLogo] = await Promise.all([loadImg(settings?.logo_url), loadImg(settings?.right_logo_url)]);
+    const smallCells: string[] = [];
+
     for (let roomIndex = 0; roomIndex < rooms.length; roomIndex++) {
       const room = rooms[roomIndex];
-      
-      if (roomIndex > 0) {
-        doc.addPage();
-      }
-      
-      // Modern compact header
-      let yPos = 10;
-      const pageCenter = 148.5; // Center of landscape A4
-      
-      // Add logos if available - optimized size and position
-      if (settings?.logo_url) {
-        try {
-          const img = new Image();
-          img.crossOrigin = 'Anonymous';
-          img.src = settings.logo_url;
-          await new Promise((resolve) => {
-            img.onload = () => {
-              const canvas = document.createElement('canvas');
-              canvas.width = img.width;
-              canvas.height = img.height;
-              const ctx = canvas.getContext('2d');
-              if (ctx) {
-                ctx.drawImage(img, 0, 0);
-                doc.addImage(canvas.toDataURL('image/png'), 'PNG', 15, yPos - 2, 18, 18);
-              }
-              resolve(null);
-            };
-            img.onerror = () => resolve(null);
-          });
-        } catch (e) {
-          console.error("Error loading logo:", e);
-        }
-      }
-      
-      // Right logo - properly positioned to avoid overlap
-      if (settings?.right_logo_url) {
-        try {
-          const img = new Image();
-          img.crossOrigin = 'Anonymous';
-          img.src = settings.right_logo_url;
-          await new Promise((resolve) => {
-            img.onload = () => {
-              const canvas = document.createElement('canvas');
-              canvas.width = img.width;
-              canvas.height = img.height;
-              const ctx = canvas.getContext('2d');
-              if (ctx) {
-                ctx.drawImage(img, 0, 0);
-                doc.addImage(canvas.toDataURL('image/png'), 'PNG', 264, yPos - 2, 18, 18);
-              }
-              resolve(null);
-            };
-            img.onerror = () => resolve(null);
-          });
-        } catch (e) {
-          console.error("Error loading right logo:", e);
-        }
-      }
+      if (roomIndex > 0) doc.addPage();
 
-      // School info - modern layout with proper spacing
-      let headerY = yPos + 1;
-      
-      // District name (if exists)
+      // ---------- Kop ----------
+      const logoSize = 16;
+      if (leftLogo) doc.addImage(leftLogo, 'PNG', M, M - 2, logoSize, logoSize, 'denahLogoKiri');
+      if (rightLogo) doc.addImage(rightLogo, 'PNG', PW - M - logoSize, M - 2, logoSize, logoSize, 'denahLogoKanan');
+      const headW = PW - 2 * (M + logoSize + 4);
+      let y = M + 1;
       if (settings?.district_name) {
-        doc.setFontSize(9);
         doc.setFont("helvetica", "bold");
         doc.setTextColor(60, 60, 60);
-        doc.text(settings.district_name.toUpperCase(), pageCenter, headerY, { align: "center" });
-        headerY += 4.5;
+        doc.text(fitText(doc, settings.district_name.toUpperCase(), headW, 9, 6), cx, y, { align: "center" });
+        y += 4.5;
       }
-      
-      // School name
-      doc.setFontSize(13);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(0, 0, 0);
-      doc.text((settings?.school_name || "NAMA SEKOLAH").toUpperCase(), pageCenter, headerY, { align: "center" });
-      headerY += 5.5;
-      
-      // Address and phone in one line if possible
-      doc.setFontSize(7.5);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(80, 80, 80);
-      if (settings?.school_address) {
-        const addressText = settings.school_phone 
-          ? `${settings.school_address} | Telp: ${settings.school_phone}`
-          : settings.school_address;
-        doc.text(addressText, pageCenter, headerY, { align: "center" });
-        headerY += 3.5;
+      doc.text(fitText(doc, (settings?.school_name || "NAMA SEKOLAH").toUpperCase(), headW, 13, 8), cx, y, { align: "center" });
+      y += 5;
+      const addr = [settings?.school_address, settings?.school_phone ? `Telp: ${settings.school_phone}` : ''].filter(Boolean).join(' | ');
+      if (addr) {
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(80, 80, 80);
+        doc.text(fitText(doc, addr, headW, 7.5, 5), cx, y, { align: "center" });
+        y += 3.5;
       }
-      
-      // Modern separator lines
-      headerY += 0.5;
-      doc.setDrawColor(41, 128, 185);
+      y = Math.max(y, M + logoSize) + 0.5;
+      doc.setDrawColor(...BLUE);
       doc.setLineWidth(0.6);
-      doc.line(40, headerY, 257, headerY);
-      headerY += 0.5;
+      doc.line(M, y, PW - M, y);
       doc.setDrawColor(220, 220, 220);
       doc.setLineWidth(0.3);
-      doc.line(40, headerY, 257, headerY);
-      
-      headerY += 5;
+      doc.line(M, y + 0.9, PW - M, y + 0.9);
+      y += 5.5;
 
-      // Title section with modern styling
+      // ---------- Judul + ruang ----------
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(...BLUE);
       doc.setFontSize(13);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(41, 128, 185);
-      doc.text("DENAH TEMPAT DUDUK PESERTA", pageCenter, headerY, { align: "center" });
-      headerY += 5;
-      
-      // Exam info
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(60, 60, 60);
-      doc.text(settings?.exam_name || "PENILAIAN SUMATIF AKHIR TAHUN (PSAT)", pageCenter, headerY, { align: "center" });
-      headerY += 3.5;
-      doc.text(`Tahun Ajaran ${settings?.academic_year || "2024/2025"}`, pageCenter, headerY, { align: "center" });
-      
-      // Room number with badge style
-      headerY += 5;
-      doc.setFillColor(41, 128, 185);
-      doc.roundedRect(pageCenter - 25, headerY - 4, 50, 7, 1, 1, 'F');
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(255, 255, 255);
-      const roomNames = ['', 'Satu', 'Dua', 'Tiga', 'Empat', 'Lima', 'Enam', 'Tujuh', 'Delapan', 'Sembilan', 'Sepuluh'];
-      doc.text(`RUANG ${room.roomNumber}`, pageCenter, headerY, { align: "center" });
-      
-      headerY += 7;
-
-      // Add statistics distribution
-      const gradeDistribution: Record<number, number> = {};
-      const classDistribution: Record<string, number> = {};
-      const genderDistribution: Record<string, number> = { L: 0, P: 0 };
-      
-      room.seats.forEach(seat => {
-        const grade = seat.student.classes.grade;
-        const className = seat.student.classes.name;
-        const gender = seat.student.gender || 'L';
-        
-        gradeDistribution[grade] = (gradeDistribution[grade] || 0) + 1;
-        classDistribution[className] = (classDistribution[className] || 0) + 1;
-        genderDistribution[gender] = (genderDistribution[gender] || 0) + 1;
-      });
-
-      // Calculate statistics box height based on content
-      const classCount = Object.keys(classDistribution).length;
-      const classLines = Math.ceil(classCount / 5); // 5 classes per line
-      const boxHeight = 18 + (classLines - 1) * 4; // Base height + extra lines
-      
-      // Statistics Box - cleaner layout
-      doc.setDrawColor(41, 128, 185);
-      doc.setLineWidth(0.5);
-      doc.rect(40, headerY - 2, 217, boxHeight);
-      
-      doc.setFontSize(7.5);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(41, 128, 185);
-      
-      // Grade distribution
-      let statX = 45;
-      doc.text("Tingkat:", statX, headerY + 2);
-      statX += 18;
-      Object.entries(gradeDistribution).sort(([a], [b]) => Number(a) - Number(b)).forEach(([grade, count]) => {
+      doc.text("DENAH TEMPAT DUDUK PESERTA", cx, y, { align: "center" });
+      y += 4.5;
+      const subtitle = [settings?.exam_name, settings?.academic_year ? `Tahun Pelajaran ${settings.academic_year}` : ''].filter(Boolean).join('  •  ');
+      if (subtitle) {
         doc.setFont("helvetica", "normal");
         doc.setTextColor(60, 60, 60);
-        doc.text(`Kls ${grade}: ${count}`, statX, headerY + 2);
-        statX += 18;
-      });
-      
-      // Class distribution
-      let classY = headerY + 7;
-      statX = 45;
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(41, 128, 185);
-      doc.text("Kelas:", statX, classY);
-      statX += 18;
-      Object.entries(classDistribution).sort(([a], [b]) => a.localeCompare(b)).forEach(([className, count], idx) => {
-        const color = getClassColor(className);
-        doc.setFillColor(color.r, color.g, color.b);
-        doc.circle(statX + 1, classY - 1, 1, 'F');
-        
-        doc.setFont("helvetica", "normal");
-        doc.setTextColor(60, 60, 60);
-        doc.text(`${className}: ${count}`, statX + 3, classY);
-        statX += 20;
-        
-        if ((idx + 1) % 5 === 0 && idx < Object.keys(classDistribution).length - 1) {
-          statX = 63;
-          classY += 4;
-        }
-      });
-      
-      // Gender distribution - below class distribution
-      const genderY = classY + 4;
-      statX = 45;
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(41, 128, 185);
-      doc.text("Jenis Kelamin:", statX, genderY);
-      statX += 28;
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(41, 128, 185);
-      doc.text(`Laki-laki: ${genderDistribution.L || 0}`, statX, genderY);
-      statX += 30;
-      doc.setTextColor(219, 39, 119);
-      doc.text(`Perempuan: ${genderDistribution.P || 0}`, statX, genderY);
-      statX += 35;
-      doc.setTextColor(60, 60, 60);
-      doc.text(`Total: ${room.seats.length} siswa`, statX, genderY);
-      
-      headerY = genderY + 9; // Add more spacing after statistics box
-
-      // Add legend for class colors - cleaner layout
-      const uniqueClasses = Array.from(new Set(room.seats.map(s => s.student.classes.name))).sort();
-      if (uniqueClasses.length > 0) {
-        doc.setFontSize(7.5);
-        doc.setFont("helvetica", "bold");
-        doc.setTextColor(41, 128, 185);
-        doc.text("Legenda Kelas:", 40, headerY);
-        
-        let legendX = 65;
-        doc.setFontSize(7);
-        doc.setFont("helvetica", "normal");
-        uniqueClasses.forEach((className, idx) => {
-          const color = getClassColor(className);
-          
-          // Draw color box
-          doc.setFillColor(color.r, color.g, color.b);
-          doc.rect(legendX, headerY - 3, 5, 4, 'F');
-          doc.setDrawColor(150, 150, 150);
-          doc.setLineWidth(0.2);
-          doc.rect(legendX, headerY - 3, 5, 4);
-          
-          // Draw class name
-          doc.setTextColor(60, 60, 60);
-          doc.text(className, legendX + 6.5, headerY);
-          
-          legendX += 22;
-          
-          // Wrap to next line if too many classes
-          if ((idx + 1) % 7 === 0 && idx < uniqueClasses.length - 1) {
-            headerY += 5;
-            legendX = 65;
-          }
-        });
-        
-        headerY += 6;
+        doc.text(fitText(doc, subtitle, PW - 2 * M, 8.5, 6), cx, y, { align: "center" });
+        y += 3.5;
       }
-
-      // Supervisor indicator - modern style
-      doc.setFillColor(50, 50, 50);
-      doc.rect(pageCenter - 40, headerY - 1, 80, 4, 'F');
-      doc.setFontSize(7);
+      y += 2.5;
+      doc.setFillColor(...BLUE);
+      doc.roundedRect(cx - 28, y - 4.2, 56, 6.4, 1, 1, 'F');
       doc.setFont("helvetica", "bold");
+      doc.setFontSize(9.5);
       doc.setTextColor(255, 255, 255);
-      doc.text("▼ PENGAWAS ▼", pageCenter, headerY + 1.5, { align: "center" });
-      
-      yPos = headerY + 5;
+      doc.text(`RUANG ${room.roomNumber}  •  ${room.seats.length} PESERTA`, cx, y, { align: "center" });
+      y += 5;
 
-      // Optimized for 8 columns - calculate dynamic cell width
-      const pageWidth = 297;
-      const marginLeft = 15;
-      const marginRight = 15;
-      const availableWidth = pageWidth - marginLeft - marginRight;
-      const cellWidth = availableWidth / columnsCount;
-      
-      // Calculate optimal cell height
-      const availableHeight = 200 - yPos;
-      const cellHeight = Math.min(20, availableHeight / rowsCount);
-      const startX = marginLeft;
-      const startY = yPos;
+      // ---------- Ringkasan: tingkat, jenis kelamin ----------
+      const gradeCount: Record<number, number> = {};
+      const classCount: Record<string, number> = {};
+      let male = 0, female = 0, unknown = 0;
+      room.seats.forEach((seat) => {
+        gradeCount[seat.student.classes.grade] = (gradeCount[seat.student.classes.grade] || 0) + 1;
+        classCount[seat.student.classes.name] = (classCount[seat.student.classes.name] || 0) + 1;
+        const g = (seat.student.gender || '').toUpperCase();
+        if (g === 'L') male++; else if (g === 'P') female++; else unknown++;
+      });
+      const summary = [
+        ...Object.entries(gradeCount).sort(([a], [b]) => Number(a) - Number(b)).map(([g, c]) => `Kelas ${g}: ${c}`),
+        `Laki-laki: ${male}`,
+        `Perempuan: ${female}`,
+        ...(unknown ? [`Belum diisi: ${unknown}`] : []),
+      ].join('   |   ');
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(60, 60, 60);
+      doc.text(fitText(doc, summary, PW - 2 * M, 8, 6), cx, y, { align: "center" });
+      y += 4;
+
+      // ---------- Legenda kelas (membungkus ke baris berikutnya sesuai lebar) ----------
+      const classNames = Object.keys(classCount).sort((a, b) => a.localeCompare(b, 'id', { numeric: true }));
+      doc.setFontSize(7.5);
+      let lx = M;
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(...BLUE);
+      doc.text("Legenda:", lx, y);
+      lx += doc.getTextWidth("Legenda:") + 3;
+      const legendStart = lx;
+      doc.setFont("helvetica", "normal");
+      classNames.forEach((name) => {
+        const label = `${name} (${classCount[name]})`;
+        const w = 5 + 1.5 + doc.getTextWidth(label) + 5;
+        if (lx + w > PW - M && lx > legendStart) { lx = legendStart; y += 4.5; }
+        const color = getClassColor(name);
+        doc.setFillColor(color.r, color.g, color.b);
+        doc.rect(lx, y - 3, 5, 3.6, 'F');
+        doc.setTextColor(60, 60, 60);
+        doc.text(label, lx + 6.5, y);
+        lx += w;
+      });
+      y += 4;
+
+      // ---------- Penanda pengawas / depan ruang ----------
+      doc.setFillColor(50, 50, 50);
+      doc.rect(cx - 40, y - 1, 80, 4.2, 'F');
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.setTextColor(255, 255, 255);
+      doc.text("MEJA PENGAWAS / DEPAN RUANGAN", cx, y + 2, { align: "center" });
+      y += 6.5;
+
+      // ---------- Grid kursi: seluruh sisa halaman dipakai ----------
+      const footerH = 6;
+      const gridW = PW - 2 * M;
+      const cellW = gridW / columnsCount;
+      const cellH = Math.min(24, (PH - M - footerH - y) / rowsCount);
+      if (cellH < 11 && !smallCells.includes(room.roomNumber.toString())) smallCells.push(room.roomNumber.toString());
+      const bar = Math.max(3.2, Math.min(4.8, cellH * 0.28));
+      const seatByTable = new Map(room.seats.map((s) => [s.tableNumber, s]));
 
       for (let row = 0; row < rowsCount; row++) {
         for (let col = 0; col < columnsCount; col++) {
-          const x = startX + col * cellWidth;
-          const y = startY + row * cellHeight;
-          
-          // Calculate table number in snake pattern for this position
-          let tableNumber: number;
-          if (row % 2 === 0) {
-            // Even row: left to right
-            tableNumber = row * columnsCount + col + 1;
-          } else {
-            // Odd row: right to left
-            tableNumber = (row + 1) * columnsCount - col;
-          }
-          
-          // Find the seat with this table number
-          const seat = room.seats.find(s => s.tableNumber === tableNumber);
-          
-          // Modern cell border with shadow effect
+          const x = M + col * cellW;
+          const cy = y + row * cellH;
+          const seat = seatByTable.get(snakeTableNumber(row, col, columnsCount));
           doc.setDrawColor(180, 180, 180);
-          doc.setLineWidth(0.4);
-          doc.rect(x, y, cellWidth, cellHeight);
-          
-          if (seat) {
-            
-            // Add light background color based on class
-            const classColor = getClassColor(seat.student.classes.name);
-            const lightR = Math.floor(classColor.r + (255 - classColor.r) * 0.8);
-            const lightG = Math.floor(classColor.g + (255 - classColor.g) * 0.8);
-            const lightB = Math.floor(classColor.b + (255 - classColor.b) * 0.8);
-            doc.setFillColor(lightR, lightG, lightB);
-            doc.rect(x, y, cellWidth, cellHeight, 'F');
-            
-            // Exam number badge - modern gradient style
-            doc.setFillColor(41, 128, 185);
-            doc.rect(x, y, cellWidth, 5, 'F');
-            
-            doc.setFontSize(9);
-            doc.setFont("helvetica", "bold");
-            doc.setTextColor(255, 255, 255);
-            doc.text(`${seat.tableNumber}`, x + cellWidth/2, y + 3.5, { align: "center" });
-            
-            // Reset text color for student info
-            doc.setTextColor(0, 0, 0);
-            
-            // Student name - full name with adjusted font size (Title Case)
-            const fullName = toTitleCase(seat.student.full_name);
-            const nameLength = fullName.length;
-            
-            // Dynamic font size based on name length
-            let nameFontSize;
-            if (columnsCount >= 8) {
-              nameFontSize = nameLength > 20 ? 5 : nameLength > 15 ? 5.5 : 6;
-            } else {
-              nameFontSize = nameLength > 20 ? 6 : nameLength > 15 ? 6.5 : 7;
-            }
-            
-            doc.setFontSize(nameFontSize);
-            doc.setFont("helvetica", "bold");
-            
-            // Split long names into multiple lines if needed
-            const maxWidth = cellWidth - 2;
-            const nameLines = doc.splitTextToSize(fullName, maxWidth);
-            const nameStartY = y + 8;
-            
-            nameLines.forEach((line: string, idx: number) => {
-              if (idx < 2) { // Maximum 2 lines for name
-                doc.text(line, x + cellWidth/2, nameStartY + (idx * 3), { align: "center" });
-              }
-            });
-            
-            const nextY = nameStartY + (Math.min(nameLines.length, 2) * 3) + 0.5;
-            
-            // Gender indicator without symbols
-            doc.setFontSize(columnsCount >= 8 ? 5 : 5.5);
-            doc.setFont("helvetica", "normal");
-            const gender = seat.student.gender || 'L';
-            if (gender === 'L') {
-              doc.setTextColor(41, 128, 185);
-              doc.text("Laki-laki", x + cellWidth/2, nextY, { align: "center" });
-            } else {
-              doc.setTextColor(219, 39, 119);
-              doc.text("Perempuan", x + cellWidth/2, nextY, { align: "center" });
-            }
-            
-            // Exam number below gender with better spacing
-            const examNumberY = nextY + (columnsCount >= 8 ? 2.5 : 3);
-            doc.setFontSize(columnsCount >= 8 ? 5.5 : 6);
-            doc.setFont("helvetica", "bold");
-            doc.setTextColor(0, 0, 0);
-            doc.text(`No: ${seat.examNumber}`, x + cellWidth/2, examNumberY, { align: "center" });
-            
-            doc.setTextColor(0, 0, 0);
-            
-            // Class badge - adjusted position to avoid overlap
-            doc.setFillColor(245, 245, 245);
-            const classBoxY = y + cellHeight - 5.5;
-            doc.rect(x + 1, classBoxY, cellWidth - 2, 4.5, 'F');
-            
-            doc.setFontSize(columnsCount >= 8 ? 6.5 : 7.5);
-            doc.setFont("helvetica", "bold");
-            doc.setTextColor(41, 128, 185);
-            doc.text(seat.student.classes.name, x + cellWidth/2, classBoxY + 3, { align: "center" });
+          doc.setLineWidth(0.3);
+          if (!seat) { doc.rect(x, cy, cellW, cellH); continue; }
+
+          const color = getClassColor(seat.student.classes.name);
+          doc.setFillColor(Math.floor(color.r + (255 - color.r) * 0.82), Math.floor(color.g + (255 - color.g) * 0.82), Math.floor(color.b + (255 - color.b) * 0.82));
+          doc.rect(x, cy, cellW, cellH, 'FD');
+          // bilah atas: kelas | nomor meja | L/P
+          doc.setFillColor(color.r, color.g, color.b);
+          doc.rect(x, cy, cellW, bar, 'F');
+          doc.setTextColor(255, 255, 255);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(Math.min(8.5, bar * 1.9));
+          doc.text(String(seat.tableNumber), x + cellW / 2, cy + bar * 0.72, { align: "center" });
+          doc.setFontSize(Math.min(6.5, bar * 1.45));
+          doc.text(ellipsize(doc, seat.student.classes.name, cellW * 0.38), x + 1, cy + bar * 0.72);
+          const g = (seat.student.gender || '').toUpperCase();
+          doc.text(g === 'L' || g === 'P' ? g : '-', x + cellW - 1, cy + bar * 0.72, { align: "right" });
+
+          // nama: maks. 2 baris (1 baris bila sel pendek), dikecilkan agar muat
+          const body = cy + bar;
+          const bodyH = cellH - bar;
+          const lines = bodyH >= 11 ? 2 : 1;
+          const nameFs = Math.min(columnsCount >= 8 ? 6.5 : 7.5, bodyH / (lines + 1.4) * 2.2);
+          doc.setTextColor(0, 0, 0);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(nameFs);
+          const full = toTitleCase(seat.student.full_name);
+          let nameLines: string[] = doc.splitTextToSize(full, cellW - 2);
+          if (nameLines.length > lines) {
+            nameLines = nameLines.slice(0, lines);
+            nameLines[lines - 1] = ellipsize(doc, nameLines[lines - 1] + ' …', cellW - 2);
           }
+          const lh = nameFs * 0.42;
+          nameLines.forEach((ln, i) => doc.text(ln, x + cellW / 2, body + lh + 0.4 + i * lh, { align: "center" }));
+
+          // nomor peserta di dasar sel
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(Math.min(6.5, Math.max(4.5, bodyH * 0.3)));
+          doc.setTextColor(40, 40, 40);
+          doc.text(ellipsize(doc, `No. ${seat.examNumber}`, cellW - 2), x + cellW / 2, cy + cellH - 1.2, { align: "center" });
         }
       }
+
+      // ---------- Kaki halaman ----------
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(6.5);
+      doc.setTextColor(120, 120, 120);
+      doc.text(`Ruang ${room.roomNumber} • halaman ${roomIndex + 1}/${rooms.length}`, PW - M, PH - M + 3, { align: "right" });
     }
 
     doc.save(`denah-duduk-${rooms.length}-ruangan.pdf`);
-    toast.success(`Denah duduk untuk ${rooms.length} ruangan berhasil dicetak`);
+    toast.success(`Denah duduk untuk ${rooms.length} ruangan berhasil dicetak (${paper.toUpperCase()})`);
+    if (smallCells.length > 0) {
+      toast.warning(`Ruang ${smallCells.join(', ')}: baris terlalu banyak sehingga kotak kursi kecil. Kurangi jumlah baris atau pakai kertas F4.`, { duration: 9000 });
+    }
   };
 
   const handleGeneratePreview = () => {
@@ -1273,23 +901,25 @@ const ExamAdministration = () => {
       return;
     }
 
-    const rooms = previewRooms.length > 0 ? previewRooms : generateRooms();
+    const rooms = generateRooms();
     if (rooms.length === 0) return;
 
     try {
-      // F4 dimensions: 210mm x 330mm in portrait mode
-      const doc = new jsPDF('portrait', 'mm', [210, 330]);
-      
-      // 30 cards per page: 5 columns x 6 rows (adjusted to fit perfectly on F4)
-      const cardsPerPage = 30;
+      const doc = new jsPDF('portrait', 'mm', paperFormat(paper));
+      const PW = doc.internal.pageSize.getWidth();
+      const PH = doc.internal.pageSize.getHeight();
+
+      // 5 kolom; jumlah baris menyesuaikan kertas (F4: 6 baris = 30 kartu, A4: 5 baris = 25 kartu); grid dipusatkan
       const cols = 5;
-      const rows = 6;
-      const cardWidth = 39;
       const cardHeight = 52;
-      const marginX = 3;
-      const marginY = 3;
       const gapX = 1.5;
       const gapY = 1.5;
+      const edge = 5;
+      const cardWidth = (PW - 2 * edge - (cols - 1) * gapX) / cols;
+      const rows = Math.max(1, Math.floor((PH - 2 * edge + gapY) / (cardHeight + gapY)));
+      const cardsPerPage = cols * rows;
+      const marginX = edge;
+      const marginY = (PH - (rows * cardHeight + (rows - 1) * gapY)) / 2;
       
       let cardCount = 0;
       let isFirstPage = true;
@@ -1362,13 +992,11 @@ const ExamAdministration = () => {
           doc.setTextColor(0, 0, 0);
           const studentName = toTitleCase(seat.student.full_name);
           const maxNameWidth = cardWidth - 4;
-          const nameLines = doc.splitTextToSize(studentName, maxNameWidth);
+          let nameLines: string[] = doc.splitTextToSize(studentName, maxNameWidth);
+          if (nameLines.length > 2) nameLines = [nameLines[0], ellipsize(doc, nameLines.slice(1).join(' '), maxNameWidth)];
           const nameY = y + 32;
-          doc.text(nameLines.slice(0, 2), x + cardWidth/2, nameY, { 
-            align: "center",
-            maxWidth: maxNameWidth
-          });
-          
+          nameLines.forEach((ln, i) => doc.text(ln, x + cardWidth / 2, nameY + i * 3, { align: "center" }));
+
           // Student info section
           const infoY = nameLines.length > 1 ? y + 39 : y + 36;
           
@@ -1395,24 +1023,19 @@ const ExamAdministration = () => {
           doc.line(x + 3, y + cardHeight - 9, x + cardWidth - 3, y + cardHeight - 9);
           
           // Exam name and academic year at bottom
-          doc.setFontSize(4.5);
           doc.setFont("helvetica", "normal");
           doc.setTextColor(80, 80, 80);
-          const examName = settings?.exam_name || "PENILAIAN SUMATIF";
-          const examNameLines = doc.splitTextToSize(examName, cardWidth - 4);
-          doc.text(examNameLines.slice(0, 1), x + cardWidth/2, y + cardHeight - 6, { 
-            align: "center",
-            maxWidth: cardWidth - 4
-          });
-          
-          // Academic year
-          doc.setFontSize(4.5);
-          doc.setFont("helvetica", "bold");
-          doc.setTextColor(classColor.r, classColor.g, classColor.b);
-          const academicYear = settings?.academic_year || "2024/2025";
-          doc.text(`TP ${academicYear}`, x + cardWidth/2, y + cardHeight - 3, { 
-            align: "center"
-          });
+          if (settings?.exam_name) {
+            doc.text(fitText(doc, settings.exam_name, cardWidth - 8, 4.5, 3), x + cardWidth / 2, y + cardHeight - 6, { align: "center" });
+          }
+
+          // Tahun pelajaran (hanya bila sudah diisi)
+          if (settings?.academic_year) {
+            doc.setFontSize(4.5);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(classColor.r, classColor.g, classColor.b);
+            doc.text(`TP ${settings.academic_year}`, x + cardWidth / 2, y + cardHeight - 3, { align: "center" });
+          }
           
           // Bottom decorative corner
           doc.setFillColor(classColor.r, classColor.g, classColor.b);
@@ -1424,7 +1047,7 @@ const ExamAdministration = () => {
       }
 
       doc.save(`nomor-meja-${rooms.length}-ruangan-${cardCount}-kartu.pdf`);
-      toast.success(`${cardCount} nomor meja berhasil dicetak (${Math.ceil(cardCount/cardsPerPage)} halaman F4)`);
+      toast.success(`${cardCount} nomor meja berhasil dicetak (${Math.ceil(cardCount/cardsPerPage)} halaman ${paper.toUpperCase()})`);
     } catch (error) {
       console.error("Error printing table numbers:", error);
       toast.error("Gagal mencetak nomor meja. Silakan coba lagi.");
@@ -1437,194 +1060,140 @@ const ExamAdministration = () => {
       return;
     }
 
-    const rooms = previewRooms.length > 0 ? previewRooms : generateRooms();
+    const rooms = generateRooms();
     if (rooms.length === 0) return;
 
-    // Collect all students with their room information
-    interface StudentRecord {
-      className: string;
-      grade: number;
-      fullName: string;
-      examNumber: number;
-      gender: string;
-      roomNumber: number;
-    }
+    // Kumpulkan semua siswa beserta ruangnya
+    const studentRecords = rooms.flatMap((room) =>
+      room.seats.map((seat) => ({
+        className: seat.student.classes.name,
+        fullName: seat.student.full_name,
+        examNumber: seat.examNumber,
+        gender: (seat.student.gender || '-').toUpperCase(),
+        roomNumber: room.roomNumber,
+      }))
+    );
+    // urut kelas (alami: 7A, 7B, ..., 7K) lalu nama
+    studentRecords.sort((a, b) =>
+      a.className.localeCompare(b.className, 'id', { numeric: true }) ||
+      a.fullName.localeCompare(b.fullName, 'id', { sensitivity: 'base' }));
 
-    const studentRecords: StudentRecord[] = [];
-    
-    rooms.forEach(room => {
-      room.seats.forEach(seat => {
-        studentRecords.push({
-          className: seat.student.classes.name,
-          grade: seat.student.classes.grade,
-          fullName: seat.student.full_name,
-          examNumber: seat.examNumber,
-          gender: seat.student.gender || '-',
-          roomNumber: room.roomNumber
-        });
-      });
-    });
+    const doc = new jsPDF('portrait', 'mm', paperFormat(paper));
+    const PW = doc.internal.pageSize.getWidth();
+    const PH = doc.internal.pageSize.getHeight();
+    const cx = PW / 2;
+    const M = 14;
+    const BLUE: [number, number, number] = [41, 128, 185];
 
-    // Sort by class name, then by student name
-    studentRecords.sort((a, b) => {
-      const classCompare = a.className.localeCompare(b.className);
-      if (classCompare !== 0) return classCompare;
-      return a.fullName.localeCompare(b.fullName);
-    });
+    let currentY = settings ? await addLetterheadToPDF(doc, settings) : 20;
+    currentY += 2;
 
-    const doc = new jsPDF();
-    
-    // Add letterhead if available
-    if (settings) {
-      await addLetterheadToPDF(doc, settings);
-    }
-
-    let currentY = settings ? 55 : 20;
-
-    // Title
     doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
-    doc.text("REKAP KOMPOSISI RUANGAN UJIAN", 105, currentY, { align: "center" });
-    
-    currentY += 7;
+    doc.setTextColor(0, 0, 0);
+    doc.text("REKAP KOMPOSISI RUANGAN UJIAN", cx, currentY, { align: "center" });
+    currentY += 6;
+    doc.setFontSize(10.5);
+    doc.setFont("helvetica", "normal");
+    const sub = [settings?.exam_name, settings?.academic_year ? `Tahun Pelajaran ${settings.academic_year}` : ''].filter(Boolean).join('  •  ');
+    if (sub) {
+      doc.text(fitText(doc, sub, PW - 2 * M, 10.5, 7), cx, currentY, { align: "center" });
+      currentY += 6;
+    }
+    currentY += 2;
 
-    // Add summary statistics in modern card style
-    doc.setFillColor(245, 247, 250);
-    doc.roundedRect(20, currentY, 170, 22, 2, 2, 'F');
-    doc.setDrawColor(41, 128, 185);
-    doc.setLineWidth(0.5);
-    doc.roundedRect(20, currentY, 170, 22, 2, 2);
-
-    // Total statistics
-    const totalStudents = rooms.reduce((sum, room) => sum + room.seats.length, 0);
+    // ---- Kotak ringkasan (tinggi mengikuti jumlah ruang) ----
+    const totalStudents = studentRecords.length;
     const avgPerRoom = (totalStudents / rooms.length).toFixed(1);
-    
+    const boxX = M, boxW = PW - 2 * M;
+    const roomsPerRow = 6;
+    const roomRows = Math.ceil(rooms.length / roomsPerRow);
+    const boxH = Math.max(20, 12 + roomRows * 4);
+    doc.setFillColor(245, 247, 250);
+    doc.roundedRect(boxX, currentY, boxW, boxH, 2, 2, 'F');
+    doc.setDrawColor(...BLUE);
+    doc.setLineWidth(0.4);
+    doc.roundedRect(boxX, currentY, boxW, boxH, 2, 2);
+
     doc.setFontSize(8.5);
     doc.setFont("helvetica", "bold");
-    doc.setTextColor(41, 128, 185);
-    doc.text("RINGKASAN", 25, currentY + 5);
-    
-    doc.setFontSize(7.5);
+    doc.setTextColor(...BLUE);
+    doc.text("RINGKASAN", boxX + 5, currentY + 5.5);
+    doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(60, 60, 60);
-    doc.text(`Total Ruangan: ${rooms.length}`, 25, currentY + 10);
-    doc.text(`Total Siswa: ${totalStudents}`, 25, currentY + 14.5);
-    doc.text(`Rata-rata per Ruang: ${avgPerRoom} siswa`, 25, currentY + 19);
+    doc.text(`Total ruangan: ${rooms.length}`, boxX + 5, currentY + 10.5);
+    doc.text(`Total siswa: ${totalStudents}`, boxX + 5, currentY + 15);
+    if (boxH > 20) doc.text(`Rata-rata: ${avgPerRoom} siswa/ruang`, boxX + 5, currentY + 19.5);
+    else doc.text(`Rata-rata: ${avgPerRoom}/ruang`, boxX + 5, currentY + 19);
 
-    // Room details in columns
+    const colX = boxX + 62;
     doc.setFont("helvetica", "bold");
-    doc.setTextColor(41, 128, 185);
-    doc.text("JUMLAH SISWA PER RUANG:", 80, currentY + 5);
-    
+    doc.setTextColor(...BLUE);
+    doc.text("JUMLAH SISWA PER RUANG", colX, currentY + 5.5);
     doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
     doc.setTextColor(60, 60, 60);
-    doc.setFontSize(7);
-    
-    let roomStatsX = 80;
-    let roomStatsY = currentY + 10;
-    const roomsPerRow = 5;
-    
+    const stepX = (boxX + boxW - 5 - colX) / roomsPerRow;
     rooms.forEach((room, idx) => {
-      if (idx > 0 && idx % roomsPerRow === 0) {
-        roomStatsY += 3.5;
-        roomStatsX = 80;
-      }
-      
-      doc.text(`R${room.roomNumber}: ${room.seats.length}`, roomStatsX, roomStatsY);
-      roomStatsX += 18;
+      doc.text(`R${room.roomNumber}: ${room.seats.length}`, colX + (idx % roomsPerRow) * stepX, currentY + 10.5 + Math.floor(idx / roomsPerRow) * 4);
     });
-    
-    currentY += 27;
-    doc.setFontSize(12);
-    doc.setFont("helvetica", "normal");
-    if (settings?.exam_name) {
-      doc.text(settings.exam_name, 105, currentY, { align: "center" });
-      currentY += 7;
-    }
-    doc.text(`Tahun Pelajaran ${settings?.academic_year || '2024/2025'}`, 105, currentY, { align: "center" });
-    
-    currentY += 12;
+    currentY += boxH + 6;
 
-    // Prepare table data
-    const tableData = studentRecords.map((record, index) => [
-      index + 1,
-      toTitleCase(record.fullName),
-      record.examNumber.toString(),
-      record.className,
-      record.gender.toUpperCase(),
-      record.roomNumber.toString()
-    ]);
-
-    // Create table
+    // ---- Tabel ----
     autoTable(doc, {
       startY: currentY,
-      head: [['No', 'Nama Siswa', 'Nopes', 'Kelas', 'L/P', 'Ruang']],
-      body: tableData,
+      head: [['No', 'Nama Siswa', 'Nomor Peserta', 'Kelas', 'L/P', 'Ruang']],
+      body: studentRecords.map((r, i) => [i + 1, toTitleCase(r.fullName), r.examNumber.toString(), r.className, r.gender, r.roomNumber.toString()]),
       theme: 'grid',
-      headStyles: {
-        fillColor: [41, 128, 185],
-        textColor: 255,
-        fontStyle: 'bold',
-        halign: 'center',
-        fontSize: 8
-      },
+      headStyles: { fillColor: BLUE, textColor: 255, fontStyle: 'bold', halign: 'center', fontSize: 8 },
       columnStyles: {
-        0: { halign: 'center', cellWidth: 10 },  // No
-        1: { halign: 'left', cellWidth: 65 },     // Nama
-        2: { halign: 'center', cellWidth: 25 },   // Nopes
-        3: { halign: 'center', cellWidth: 18 },   // Kelas
-        4: { halign: 'center', cellWidth: 12 },   // L/P
-        5: { halign: 'center', cellWidth: 15 }    // Ruang
+        0: { halign: 'center', cellWidth: 10 },
+        1: { halign: 'left' },
+        2: { halign: 'center', cellWidth: 28 },
+        3: { halign: 'center', cellWidth: 18 },
+        4: { halign: 'center', cellWidth: 12 },
+        5: { halign: 'center', cellWidth: 16 },
       },
-      styles: {
-        fontSize: 8,
-        cellPadding: 2
-      }
+      styles: { fontSize: 8, cellPadding: 1.8, lineWidth: 0.1 },
+      margin: { left: M, right: M, top: 15, bottom: 16 },
+      rowPageBreak: 'avoid',
     });
 
-    // Add page numbers after table is complete
+    // ---- Rincian per kelas (pindah halaman bila tidak muat) ----
+    const classSummary: Record<string, number> = {};
+    studentRecords.forEach((r) => { classSummary[r.className] = (classSummary[r.className] || 0) + 1; });
+    const classEntries = Object.entries(classSummary).sort(([a], [b]) => a.localeCompare(b, 'id', { numeric: true }));
+    const perLine = 4;
+    const summaryH = 16 + Math.ceil(classEntries.length / perLine) * 5;
+    let finalY = (doc as any).lastAutoTable.finalY + 8;
+    if (finalY + summaryH > PH - 16) { doc.addPage(); finalY = 20; }
+    doc.setFontSize(9.5);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(0, 0, 0);
+    doc.text(`Total: ${totalStudents} siswa dalam ${rooms.length} ruangan`, M, finalY);
+    finalY += 6;
+    doc.setFontSize(9);
+    doc.text("Rincian per kelas:", M, finalY);
+    finalY += 5;
+    doc.setFont("helvetica", "normal");
+    const colW = (PW - 2 * M) / perLine;
+    classEntries.forEach(([name, count], i) => {
+      doc.text(`${name}: ${count} siswa`, M + 3 + (i % perLine) * colW, finalY + Math.floor(i / perLine) * 5);
+    });
+
+    // ---- Nomor halaman setelah seluruh isi selesai ----
     const totalPages = (doc as any).internal.getNumberOfPages();
     for (let i = 1; i <= totalPages; i++) {
       doc.setPage(i);
       doc.setFontSize(8);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(100, 100, 100);
-      doc.text(
-        `Halaman ${i} dari ${totalPages}`,
-        105,
-        doc.internal.pageSize.height - 10,
-        { align: 'center' }
-      );
+      doc.text(`Halaman ${i} dari ${totalPages}`, cx, PH - 8, { align: 'center' });
     }
 
-    // Add summary at the bottom of the last page
-    const finalY = (doc as any).lastAutoTable.finalY + 10;
-    
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
-    doc.text(`Total Siswa: ${studentRecords.length} siswa`, 14, finalY);
-    doc.text(`Total Ruangan: ${rooms.length} ruangan`, 14, finalY + 7);
-
-    // Group by class for summary
-    const classSummary: Record<string, number> = {};
-    studentRecords.forEach(record => {
-      classSummary[record.className] = (classSummary[record.className] || 0) + 1;
-    });
-
-    let summaryY = finalY + 17;
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "bold");
-    doc.text("Rincian per Kelas:", 14, summaryY);
-    
-    summaryY += 5;
-    doc.setFont("helvetica", "normal");
-    Object.entries(classSummary).sort().forEach(([className, count]) => {
-      doc.text(`${className}: ${count} siswa`, 20, summaryY);
-      summaryY += 5;
-    });
-
     doc.save("rekap-komposisi-ruangan.pdf");
-    toast.success(`Rekap komposisi ruangan untuk ${studentRecords.length} siswa berhasil dicetak`);
+    toast.success(`Rekap komposisi ruangan untuk ${totalStudents} siswa berhasil dicetak (${paper.toUpperCase()})`);
   };
 
   const handlePrintRoomParticipants = async () => {
@@ -1633,187 +1202,128 @@ const ExamAdministration = () => {
       return;
     }
 
-    const rooms = previewRooms.length > 0 ? previewRooms : generateRooms();
+    const rooms = generateRooms();
     if (rooms.length === 0) return;
 
     try {
-      const doc = new jsPDF();
-      
+      const doc = new jsPDF('portrait', 'mm', paperFormat(paper));
+      const PW = doc.internal.pageSize.getWidth();
+      const PH = doc.internal.pageSize.getHeight();
+      const cx = PW / 2;
+      const BLUE: [number, number, number] = [41, 128, 185];
+      const boxX = 20, boxW = PW - 40;
+
       for (let roomIdx = 0; roomIdx < rooms.length; roomIdx++) {
         const room = rooms[roomIdx];
-        
-        // Add new page for each room except the first
-        if (roomIdx > 0) {
-          doc.addPage();
-        }
-        
-        // Add letterhead if available (only on first page of each room)
-        if (settings) {
-          await addLetterheadToPDF(doc, settings);
-        }
+        if (roomIdx > 0) doc.addPage();
 
-        let currentY = settings ? 52 : 20;
+        let currentY = settings ? await addLetterheadToPDF(doc, settings) : 20;
 
-        // Title
         doc.setFontSize(12);
         doc.setFont("helvetica", "bold");
-        doc.text(`DAFTAR PESERTA UJIAN`, 105, currentY, { align: "center" });
-        currentY += 4;
+        doc.setTextColor(0, 0, 0);
+        doc.text("DAFTAR PESERTA UJIAN", cx, currentY, { align: "center" });
+        currentY += 5;
         doc.setFontSize(10);
-        doc.text(`RUANG ${room.roomNumber}`, 105, currentY, { align: "center" });
-        
-        currentY += 5.5;
+        doc.text(`RUANG ${room.roomNumber}`, cx, currentY, { align: "center" });
+        currentY += 4;
 
-        // Summary box (more compact)
-        doc.setFillColor(245, 247, 250);
-        doc.roundedRect(20, currentY, 170, 15, 2, 2, 'F');
-        doc.setDrawColor(41, 128, 185);
-        doc.setLineWidth(0.5);
-        doc.roundedRect(20, currentY, 170, 15, 2, 2);
+        const sub = [settings?.exam_name, settings?.academic_year ? `TP ${settings.academic_year}` : ''].filter(Boolean).join('  •  ');
+        if (sub) {
+          doc.setFont("helvetica", "normal");
+          doc.text(fitText(doc, sub, PW - 2 * 20, 8.5, 6), cx, currentY + 1, { align: "center" });
+          currentY += 5;
+        }
+        currentY += 2;
 
-        // Count by grade
+        // Ringkasan ruang
         const gradeCount: Record<number, number> = {};
         const genderCount = { L: 0, P: 0 };
-        
-        room.seats.forEach(seat => {
+        room.seats.forEach((seat) => {
           const grade = seat.student.classes.grade;
           gradeCount[grade] = (gradeCount[grade] || 0) + 1;
-          
           const gender = seat.student.gender?.toUpperCase();
           if (gender === 'L') genderCount.L++;
           else if (gender === 'P') genderCount.P++;
         });
-
+        const gradeEntries = Object.entries(gradeCount).sort(([a], [b]) => Number(a) - Number(b));
+        const gradeRows = Math.ceil(gradeEntries.length / 2);
+        const boxH = Math.max(15, 8 + gradeRows * 3.5);
+        doc.setFillColor(245, 247, 250);
+        doc.roundedRect(boxX, currentY, boxW, boxH, 2, 2, 'F');
+        doc.setDrawColor(...BLUE);
+        doc.setLineWidth(0.4);
+        doc.roundedRect(boxX, currentY, boxW, boxH, 2, 2);
         doc.setFontSize(7.5);
         doc.setFont("helvetica", "bold");
-        doc.setTextColor(41, 128, 185);
-        doc.text("RINGKASAN PESERTA", 25, currentY + 4);
-        
-        doc.setFontSize(6.5);
+        doc.setTextColor(...BLUE);
+        doc.text("RINGKASAN PESERTA", boxX + 5, currentY + 4.5);
+        doc.setFontSize(7);
         doc.setFont("helvetica", "normal");
         doc.setTextColor(60, 60, 60);
-        doc.text(`Total: ${room.seats.length} siswa`, 25, currentY + 7.5);
-        doc.text(`L: ${genderCount.L} | P: ${genderCount.P}`, 25, currentY + 11);
-
-        // Grade distribution (compact)
+        doc.text(`Total: ${room.seats.length} siswa`, boxX + 5, currentY + 8.5);
+        doc.text(`L: ${genderCount.L}  |  P: ${genderCount.P}`, boxX + 5, currentY + 12);
+        const gx = boxX + boxW / 2 - 10;
         doc.setFont("helvetica", "bold");
-        doc.setTextColor(41, 128, 185);
-        doc.text("DISTRIBUSI:", 85, currentY + 3.8);
-        
+        doc.setTextColor(...BLUE);
+        doc.text("DISTRIBUSI TINGKAT", gx, currentY + 4.5);
         doc.setFont("helvetica", "normal");
         doc.setTextColor(60, 60, 60);
-        let gradeX = 85;
-        let gradeY = currentY + 7.5;
-        Object.entries(gradeCount).sort().forEach(([grade, count], idx) => {
-          doc.text(`Kls ${grade}: ${count}`, gradeX, gradeY);
-          if (idx % 2 === 0) {
-            gradeX += 28;
-          } else {
-            gradeX = 85;
-            gradeY += 3.5;
-          }
+        gradeEntries.forEach(([grade, count], idx) => {
+          doc.text(`Kelas ${grade}: ${count}`, gx + (idx % 2) * 32, currentY + 8.5 + Math.floor(idx / 2) * 3.5);
         });
-        
-        currentY += 18;
-        
-        // Exam info (compact)
-        doc.setFontSize(8);
-        doc.setFont("helvetica", "normal");
-        if (settings?.exam_name) {
-          doc.text(settings.exam_name, 105, currentY, { align: "center" });
-          currentY += 4;
-        }
-        doc.text(`TP ${settings?.academic_year || '2024/2025'}`, 105, currentY, { align: "center" });
-        
-        currentY += 6;
+        currentY += boxH + 5;
 
-        // Prepare table data for this room — sort by class (A-Z) then by student name
-        const sortedSeats = [...room.seats].sort((a, b) => {
-          const classCompare = (a.student.classes.name || '').localeCompare(b.student.classes.name || '', 'id', { numeric: true, sensitivity: 'base' });
-          if (classCompare !== 0) return classCompare;
-          return toTitleCase(a.student.full_name).localeCompare(toTitleCase(b.student.full_name), 'id', { sensitivity: 'base' });
-        });
-        const tableData = sortedSeats.map((seat, index) => [
-          index + 1,
-          toTitleCase(seat.student.full_name),
-          seat.examNumber.toString(),
-          seat.student.classes.name
-        ]);
+        // Urut kelas (alami) lalu nama
+        const sortedSeats = [...room.seats].sort((a, b) =>
+          (a.student.classes.name || '').localeCompare(b.student.classes.name || '', 'id', { numeric: true, sensitivity: 'base' }) ||
+          toTitleCase(a.student.full_name).localeCompare(toTitleCase(b.student.full_name), 'id', { sensitivity: 'base' }));
 
-        // Calculate available space
-        const pageHeight = doc.internal.pageSize.height;
-        const availableSpace = pageHeight - currentY - 20; // Reserve 20mm for footer
-        
-        // Adjust font size based on number of rows to fit in one page
-        let fontSize = 7.5;
-        let cellPadding = 1.8;
-        const estimatedRowHeight = fontSize * 0.5 + cellPadding * 2;
-        const estimatedTableHeight = (tableData.length + 1) * estimatedRowHeight;
-        
-        if (estimatedTableHeight > availableSpace) {
-          fontSize = 7;
-          cellPadding = 1.5;
-        }
+        // Muat di satu halaman bila bisa; bila tidak, kecilkan sedikit lalu lanjut ke halaman berikut dengan kepala tabel diulang
+        const availableSpace = PH - currentY - 20;
+        let fontSize = 8;
+        let cellPadding = 1.9;
+        const rowH = (fs: number, pad: number) => fs * 0.3528 * 1.15 + pad * 2;
+        if ((sortedSeats.length + 1) * rowH(fontSize, cellPadding) > availableSpace) { fontSize = 7.5; cellPadding = 1.5; }
+        if ((sortedSeats.length + 1) * rowH(fontSize, cellPadding) > availableSpace) { fontSize = 7; cellPadding = 1.2; }
 
-        // Create table
         autoTable(doc, {
           startY: currentY,
           head: [['No', 'Nama Siswa', 'Nomor Peserta', 'Kelas']],
-          body: tableData,
+          body: sortedSeats.map((seat, index) => [index + 1, toTitleCase(seat.student.full_name), seat.examNumber.toString(), seat.student.classes.name]),
           theme: 'grid',
-          headStyles: {
-            fillColor: [41, 128, 185],
-            textColor: 255,
-            fontStyle: 'bold',
-            halign: 'center',
-            fontSize: fontSize
-          },
+          headStyles: { fillColor: BLUE, textColor: 255, fontStyle: 'bold', halign: 'center', fontSize },
           columnStyles: {
-            0: { halign: 'center', cellWidth: 10 },    // No
-            1: { halign: 'left', cellWidth: 95 },      // Nama
-            2: { halign: 'center', cellWidth: 32 },    // Nopes
-            3: { halign: 'center', cellWidth: 20 }     // Kelas
+            0: { halign: 'center', cellWidth: 10 },
+            1: { halign: 'left' },
+            2: { halign: 'center', cellWidth: 32 },
+            3: { halign: 'center', cellWidth: 20 },
           },
-          styles: {
-            fontSize: fontSize,
-            cellPadding: cellPadding,
-            lineWidth: 0.1
-          },
-          margin: { left: 26.5, right: 26.5 },
-          tableWidth: 'auto',
-          didDrawPage: (data) => {
-            // Ensure we don't overflow to next page
-            if (data.pageNumber > 1) {
-              console.warn(`Room ${room.roomNumber} overflowed to page ${data.pageNumber}`);
-            }
-          }
+          styles: { fontSize, cellPadding, lineWidth: 0.1 },
+          margin: { left: boxX, right: boxX, top: 15, bottom: 16 },
+          rowPageBreak: 'avoid',
         });
 
-        // Add footer info
-        const finalY = (doc as any).lastAutoTable.finalY + 5;
-        doc.setFontSize(7.5);
+        // Jumlah peserta di bawah tabel (pindah halaman bila tidak ada tempat)
+        let finalY = (doc as any).lastAutoTable.finalY + 6;
+        if (finalY > PH - 16) { doc.addPage(); finalY = 20; }
+        doc.setFontSize(8);
         doc.setFont("helvetica", "bold");
         doc.setTextColor(0, 0, 0);
-        doc.text(`Total Peserta: ${room.seats.length} siswa`, 105, finalY, { align: "center" });
+        doc.text(`Total peserta: ${room.seats.length} siswa`, cx, finalY, { align: "center" });
       }
 
-      // Add page numbers
       const totalPages = (doc as any).internal.getNumberOfPages();
       for (let i = 1; i <= totalPages; i++) {
         doc.setPage(i);
         doc.setFontSize(7);
         doc.setFont("helvetica", "normal");
         doc.setTextColor(100, 100, 100);
-        doc.text(
-          `Halaman ${i} dari ${totalPages}`,
-          105,
-          doc.internal.pageSize.height - 6,
-          { align: 'center' }
-        );
+        doc.text(`Halaman ${i} dari ${totalPages}`, cx, PH - 7, { align: 'center' });
       }
 
       doc.save(`daftar-peserta-per-ruang-${rooms.length}-ruangan.pdf`);
-      toast.success(`Daftar peserta untuk ${rooms.length} ruangan berhasil dicetak`);
+      toast.success(`Daftar peserta untuk ${rooms.length} ruangan berhasil dicetak (${paper.toUpperCase()})`);
     } catch (error) {
       console.error("Error printing room participants:", error);
       toast.error("Gagal mencetak daftar peserta. Silakan coba lagi.");
@@ -1829,9 +1339,20 @@ const ExamAdministration = () => {
         </div>
 
         <Card>
-          <CardHeader>
-            <CardTitle>Pengaturan Ujian</CardTitle>
-            <CardDescription>Pilih kelas dan atur denah duduk ujian</CardDescription>
+          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+            <div className="space-y-1.5">
+              <CardTitle>Pengaturan Ujian</CardTitle>
+              <CardDescription>Pilih kelas dan atur denah duduk ujian</CardDescription>
+            </div>
+            <div className="flex flex-col items-end gap-1 shrink-0">
+              <Button type="button" size="sm" onClick={saveExamCardSettings} disabled={saving || hasNumberErrors || !dirty}>
+                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Simpan Pengaturan
+              </Button>
+              <span className={`text-xs ${hasNumberErrors ? 'text-destructive' : dirty ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                {hasNumberErrors ? 'Nomor peserta belum valid' : dirty ? 'Ada perubahan belum disimpan' : savedSnapshot !== null ? 'Tersimpan' : ''}
+              </span>
+            </div>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-2">
@@ -1933,35 +1454,21 @@ const ExamAdministration = () => {
             )}
 
             <div className="space-y-2">
-              <Label>Kapasitas Ruangan (Maksimal 32 siswa)</Label>
+              <Label>Kapasitas Ruangan</Label>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="rows">Jumlah Baris</Label>
-                  <Input
-                    id="rows"
-                    type="number"
-                    min="1"
-                    max="20"
-                    value={rowsCount}
-                    onChange={(e) => setRowsCount(parseInt(e.target.value) || 1)}
-                  />
+                  <Label htmlFor="rows">Jumlah Baris (1–20)</Label>
+                  <DraftNumberInput id="rows" value={rowsCount} min={1} max={20} onCommit={setRowsCount} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="columns">Jumlah Kolom</Label>
-                  <Input
-                    id="columns"
-                    type="number"
-                    min="1"
-                    max="10"
-                    value={columnsCount}
-                    onChange={(e) => setColumnsCount(parseInt(e.target.value) || 1)}
-                  />
+                  <Label htmlFor="columns">Jumlah Kolom (1–12)</Label>
+                  <DraftNumberInput id="columns" value={columnsCount} min={1} max={12} onCommit={setColumnsCount} />
                 </div>
               </div>
               <p className="text-sm text-muted-foreground">
-                Total kursi per ruangan: {rowsCount * columnsCount} | 
-                Siswa terpilih: {students.filter(s => selectedGrades.includes(s.classes.grade.toString())).length} |
-                Urutan: Berdasarkan NIS
+                Kursi per ruangan: {rowsCount * columnsCount} |{' '}
+                Siswa terpilih: {students.filter((st) => selectedGrades.includes(st.classes.grade.toString())).length} |{' '}
+                Urutan dalam kelas: berdasarkan nama (A–Z)
               </p>
             </div>
 
@@ -1970,23 +1477,36 @@ const ExamAdministration = () => {
               <Select value={seatingMode} onValueChange={(v: any) => setSeatingMode(v)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="auto">Otomatis (lama: per rombel hanya jika 1 kelas dipilih)</SelectItem>
+                  <SelectItem value="auto">Otomatis (1 tingkat dipilih: per rombel; lebih dari 1: berselang-seling)</SelectItem>
                   <SelectItem value="alternating">Berselang-seling antar kelas</SelectItem>
                   <SelectItem value="by_class">Per Rombel (1 ruang = 1 kelas)</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-sm text-muted-foreground">
-                Pilih cara penyusunan: pengaturan lama atau pembaruan terbaru.
+                Berselang-seling: siswa kelas berbeda duduk berdampingan dan tiap tingkat dipisah ruang. Per rombel: satu ruang hanya satu kelas.
               </p>
+              {layoutWarnings.length > 0 && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 space-y-1">
+                  {layoutWarnings.map((w, i) => <p key={i}>⚠ {w}</p>)}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="paper">Ukuran Kertas Cetak</Label>
+              <Select value={paper} onValueChange={(v: any) => setPaper(v)}>
+                <SelectTrigger id="paper"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(PAPER_LABEL) as PdfPaper[]).map((k) => (
+                    <SelectItem key={k} value={k}>{PAPER_LABEL[k]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-sm text-muted-foreground">Berlaku untuk semua cetakan (kartu, denah, nomor meja, rekap, daftar peserta).</p>
             </div>
 
             <div className="space-y-2 border rounded-md p-4 bg-muted/30">
-              <div className="flex items-center justify-between">
-                <Label className="text-base">Pengaturan Kartu Ujian</Label>
-                <Button type="button" size="sm" variant="outline" onClick={saveExamCardSettings}>
-                  Simpan Pengaturan
-                </Button>
-              </div>
+              <Label className="text-base">Pengaturan Kartu Ujian</Label>
 
               <div className="flex items-center justify-between rounded-md bg-background border p-3">
                 <div className="space-y-0.5">
@@ -2017,15 +1537,11 @@ const ExamAdministration = () => {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label>Lebar (mm)</Label>
-                    <Input type="number" min={40} max={200}
-                      value={customCardWidth}
-                      onChange={(e) => setCustomCardWidth(parseInt(e.target.value) || 85)} />
+                    <DraftNumberInput min={40} max={200} value={customCardWidth} onCommit={setCustomCardWidth} />
                   </div>
                   <div>
                     <Label>Tinggi (mm)</Label>
-                    <Input type="number" min={30} max={200}
-                      value={customCardHeight}
-                      onChange={(e) => setCustomCardHeight(parseInt(e.target.value) || 54)} />
+                    <DraftNumberInput min={30} max={200} value={customCardHeight} onCommit={setCustomCardHeight} />
                   </div>
                 </div>
               )}
@@ -2041,63 +1557,60 @@ const ExamAdministration = () => {
               </div>
             </div>
 
-            <div className="space-y-4">
-              <Label>Nomor Peserta Awal (5 digit pertama)</Label>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="startingExamNumberGrade7">Kelas 7</Label>
-                  <Input
-                    id="startingExamNumberGrade7"
-                    type="number"
-                    min="10000"
-                    max="99999"
-                    value={startingExamNumberGrade7}
-                    onChange={(e) => {
-                      const value = parseInt(e.target.value) || 25267;
-                      if (value >= 10000 && value <= 99999) {
-                        setStartingExamNumberGrade7(value);
-                      }
-                    }}
-                    placeholder="25267"
-                  />
+            <div className="space-y-3 border rounded-md p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <Label className="text-base">Nomor Peserta Awal per Tingkat</Label>
+                  <p className="text-xs text-muted-foreground">5 digit awal per tingkat; 3 digit terakhir urut otomatis sesuai nomor meja.</p>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="startingExamNumberGrade8">Kelas 8</Label>
-                  <Input
-                    id="startingExamNumberGrade8"
-                    type="number"
-                    min="10000"
-                    max="99999"
-                    value={startingExamNumberGrade8}
-                    onChange={(e) => {
-                      const value = parseInt(e.target.value) || 25268;
-                      if (value >= 10000 && value <= 99999) {
-                        setStartingExamNumberGrade8(value);
-                      }
-                    }}
-                    placeholder="25268"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="startingExamNumberGrade9">Kelas 9</Label>
-                  <Input
-                    id="startingExamNumberGrade9"
-                    type="number"
-                    min="10000"
-                    max="99999"
-                    value={startingExamNumberGrade9}
-                    onChange={(e) => {
-                      const value = parseInt(e.target.value) || 25269;
-                      if (value >= 10000 && value <= 99999) {
-                        setStartingExamNumberGrade9(value);
-                      }
-                    }}
-                    placeholder="25269"
-                  />
+                <div className="flex gap-2">
+                  <Button type="button" size="sm" variant="outline" onClick={() => {
+                    const base = startingExamNumberGrade7;
+                    setStartingExamNumberGrade7(base); setStartingExamNumberGrade8(base + 1); setStartingExamNumberGrade9(base + 2);
+                  }}>Isi berurutan (+1)</Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => {
+                    setStartingExamNumberGrade7(DEFAULT_START_NUMBERS['7']); setStartingExamNumberGrade8(DEFAULT_START_NUMBERS['8']); setStartingExamNumberGrade9(DEFAULT_START_NUMBERS['9']);
+                  }}>Kembalikan default</Button>
                 </div>
               </div>
-              <p className="text-sm text-muted-foreground">
-                Nomor peserta 8 digit: 5 digit awal sesuai kelas + 3 digit urut otomatis (contoh: Kelas 7: 25267001, 25267002... | Kelas 8: 25268001, 25268002...)
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {([
+                  ['7', startingExamNumberGrade7, setStartingExamNumberGrade7],
+                  ['8', startingExamNumberGrade8, setStartingExamNumberGrade8],
+                  ['9', startingExamNumberGrade9, setStartingExamNumberGrade9],
+                ] as const).map(([g, val, setVal]) => {
+                  const count = students.filter((st) => st.classes.grade.toString() === g).length;
+                  const err = startNumberErrors[g];
+                  const width = count > 999 ? 4 : 3;
+                  return (
+                    <div key={g} className="space-y-1.5">
+                      <Label htmlFor={`startingExamNumberGrade${g}`}>Kelas {g}</Label>
+                      <DraftNumberInput
+                        id={`startingExamNumberGrade${g}`}
+                        value={val}
+                        min={10000}
+                        max={99999}
+                        digits={5}
+                        invalid={!!err}
+                        placeholder={String(DEFAULT_START_NUMBERS[g as '7' | '8' | '9'])}
+                        onCommit={setVal}
+                      />
+                      {err ? (
+                        <p className="text-xs text-destructive">{err}</p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          {count > 0
+                            ? `${val}${'0'.repeat(width - 1)}1 … ${val}${String(count).padStart(width, '0')} (${count} siswa)`
+                            : `Contoh: ${val}${'0'.repeat(width - 1)}1`}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Nomor tiap siswa mengikuti urutan duduk (ruang 1 meja 1 = urut 001) dan dihitung ulang bila daftar siswa atau susunan ruang berubah.
+                Tingkat dengan lebih dari 999 siswa otomatis memakai 4 digit urut. Klik <strong>Simpan Pengaturan</strong> di kanan atas agar tersimpan.
               </p>
             </div>
 
@@ -2244,8 +1757,8 @@ const ExamAdministration = () => {
                       {/* Title Section with modern styling */}
                       <div className="text-center space-y-2 mb-6">
                         <h2 className="text-2xl font-bold text-primary">DENAH TEMPAT DUDUK PESERTA</h2>
-                        <p className="text-xs text-muted-foreground">{settings?.exam_name || "PENILAIAN SUMATIF AKHIR TAHUN (PSAT)"}</p>
-                        <p className="text-xs text-muted-foreground">Tahun Ajaran {settings?.academic_year || "2024/2025"}</p>
+                        {settings?.exam_name && <p className="text-xs text-muted-foreground">{settings.exam_name}</p>}
+                        {settings?.academic_year && <p className="text-xs text-muted-foreground">Tahun Ajaran {settings.academic_year}</p>}
                         <div className="inline-flex items-center justify-center px-6 py-1.5 bg-primary text-primary-foreground rounded-md font-bold text-sm mt-3">
                           RUANG {room.roomNumber}
                         </div>
@@ -2385,7 +1898,7 @@ const ExamAdministration = () => {
                       {/* Supervisor - modern style */}
                       <div className="mb-5">
                         <div className="bg-foreground/90 text-background p-2 rounded-sm">
-                          <div className="text-center font-bold text-xs tracking-wide">▼ PENGAWAS ▼</div>
+                          <div className="text-center font-bold text-xs tracking-wide">MEJA PENGAWAS / DEPAN RUANGAN</div>
                         </div>
                       </div>
                       
@@ -2626,7 +2139,7 @@ const ExamAdministration = () => {
                         </div>
                       )}
                       <div className="text-[10px] text-muted-foreground mt-1">
-                        Tahun Pelajaran {settings?.academic_year || "2024/2025"}
+                        {settings?.academic_year ? `Tahun Pelajaran ${settings.academic_year}` : ''}
                       </div>
                     </div>
 
