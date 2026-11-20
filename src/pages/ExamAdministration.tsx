@@ -121,7 +121,7 @@ const ExamAdministration = () => {
   };
 
   // Fetch only ACTIVE (non-alumni, non-mutated) students for exam administration
-  const { data: students = [], isLoading } = useQuery({
+  const { data: students = [], isLoading, isError: studentsError, error: studentsErrorDetail, refetch: refetchStudents } = useQuery({
     queryKey: ['students-for-exam-active'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -1356,6 +1356,15 @@ const ExamAdministration = () => {
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
+            {studentsError && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm space-y-2">
+                <p className="font-medium text-destructive">Daftar siswa gagal dimuat, jadi denah/kartu belum bisa dibuat.</p>
+                <p className="text-xs text-muted-foreground break-words">
+                  {(studentsErrorDetail as any)?.message || 'Server tidak merespons (periksa koneksi atau hubungi admin).'}
+                </p>
+                <Button type="button" size="sm" variant="outline" onClick={() => refetchStudents()}>Coba lagi</Button>
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Pilih Kelas</Label>
               <div className="flex gap-2">
