@@ -3378,6 +3378,126 @@ async function gdriveCleanup(folderId, prefix, keep) {
     return deleted;
 }
 
+// ===================== GAMBAR SOAL CBT -> GOOGLE DRIVE =====================
+// Guru mengompres gambar di browser, lalu mengirimnya ke sini; bot menyimpannya di folder Drive "Pusaka Gambar Soal"
+// (dibuat otomatis, id-nya disimpan di berkas lokal di samping gdrive-token.json), membuatnya dapat dibuka siapa pun yang
+// punya tautan, dan mengembalikan tautan yang disisipkan ke soal. Siswa memuat gambar langsung dari Google.
+const SOAL_IMG_FOLDER_NAME = 'Pusaka Gambar Soal';
+const SOAL_IMG_FOLDER_FILE = process.env.SOAL_IMG_FOLDER_FILE || path.join(path.dirname(GDRIVE_TOKEN_FILE), 'gdrive-gambar-soal.json');
+const SOAL_IMG_MAX_BYTES = 1024 * 1024;
+const SOAL_IMG_ROLES = ['teacher', 'admin', 'super_admin', 'admin_web'];
+const SOAL_IMG_TYPES = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png' };
+const SOAL_IMG_LIMIT = { max: 80, windowMs: 10 * 60 * 1000 }; // per pengguna
+let soalFolderId = null;
+let soalFolderPending = null;
+const soalImgHits = new Map();
+
+function soalImgMagicOk(buf, mime) {
+    if (mime === 'image/jpeg') return buf.length > 3 && buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF;
+    if (mime === 'image/png') return buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47;
+    if (mime === 'image/webp') return buf.length > 12 && buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP';
+    return false;
+}
+function soalImgRateOk(userId) {
+    const now = Date.now();
+    if (soalImgHits.size > 2000) { for (const [k, v] of soalImgHits) if (now - v.t > SOAL_IMG_LIMIT.windowMs) soalImgHits.delete(k); }
+    const v = soalImgHits.get(userId);
+    if (!v || now - v.t > SOAL_IMG_LIMIT.windowMs) { soalImgHits.set(userId, { t: now, n: 1 }); return true; }
+    return ++v.n <= SOAL_IMG_LIMIT.max;
+}
+// true = folder ada; false = hilang/di tempat sampah (404); galat lain dilempar agar tidak membuat folder ganda
+async function soalFolderExists(id) {
+    const r = await gfetch('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id) + '?fields=id,trashed');
+    if (r.status === 404) return false;
+    const j = await r.json().catch(function() { return {}; });
+    if (!r.ok) throw new Error('Google Drive: ' + ((j.error && (j.error.message || j.error)) || r.status));
+    return !!(j && j.id && !j.trashed);
+}
+function soalImageFolder(force) {
+    if (!force && soalFolderId) return Promise.resolve(soalFolderId);
+    if (soalFolderPending) return soalFolderPending;
+    soalFolderPending = (async function() {
+        try {
+            let id = null;
+            if (!force) { try { id = (JSON.parse(fs.readFileSync(SOAL_IMG_FOLDER_FILE, 'utf8')) || {}).id || null; } catch (e) { id = null; } }
+            if (id && await soalFolderExists(id)) { soalFolderId = id; return id; }
+            const f = await gjson('https://www.googleapis.com/drive/v3/files?fields=id', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: SOAL_IMG_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' })
+            });
+            try { fs.writeFileSync(SOAL_IMG_FOLDER_FILE, JSON.stringify({ id: f.id }), { mode: 0o600 }); } catch (e) { console.error('[soal-img] gagal menyimpan id folder:', e.message); }
+            soalFolderId = f.id;
+            return f.id;
+        } finally { soalFolderPending = null; }
+    })();
+    return soalFolderPending;
+}
+// Unggah berkas kecil sekali jalan (multipart); status 404 = folder induk hilang
+async function soalDriveCreate(buf, mime, name, parentId, userId) {
+    const boundary = 'pusaka' + crypto.randomBytes(12).toString('hex');
+    const meta = JSON.stringify({ name: name, parents: [parentId], mimeType: mime, appProperties: { uploader: String(userId), kind: 'soal-cbt' } });
+    const head = Buffer.from('--' + boundary + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + meta + '\r\n--' + boundary + '\r\nContent-Type: ' + mime + '\r\n\r\n');
+    const tail = Buffer.from('\r\n--' + boundary + '--');
+    const r = await gfetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size', {
+        method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + boundary }, body: Buffer.concat([head, buf, tail])
+    });
+    const j = await r.json().catch(function() { return {}; });
+    if (!r.ok) { const e = new Error('Google Drive menolak unggahan (' + r.status + '): ' + String((j.error && (j.error.message || j.error)) || '').slice(0, 200)); e.httpStatus = r.status; throw e; }
+    return j;
+}
+async function soalDriveDelete(id) { try { await gfetch('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id), { method: 'DELETE' }); } catch (e) { /* abaikan */ } }
+
+async function requireSoalImageRole(req, res, next) {
+    try {
+        const r = await supabase.from('user_roles').select('role').eq('user_id', req.userId);
+        if (r.error) throw r.error;
+        if (!(r.data || []).some(function(x) { return SOAL_IMG_ROLES.includes(x.role); })) return res.status(403).json({ status: 'error', message: 'Hanya guru/admin yang boleh mengunggah gambar soal.' });
+        if (!soalImgRateOk(req.userId)) return res.status(429).json({ status: 'error', message: 'Terlalu banyak unggahan gambar. Coba lagi beberapa menit lagi.' });
+        next();
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
+}
+const soalImgParser = express.raw({ type: Object.keys(SOAL_IMG_TYPES), limit: SOAL_IMG_MAX_BYTES });
+function soalImgBody(req, res, next) {
+    soalImgParser(req, res, function(err) {
+        if (err) return res.status(err.status === 413 || err.type === 'entity.too.large' ? 413 : 400).json({ status: 'error', message: err.status === 413 || err.type === 'entity.too.large' ? 'Gambar terlalu besar (maksimal 1 MB setelah dikompres).' : 'Isi unggahan tidak valid.' });
+        next();
+    });
+}
+// Urutan middleware: login → peran → batas laju → baru isi (body) dibaca, sehingga yang tidak berhak tidak bisa membuat server membaca berkas.
+app.post('/cbt/image-upload', requireUser, requireSoalImageRole, soalImgBody, async function(req, res) {
+    try {
+        const mime = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+        const ext = SOAL_IMG_TYPES[mime];
+        const buf = req.body;
+        if (!ext || !Buffer.isBuffer(buf) || buf.length === 0) return res.status(415).json({ status: 'error', message: 'Jenis gambar harus WebP, JPEG, atau PNG.' });
+        if (!soalImgMagicOk(buf, mime)) return res.status(415).json({ status: 'error', message: 'Isi berkas tidak sesuai jenis gambarnya.' });
+        const t = readGdriveToken();
+        if (!t || !t.refresh_token) return res.status(503).json({ status: 'error', message: 'Google Drive belum dihubungkan. Hubungkan di menu Backup Database terlebih dahulu.' });
+        const d = new Date();
+        const name = 'soal-' + d.toISOString().slice(0, 10).replace(/-/g, '') + '-' + crypto.randomBytes(6).toString('hex') + '.' + ext;
+        let file;
+        try { file = await soalDriveCreate(buf, mime, name, await soalImageFolder(false), req.userId); }
+        catch (e) {
+            if (e.httpStatus !== 404) throw e;
+            file = await soalDriveCreate(buf, mime, name, await soalImageFolder(true), req.userId); // folder induk terhapus: buat ulang sekali
+        }
+        // Siapa pun yang punya tautan boleh melihat (tanpa muncul di pencarian Google); bila gagal, berkas dibuang agar tidak yatim.
+        const p = await gfetch('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(file.id) + '/permissions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: 'reader', type: 'anyone', allowFileDiscovery: false })
+        });
+        if (!p.ok) {
+            const pj = await p.json().catch(function() { return {}; });
+            await soalDriveDelete(file.id);
+            throw new Error('Gagal membuka akses tautan gambar (' + p.status + '): ' + String((pj.error && (pj.error.message || pj.error)) || '').slice(0, 160));
+        }
+        res.json({ status: 'success', id: file.id, url: 'https://lh3.googleusercontent.com/d/' + file.id, bytes: buf.length });
+    } catch (e) {
+        console.error('[soal-img] gagal:', e.message);
+        res.status(/belum dihubungkan|GOOGLE_CLIENT/.test(e.message) ? 503 : 502).json({ status: 'error', message: e.message });
+    }
+});
+
 function dbDumpCommand() {
     if (process.env.BACKUP_DB_COMMAND) return process.env.BACKUP_DB_COMMAND;                       // perintah bebas, hasil SQL lewat stdout
     if (process.env.BACKUP_DATABASE_URL) return 'pg_dump --no-owner --no-privileges "$BACKUP_DATABASE_URL"';
