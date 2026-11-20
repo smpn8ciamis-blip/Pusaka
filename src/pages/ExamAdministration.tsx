@@ -149,17 +149,18 @@ const ExamAdministration = () => {
 
       if (error) throw error;
 
-      // Exclude any student that has a mutation record (mutasi keluar)
-      const ids = (data || []).map((s: any) => s.id);
+      // Siswa yang pernah dimutasi keluar tidak ikut ujian. Daftar mutasi diambil apa adanya (tabel kecil, dibatasi RLS)
+      // dan dicocokkan di sini, tanpa daftar ratusan id di alamat permintaan (alamat panjang bisa memicu 502 di proxy).
       const mutatedIds = new Set<string>();
-      // dalam potongan 100 id agar alamat permintaan tidak terlalu panjang (600 id sekaligus bisa ditolak server)
-      for (let i = 0; i < ids.length; i += 100) {
+      for (let from = 0; ; from += 1000) {
         const { data: mut, error: mutErr } = await supabase
           .from('student_mutations')
           .select('student_id')
-          .in('student_id', ids.slice(i, i + 100));
+          .order('id')
+          .range(from, from + 999);
         if (mutErr) throw mutErr;
         (mut || []).forEach((m: any) => mutatedIds.add(m.student_id));
+        if (!mut || mut.length < 1000) break;
       }
       // siswa tanpa kelas tidak bisa ditempatkan di ruang ujian
       return (data as Student[]).filter((s: any) => s.classes && !mutatedIds.has(s.id));
