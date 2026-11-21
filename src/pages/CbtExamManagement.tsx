@@ -962,7 +962,7 @@ export default function CbtExamManagement() {
                               if (!val) return null;
                               return (
                                 <span key={opt} className={`px-2 py-1 rounded ${q.correct_answer === opt ? 'bg-primary/10 text-primary font-medium' : 'bg-muted'}`}>
-                                  {opt}. <OptionDisplay value={val} />
+                                  <span className="flex items-start gap-1"><b>{opt}.</b><span className="flex-1 min-w-0"><OptionDisplay value={val} /></span></span>
                                 </span>
                               );
                             })}
@@ -1259,7 +1259,7 @@ export default function CbtExamManagement() {
                       <RichTextDisplay html={q?.question_text || ''} className="text-sm mb-2" />
                       <div className="bg-muted/30 p-2 rounded text-sm">
                         <p className="text-xs font-medium text-muted-foreground mb-1">Jawaban Siswa:</p>
-                        {isEssay ? <p className="whitespace-pre-wrap">{a.essay_answer || <em className="text-muted-foreground">Tidak menjawab</em>}</p>
+                        {isEssay ? <p dir="auto" className="whitespace-pre-wrap">{a.essay_answer || <em className="text-muted-foreground">Tidak menjawab</em>}</p>
                          : <p>{a.selected_answer || '-'}</p>}
                       </div>
                       {isEssay && q?.essay_answer_key && (

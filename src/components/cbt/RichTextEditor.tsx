@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Bold, Italic, Underline as UIcon, List, ListOrdered, Image as ImgIcon, Link as LinkIcon, Undo, Redo, Heading2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { SymbolPalette } from '@/components/cbt/SymbolPalette';
 import { compressAndUploadQuestionImage } from '@/lib/driveImage';
 import { driveFileId, driveFallbackUrl, driveImageUrl } from '@/lib/driveLinks';
 
@@ -40,7 +41,7 @@ export function RichTextEditor({ value, onChange, placeholder, minHeight = '120p
     editorProps: {
       attributes: {
         class: cn(
-          'prose prose-sm dark:prose-invert max-w-none focus:outline-none px-3 py-2',
+          'prose prose-sm dark:prose-invert max-w-none focus:outline-none px-3 py-2 bidi-auto',
           'min-h-[' + minHeight + ']'
         ),
         style: `min-height:${minHeight}`,
@@ -140,6 +141,7 @@ export function RichTextEditor({ value, onChange, placeholder, minHeight = '120p
         </div>
         )}
       </div>
+      <SymbolPalette className="border-b p-1" onInsert={(t) => editor.chain().focus().insertContent(t).run()} />
       <EditorContent editor={editor} placeholder={placeholder} />
     </div>
   );
@@ -166,5 +168,5 @@ export function RichTextDisplay({ html, className }: { html: string; className?:
     el.addEventListener('error', onErr, true);
     return () => el.removeEventListener('error', onErr, true);
   }, []);
-  return <div ref={ref} className={cn('prose prose-sm dark:prose-invert max-w-none', className)} dangerouslySetInnerHTML={{ __html: withNoReferrer(html || '') }} />;
+  return <div ref={ref} className={cn('prose prose-sm dark:prose-invert max-w-none bidi-auto', className)} dangerouslySetInnerHTML={{ __html: withNoReferrer(html || '') }} />;
 }

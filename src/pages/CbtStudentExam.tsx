@@ -18,6 +18,7 @@ import { format } from 'date-fns';
 import { id as idLocale } from 'date-fns/locale';
 import { RichTextDisplay } from '@/components/cbt/RichTextEditor';
 import { OptionDisplay } from '@/components/cbt/OptionDisplay';
+import { SymbolPalette } from '@/components/cbt/SymbolPalette';
 import { useCbtAntiCheat } from '@/hooks/useCbtAntiCheat';
 import { createDeadline, violationLabel } from '@/lib/cbtAntiCheat';
 import {
@@ -329,6 +330,19 @@ export default function CbtStudentExam() {
     answersRef.current = { ...answersRef.current, [qid]: value };
     setAnswers(answersRef.current);
     persistLocalSoon();
+  };
+  const essayRef = useRef<HTMLTextAreaElement>(null);
+  /** Sisipkan simbol/huruf Arab di posisi kursor kolom jawaban essay. */
+  const insertIntoEssay = (text: string) => {
+    const q = questionsRef.current[currentIdx];
+    if (!q) return;
+    const ta = essayRef.current;
+    const cur: string = essaysRef.current[q.id] || '';
+    const s0 = ta ? Math.min(ta.selectionStart ?? cur.length, cur.length) : cur.length;
+    const e0 = ta ? Math.min(ta.selectionEnd ?? cur.length, cur.length) : cur.length;
+    setEssay(q.id, cur.slice(0, s0) + text + cur.slice(e0));
+    const pos = s0 + text.length;
+    requestAnimationFrame(() => { ta?.focus(); try { ta?.setSelectionRange(pos, pos); } catch { /* abaikan */ } });
   };
   const setEssay = (qid: string, value: string) => {
     essaysRef.current = { ...essaysRef.current, [qid]: value };
@@ -692,8 +706,11 @@ export default function CbtStudentExam() {
             <CardContent className="space-y-4">
               <RichTextDisplay html={rewriteImages(currentQ.question_text, imageMap)} className="text-base" />
               {isEssay ? (
-                <Textarea rows={8} className="select-text" placeholder="Tulis jawaban Anda..." value={essayAnswers[currentQ.id] || ''}
-                  onChange={e => setEssay(currentQ.id, e.target.value)} />
+                <div className="space-y-2">
+                  <Textarea ref={essayRef} dir="auto" rows={8} className="select-text" placeholder="Tulis jawaban Anda..." value={essayAnswers[currentQ.id] || ''}
+                    onChange={e => setEssay(currentQ.id, e.target.value)} />
+                  <SymbolPalette onInsert={insertIntoEssay} />
+                </div>
               ) : (
                 <RadioGroup value={answers[currentQ.id] || ''} onValueChange={v => setAnswer(currentQ.id, v)} className="space-y-2">
                   {['A','B','C','D','E'].map(opt => {
@@ -704,7 +721,7 @@ export default function CbtStudentExam() {
                       <label key={opt} htmlFor={`opt-${opt}`}
                         className={`flex items-start space-x-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${selected ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40 hover:bg-accent/30'}`}>
                         <RadioGroupItem value={opt} id={`opt-${opt}`} className="mt-0.5" />
-                        <span className="flex-1 text-sm min-w-0"><strong className="mr-1">{opt}.</strong> <OptionDisplay value={val} imageMap={imageMap} /></span>
+                        <span className="flex-1 text-sm min-w-0 flex items-start gap-1"><strong>{opt}.</strong><span className="flex-1 min-w-0"><OptionDisplay value={val} imageMap={imageMap} /></span></span>
                       </label>
                     );
                   })}
