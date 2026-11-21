@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
   Activity, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, Clock, Loader2, MoreHorizontal, Pause, Play, Power,
-  RefreshCcw, RotateCcw, Search, ShieldAlert, Users, WifiOff, X,
+  Printer, RefreshCcw, RotateCcw, Search, ShieldAlert, Users, WifiOff, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DashboardLayout } from '@/components/DashboardLayout';
@@ -15,6 +15,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { PdfPreviewDialog } from '@/components/piket/PdfPreviewDialog';
+import { PAPER_LABEL, type PdfPaper } from '@/lib/pdfPaper';
+import { ORDER_LABEL, buildCbtResultPdf, describeFilter, reportFileName, type ReportOrder } from '@/lib/cbtResultPdf';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -209,6 +213,17 @@ function StatCard({ label, value, tone, active, onClick, icon }: { label: string
   );
 }
 
+const PDF_PREFS_KEY = 'cbtMonitorPdfPrefs';
+const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+function loadPdfPrefs(): { paper: PdfPaper; order: ReportOrder; place: string } {
+  const d = { paper: 'a4' as PdfPaper, order: 'kelas-nama' as ReportOrder, place: '' };
+  try {
+    const j = JSON.parse(localStorage.getItem(PDF_PREFS_KEY) || '{}');
+    return { paper: j.paper === 'f4' ? 'f4' : 'a4', order: j.order === 'nama' ? 'nama' : 'kelas-nama', place: typeof j.place === 'string' ? j.place.slice(0, 60) : '' };
+  } catch { return d; }
+}
+function savePdfPrefs(p: { paper: PdfPaper; order: ReportOrder; place: string }) { try { localStorage.setItem(PDF_PREFS_KEY, JSON.stringify(p)); } catch { /* abaikan */ } }
+
 export default function CbtMonitor() {
   const { user, userRole } = useAuth();
   const { selectedYear } = useAcademicYear();
@@ -226,6 +241,16 @@ export default function CbtMonitor() {
   const [confirmState, setConfirmState] = useState<{ title: string; desc: string; label: string; destructive?: boolean; run: () => void } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [busy, setBusy] = useState<string | null>(null);
+
+  // ---- cetak / pratinjau PDF hasil ujian (pilihan terakhir diingat di perangkat ini)
+  const [pdfOpen, setPdfOpen] = useState(false);
+  const [paper, setPaper] = useState<PdfPaper>(() => loadPdfPrefs().paper);
+  const [order, setOrder] = useState<ReportOrder>(() => loadPdfPrefs().order);
+  const [placeInput, setPlaceInput] = useState(() => loadPdfPrefs().place);
+  const [place, setPlace] = useState(placeInput);
+  const [signDate, setSignDate] = useState(() => todayIso());
+  useEffect(() => { const t = setTimeout(() => setPlace(placeInput), 400); return () => clearTimeout(t); }, [placeInput]);
+  useEffect(() => { savePdfPrefs({ paper, order, place }); }, [paper, order, place]);
 
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 15_000); return () => clearInterval(t); }, []);
   // pencarian: tunda 250 ms supaya mengetik tidak menyaring ulang tiap huruf
@@ -274,7 +299,7 @@ export default function CbtMonitor() {
     queryKey: ['cbt-monitor-sessions', examId],
     queryFn: () => fetchAllPages<RawSession>((from, to) =>
       (supabase as any).from('cbt_exam_sessions')
-        .select('id, student_id, status, attempt_number, is_remedial, answered_count, time_remaining_seconds, last_activity_at, start_time, score, grading_status, students(full_name, nis, class_id, classes(name, grade))')
+        .select('id, student_id, status, attempt_number, is_remedial, answered_count, time_remaining_seconds, last_activity_at, start_time, score, correct_count, wrong_count, grading_status, students(full_name, nis, class_id, classes(name, grade))')
         .eq('exam_id', examId).order('id').range(from, to)),
     enabled: !!examId,
     refetchInterval: autoRefresh ? POLL_MS : false,
@@ -328,6 +353,24 @@ export default function CbtMonitor() {
   );
   const summary = useMemo(() => summarize(rows), [rows]);
 
+  // Pengaturan sekolah untuk kop & tanda tangan PDF. Panitia ujian tidak membaca tabel langsung: lewat fungsi server khusus ujian.
+  const viaRpc = userRole === 'panitia_ujian';
+  const settingsQ = useQuery({
+    queryKey: [viaRpc ? 'exam-settings' : 'school-settings'],
+    queryFn: async () => {
+      if (viaRpc) {
+        const { data, error } = await (supabase as any).rpc('exam_settings_get');
+        if (error) throw error;
+        return data as any;
+      }
+      const { data, error } = await supabase.from('school_settings').select('*').limit(1).maybeSingle();
+      if (error) throw error;
+      return data as any;
+    },
+    enabled: pdfOpen,
+    staleTime: 5 * 60_000,
+  });
+
   const classOptions = useMemo(() => {
     const m = new Map<string, string>();
     rows.forEach((r) => { if (r.classKey) m.set(r.classKey, r.classLabel); });
@@ -335,6 +378,15 @@ export default function CbtMonitor() {
   }, [rows]);
 
   const filtered = useMemo(() => applyFilter(rows, filter), [rows, filter]);
+  const buildPdf = async () => {
+    if (!exam) throw new Error('Pilih ujian terlebih dahulu.');
+    const st = settingsQ.data ?? (await settingsQ.refetch()).data;
+    if (!st) throw new Error('Pengaturan sekolah belum dimuat. Tutup lalu coba lagi.');
+    return buildCbtResultPdf({
+      exam, rows: filtered, order, paper, place: place || st.city_name || '', signDate,
+      filterText: describeFilter(filter, (k) => classOptions.find(([id]) => id === k)?.[1]),
+    }, st);
+  };
   const sorted = useMemo(() => sortRows(filtered, sort), [filtered, sort]);
   const safePage = clampPage(page, sorted.length, pageSize);
   const pageRows = useMemo(() => pageSlice(sorted, safePage, pageSize), [sorted, safePage, pageSize]);
@@ -491,6 +543,9 @@ export default function CbtMonitor() {
               <label className="flex items-center gap-2 text-xs text-muted-foreground whitespace-nowrap">
                 <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} /> Otomatis {POLL_MS / 1000} dtk
               </label>
+              <Button size="sm" variant="outline" onClick={() => setPdfOpen(true)} disabled={!examId || loadingFirst || filtered.length === 0} title="Pratinjau / cetak PDF hasil ujian sesuai saringan">
+                <Printer className="h-4 w-4 mr-1" /> Cetak PDF
+              </Button>
               <Button size="sm" variant="outline" onClick={refreshAll} disabled={!examId || sessionsQ.isFetching}>
                 {sessionsQ.isFetching ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCcw className="h-4 w-4 mr-1" />} {updatedAt}
               </Button>
@@ -618,6 +673,46 @@ export default function CbtMonitor() {
             </>
           )}
         </div>
+
+        <PdfPreviewDialog
+          open={pdfOpen}
+          onClose={() => setPdfOpen(false)}
+          title={`Pratinjau Hasil Ujian${exam ? ' — ' + exam.title : ''}`}
+          filename={exam ? reportFileName(exam) : 'Hasil_CBT.pdf'}
+          build={buildPdf}
+          rebuildKey={`${paper}|${order}|${place}|${signDate}`}
+          toolbar={
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Isi mengikuti saringan yang sedang aktif ({filtered.length} siswa: {describeFilter(filter, (k) => classOptions.find(([id]) => id === k)?.[1])}). Data diambil saat pratinjau dibuka atau pengaturan diubah.
+              </p>
+              <div className="flex flex-wrap items-end gap-3 rounded-md border bg-muted/30 p-3">
+                <div>
+                  <Label className="text-xs">Kertas</Label>
+                  <Select value={paper} onValueChange={(v) => setPaper(v as PdfPaper)}>
+                    <SelectTrigger className="w-44 h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>{(Object.keys(PAPER_LABEL) as PdfPaper[]).map((k) => <SelectItem key={k} value={k}>{PAPER_LABEL[k]}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Urutan</Label>
+                  <Select value={order} onValueChange={(v) => setOrder(v as ReportOrder)}>
+                    <SelectTrigger className="w-40 h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>{(Object.keys(ORDER_LABEL) as ReportOrder[]).map((k) => <SelectItem key={k} value={k}>{ORDER_LABEL[k]}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Tempat titimangsa</Label>
+                  <Input value={placeInput} maxLength={60} onChange={(e) => setPlaceInput(e.target.value)} placeholder="Ciamis" className="w-36 h-9" />
+                </div>
+                <div>
+                  <Label className="text-xs">Tanggal titimangsa</Label>
+                  <Input type="date" value={signDate} onChange={(e) => setSignDate(e.target.value)} className="w-40 h-9" />
+                </div>
+              </div>
+            </div>
+          }
+        />
 
         <DetailSheet row={detail} exam={exam} totalQ={totalQ} now={now} onClose={() => setDetail(null)} onAction={(r, a) => { setDetail(null); onRowAction(r, a); }} />
 
