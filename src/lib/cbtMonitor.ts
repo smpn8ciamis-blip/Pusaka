@@ -26,6 +26,8 @@ export interface RawSession {
   last_activity_at?: string | null;
   start_time?: string | null;
   score?: number | null;
+  correct_count?: number | null;
+  wrong_count?: number | null;
   grading_status?: string | null;
   students?: { full_name?: string | null; nis?: string | null; class_id?: string | null; classes?: { name?: string | null; grade?: string | number | null } | null } | null;
 }
@@ -59,6 +61,8 @@ export interface MonRow {
   violations: number;
   lastViolation: string | null;
   score: number | null;
+  correct: number | null;
+  wrong: number | null;
   needsGrading: boolean;
 }
 
@@ -112,6 +116,8 @@ export function buildRows(
       violations: v?.total || 0,
       lastViolation: v?.lastType || null,
       score: s.score == null ? null : Number(s.score),
+      correct: s.correct_count == null ? null : Number(s.correct_count),
+      wrong: s.wrong_count == null ? null : Number(s.wrong_count),
       needsGrading: status === 'selesai' && !!s.grading_status && s.grading_status !== 'fully_graded',
     });
   }
@@ -138,6 +144,8 @@ export function buildRows(
       violations: 0,
       lastViolation: null,
       score: null,
+      correct: null,
+      wrong: null,
       needsGrading: false,
     });
   }
