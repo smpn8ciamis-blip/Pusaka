@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Pagination, PaginationContent, PaginationItem, PaginationNext, PaginationPrevious } from '@/components/ui/pagination';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAcademicYear } from '@/contexts/AcademicYearContext';
@@ -38,13 +39,13 @@ export default function CbtExamManagement() {
   const { user, userRole } = useAuth();
   const { selectedYear } = useAcademicYear();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isQuestionsOpen, setIsQuestionsOpen] = useState(false);
   const [isResultsOpen, setIsResultsOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
-  const [isControlOpen, setIsControlOpen] = useState(false);
   const [isGradingOpen, setIsGradingOpen] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [isAnalysisOpen, setIsAnalysisOpen] = useState(false);
@@ -127,8 +128,7 @@ export default function CbtExamManagement() {
       if (error) throw error;
       return data || [];
     },
-    enabled: !!selectedExam?.id && (isResultsOpen || isControlOpen || isGradingOpen),
-    refetchInterval: isControlOpen ? 20000 : false,
+    enabled: !!selectedExam?.id && (isResultsOpen || isGradingOpen),
   });
 
   // Jumlah soal terjawab per sesi memakai kolom answered_count (tanpa mengunduh semua jawaban)
@@ -400,48 +400,6 @@ export default function CbtExamManagement() {
     onSuccess: (r) => {
       queryClient.invalidateQueries({ queryKey: ['schedule-students-grades'] });
       toast.success(`Nilai dikirim ke menu Nilai: ${r.synced} siswa` + (r.no_schedule ? `, ${r.no_schedule} siswa tanpa jadwal mapel yang cocok` : '') + (r.skipped ? `, ${r.skipped} belum selesai/menunggu koreksi` : ''));
-    },
-    onError: (e: any) => toast.error(e.message),
-  });
-
-  // Siswa dianggap offline bila denyut terakhir > 90 dtk lalu atau belum pernah mengirim denyut sama sekali.
-  // Hanya untuk konfirmasi di UI; logika server (cbt_finish_or_request) tidak berubah.
-  const OFFLINE_WARNING = 'Siswa ini offline, jawabannya mungkin belum terkirim. Tunggu atau lanjutkan akhiri?';
-  const isOfflineSession = (r: any) => {
-    if (!r?.last_activity_at) return true;
-    const t = new Date(r.last_activity_at).getTime();
-    return !Number.isFinite(t) || Date.now() - t > 90_000;
-  };
-  const confirmFinalize = (r: any) => (isOfflineSession(r) ? confirm(OFFLINE_WARNING) : confirm('Akhiri ujian siswa ini?'));
-
-  // Control panel actions
-  const sessionActionMutation = useMutation({
-    mutationFn: async ({ id, action }: { id: string; action: 'pause' | 'resume' | 'finalize' | 'reset' }) => {
-      if (action === 'pause') {
-        await supabase.from('cbt_exam_sessions').update({ status: 'paused' }).eq('id', id);
-      } else if (action === 'resume') {
-        await supabase.from('cbt_exam_sessions').update({ status: 'in_progress', last_activity_at: new Date().toISOString() }).eq('id', id);
-      } else if (action === 'finalize') {
-        // Jawaban siswa tersimpan di perangkatnya sampai ia menekan Selesai. Akhiri = MINTA perangkat siswa
-        // mengumpulkan jawaban (nilai tidak 0); dipaksa langsung bila siswa tidak aktif / permintaan tidak dipenuhi.
-        const r = await (supabase as any).rpc('cbt_finish_or_request', { p_session_id: id });
-        if (r.error) {
-          if (r.error.code === 'PGRST202' || r.error.code === '42883') {
-            const { error } = await (supabase as any).rpc('cbt_force_finish', { p_session_id: id });
-            if (error) throw error;
-          } else throw r.error;
-        } else if (r.data?.requested) {
-          return { requested: true } as const;
-        }
-      } else if (action === 'reset') {
-        await supabase.from('cbt_student_answers').delete().eq('session_id', id);
-        await supabase.from('cbt_exam_sessions').delete().eq('id', id);
-      }
-    },
-    onSuccess: (res: any) => {
-      queryClient.invalidateQueries({ queryKey: ['cbt-results'] });
-      if (res?.requested) toast.info('Permintaan kumpul dikirim ke perangkat siswa. Jawaban masuk otomatis dalam ±1 menit; tekan Akhiri lagi bila belum selesai.');
-      else toast.success('Aksi berhasil');
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -762,7 +720,7 @@ export default function CbtExamManagement() {
   }, [gradingAnswers]);
 
   return (
-    <ProtectedRoute allowedRoles={['teacher', 'admin']}>
+    <ProtectedRoute allowedRoles={['teacher', 'admin', 'panitia_ujian']}>
       <DashboardLayout>
         <div className="space-y-6 animate-fade-in">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -825,7 +783,7 @@ export default function CbtExamManagement() {
                         <TableCell>
                           <div className="flex gap-1 justify-end">
                             <Button variant="ghost" size="icon" title="Kelola Soal" onClick={() => { setSelectedExam(exam); setIsQuestionsOpen(true); }}><FileSpreadsheet className="h-4 w-4" /></Button>
-                            <Button variant="ghost" size="icon" title="Control Panel" onClick={() => { setSelectedExam(exam); setIsControlOpen(true); }}><Activity className="h-4 w-4 text-blue-600" /></Button>
+                            <Button variant="ghost" size="icon" title="Pantau siswa (Pantau CBT)" onClick={() => navigate(`/cbt-monitor?exam=${exam.id}`)}><Activity className="h-4 w-4 text-blue-600" /></Button>
                             <Button variant="ghost" size="icon" title="Hasil" onClick={() => { setSelectedExam(exam); setIsResultsOpen(true); }}><Users className="h-4 w-4" /></Button>
                             {exam.grade_component && (
                               <Button variant="ghost" size="icon" title={`Kirim ulang nilai ke menu Nilai (${exam.grade_component.toUpperCase()})`} disabled={syncGradesMutation.isPending} onClick={() => syncGradesMutation.mutate(exam.id)}><RefreshCcw className="h-4 w-4 text-emerald-600" /></Button>
@@ -1042,153 +1000,6 @@ export default function CbtExamManagement() {
                     </div>
                   ))}
               </div>
-            </DialogContent>
-          </Dialog>
-
-          {/* Control Panel - Live Monitoring (Modern) */}
-          <Dialog open={isControlOpen} onOpenChange={setIsControlOpen}>
-            <DialogContent className="max-w-6xl max-h-[92vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <Activity className="h-5 w-5 text-blue-600 animate-pulse" />
-                  Live Monitor: {selectedExam?.title}
-                </DialogTitle>
-                <DialogDescription className="flex items-center gap-2 text-xs">
-                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 animate-pulse" /> Auto-refresh setiap 5 detik
-                  {selectedExam?.duration_minutes && <span>• Durasi: {selectedExam.duration_minutes} menit</span>}
-                  {selectedExam?.exam_token && <span className="font-mono">• Token: {selectedExam.exam_token}</span>}
-                </DialogDescription>
-              </DialogHeader>
-
-              {/* Stats */}
-              {(() => {
-                const inProg = (examResults || []).filter((r: any) => r.status === 'in_progress');
-                const paused = (examResults || []).filter((r: any) => r.status === 'paused');
-                const done = (examResults || []).filter((r: any) => r.status === 'completed');
-                const totalQ = selectedExam?.total_questions || 0;
-                const avgProgress = inProg.length && totalQ ? Math.round(inProg.reduce((s: number, r: any) => s + Math.min(100, ((answerCounts?.[r.id] || 0) / totalQ) * 100), 0) / inProg.length) : 0;
-                return (
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-                    <Card className="border-blue-200 bg-blue-50/50 dark:bg-blue-950/20"><CardContent className="p-3"><p className="text-xs text-muted-foreground">Sedang Ujian</p><p className="text-2xl font-bold text-blue-600">{inProg.length}</p></CardContent></Card>
-                    <Card className="border-amber-200 bg-amber-50/50 dark:bg-amber-950/20"><CardContent className="p-3"><p className="text-xs text-muted-foreground">Dijeda</p><p className="text-2xl font-bold text-amber-600">{paused.length}</p></CardContent></Card>
-                    <Card className="border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20"><CardContent className="p-3"><p className="text-xs text-muted-foreground">Selesai</p><p className="text-2xl font-bold text-emerald-600">{done.length}</p></CardContent></Card>
-                    <Card><CardContent className="p-3"><p className="text-xs text-muted-foreground">Total Sesi</p><p className="text-2xl font-bold">{examResults?.length || 0}</p></CardContent></Card>
-                    <Card><CardContent className="p-3"><p className="text-xs text-muted-foreground">Rata-rata Progres</p><p className="text-2xl font-bold">{avgProgress}%</p></CardContent></Card>
-                  </div>
-                );
-              })()}
-
-              {/* Bulk actions */}
-              <div className="flex flex-wrap gap-2 mb-3">
-                <Button size="sm" variant="outline" onClick={() => {
-                  const inProg = (examResults || []).filter((r: any) => r.status === 'in_progress');
-                  if (!inProg.length) return toast.info('Tidak ada sesi aktif');
-                  if (confirm(`Jeda ${inProg.length} sesi yang sedang berjalan?`)) {
-                    inProg.forEach((r: any) => sessionActionMutation.mutate({ id: r.id, action: 'pause' }));
-                  }
-                }}><Pause className="h-3 w-3 mr-1" /> Jeda Semua</Button>
-                <Button size="sm" variant="outline" onClick={() => {
-                  const paused = (examResults || []).filter((r: any) => r.status === 'paused');
-                  if (!paused.length) return toast.info('Tidak ada sesi dijeda');
-                  if (confirm(`Lanjutkan ${paused.length} sesi yang dijeda?`)) {
-                    paused.forEach((r: any) => sessionActionMutation.mutate({ id: r.id, action: 'resume' }));
-                  }
-                }}><Play className="h-3 w-3 mr-1" /> Resume Semua</Button>
-                <Button size="sm" variant="destructive" onClick={() => {
-                  const active = (examResults || []).filter((r: any) => r.status !== 'completed');
-                  if (!active.length) return toast.info('Tidak ada sesi aktif');
-                  const offline = active.filter(isOfflineSession).length;
-                  const warn = offline > 0 ? `\n\n${offline} siswa offline (tidak ada denyut > 90 dtk atau belum pernah mengirim). Jawaban mereka mungkin belum terkirim. Tunggu atau lanjutkan akhiri?` : '';
-                  if (confirm(`Akhiri ${active.length} sesi? Perangkat siswa diminta mengumpulkan jawabannya; siswa yang tidak aktif diakhiri langsung. Tidak bisa dibatalkan.${warn}`)) {
-                    active.forEach((r: any) => sessionActionMutation.mutate({ id: r.id, action: 'finalize' }));
-                  }
-                }}><Power className="h-3 w-3 mr-1" /> Akhiri Semua</Button>
-                <Button size="sm" variant="ghost" onClick={() => queryClient.invalidateQueries({ queryKey: ['cbt-results'] })}>
-                  <RefreshCcw className="h-3 w-3 mr-1" /> Refresh
-                </Button>
-              </div>
-
-              {/* Modern card grid */}
-              {(!examResults || examResults.length === 0) ? (
-                <div className="text-center py-12 text-muted-foreground border rounded-lg bg-muted/20">
-                  <Activity className="h-10 w-10 mx-auto mb-2 opacity-30" />
-                  <p>Belum ada peserta yang memulai ujian</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {examResults.map((r: any) => {
-                    const totalQ = selectedExam?.total_questions || 0;
-                    const answered = answerCounts?.[r.id] || 0;
-                    const progress = totalQ > 0 ? Math.min(100, Math.round((answered / totalQ) * 100)) : 0;
-                    const remainingMin = r.time_remaining_seconds ? Math.floor(r.time_remaining_seconds / 60) : 0;
-                    const remainingSec = r.time_remaining_seconds ? r.time_remaining_seconds % 60 : 0;
-                    const lastAct = r.last_activity_at ? new Date(r.last_activity_at) : null;
-                    const lastActMin = lastAct ? Math.floor((Date.now() - lastAct.getTime()) / 60000) : null;
-                    const isStale = lastActMin !== null && lastActMin > 2 && r.status === 'in_progress';
-                    const statusColor = r.status === 'in_progress' ? 'border-blue-300 bg-blue-50/40 dark:bg-blue-950/20'
-                      : r.status === 'paused' ? 'border-amber-300 bg-amber-50/40 dark:bg-amber-950/20'
-                      : r.status === 'completed' ? 'border-emerald-300 bg-emerald-50/40 dark:bg-emerald-950/20'
-                      : 'border-border';
-                    const cls = (r.students?.classes as any);
-                    return (
-                      <Card key={r.id} className={`${statusColor} transition-shadow hover:shadow-md`}>
-                        <CardContent className="p-3 space-y-2">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="font-semibold text-sm truncate">{(r.students as any)?.full_name || 'Tanpa nama'}</p>
-                              <p className="text-xs text-muted-foreground truncate">
-                                {(r.students as any)?.nis || '-'} {cls && `• ${cls.grade} ${cls.name}`}
-                              </p>
-                            </div>
-                            <Badge variant={r.status === 'completed' ? 'default' : r.status === 'paused' ? 'secondary' : 'outline'} className="text-[10px]">
-                              {r.status === 'in_progress' ? 'Mengerjakan' : r.status === 'paused' ? 'Dijeda' : r.status === 'completed' ? 'Selesai' : r.status}
-                            </Badge>
-                          </div>
-
-                          {r.status !== 'completed' && (
-                            <>
-                              <div>
-                                <div className="flex justify-between text-[11px] mb-0.5">
-                                  <span className="text-muted-foreground">Progres</span>
-                                  <span className="font-medium">{answered}/{totalQ} ({progress}%)</span>
-                                </div>
-                                <Progress value={progress} className="h-1.5" />
-                              </div>
-                              <div className="flex items-center justify-between text-[11px]">
-                                <span className="flex items-center gap-1 text-muted-foreground">
-                                  <Clock className="h-3 w-3" /> Sisa: <span className="font-mono font-medium">{String(remainingMin).padStart(2, '0')}:{String(remainingSec).padStart(2, '0')}</span>
-                                </span>
-                                {lastAct && (
-                                  <span className={isStale ? 'text-destructive font-medium' : 'text-muted-foreground'}>
-                                    {isStale && '⚠ '}{lastActMin === 0 ? 'baru saja' : `${lastActMin}m lalu`}
-                                  </span>
-                                )}
-                              </div>
-                            </>
-                          )}
-
-                          {r.status === 'completed' && (
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="text-muted-foreground">Skor</span>
-                              <span className={`font-bold text-lg ${r.score >= (selectedExam?.pass_score || 70) ? 'text-emerald-600' : 'text-destructive'}`}>{r.score?.toFixed(1) || '-'}</span>
-                            </div>
-                          )}
-
-                          <div className="flex items-center justify-between pt-1 border-t">
-                            <span className="text-[10px] text-muted-foreground">Percobaan #{r.attempt_number || 1}{r.is_remedial && <Badge variant="outline" className="ml-1 px-1 py-0 text-[9px] border-amber-500 text-amber-600">Remidial</Badge>}</span>
-                            <div className="flex gap-1">
-                              {r.status === 'in_progress' && <Button size="icon" variant="ghost" className="h-7 w-7" title="Jeda" onClick={() => sessionActionMutation.mutate({ id: r.id, action: 'pause' })}><Pause className="h-3 w-3" /></Button>}
-                              {r.status === 'paused' && <Button size="icon" variant="ghost" className="h-7 w-7" title="Resume" onClick={() => sessionActionMutation.mutate({ id: r.id, action: 'resume' })}><Play className="h-3 w-3" /></Button>}
-                              {r.status !== 'completed' && <Button size="icon" variant="ghost" className="h-7 w-7" title="Akhiri" onClick={() => { if (confirmFinalize(r)) sessionActionMutation.mutate({ id: r.id, action: 'finalize' }); }}><Power className="h-3 w-3" /></Button>}
-                              <Button size="icon" variant="ghost" className="h-7 w-7" title="Reset" onClick={() => { if (confirm('Reset sesi ini? Semua jawaban akan dihapus.')) sessionActionMutation.mutate({ id: r.id, action: 'reset' }); }}><RefreshCcw className="h-3 w-3 text-destructive" /></Button>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    );
-                  })}
-                </div>
-              )}
             </DialogContent>
           </Dialog>
 

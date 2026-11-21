@@ -13,7 +13,7 @@ import {
   Award, FileSignature, Plane, Receipt, FileSpreadsheet, Wallet, FileBarChart,
   Inbox, Send, Hammer, Vote, Upload, Bell, Lock, Landmark, Server, UserMinus,
   Sunrise, Sparkles, CreditCard, ScanLine, LayoutDashboard, Search, Star, Moon, CalendarDays, KeyRound, Fingerprint, Briefcase, HeartHandshake,
-  Gauge, Images, Phone, UserPlus, Printer, Globe,
+  Gauge, Images, Phone, UserPlus, Printer, Globe, Activity,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -299,6 +299,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         { icon: TrendingUp, label: 'Analytics Nilai', href: '/grade-analytics' },
         { icon: FileCheck, label: 'Administrasi Ujian', href: '/exam-administration' },
         { icon: FileCheck, label: 'Ujian CBT', href: '/cbt-management' },
+        { icon: Activity, label: 'Pantau CBT', href: '/cbt-monitor' },
       ],
     },
     {
@@ -475,6 +476,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: FileText, label: 'Catatan Kejadian Penting', href: '/important-event-notes' },
     { icon: FileSignature, label: 'Surat Tugas & SPPD', href: '/my-letters' },
     { icon: FileCheck, label: 'Ujian CBT', href: '/cbt-management' },
+    { icon: Activity, label: 'Pantau CBT', href: '/cbt-monitor' },
     { icon: GraduationCap, label: 'E-Learning', href: '/elearning' },
     { icon: FolderOpen, label: 'Repositori', href: '/repository' },
     { icon: Sparkles, label: 'Nedelcis Hub', href: '/nedelcis-hub' },
@@ -645,6 +647,8 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { icon: LayoutDashboard, label: 'Dashboard Panitia Ujian', href: '/panitia-ujian-dashboard' },
     { icon: CalendarClock, label: 'Nama & Jadwal Ujian', href: '/panitia-ujian/jadwal' },
     { icon: FileCheck, label: 'Administrasi Ujian', href: '/exam-administration' },
+    { icon: Activity, label: 'Pantau CBT', href: '/cbt-monitor' },
+    { icon: FileCheck, label: 'Ujian CBT', href: '/cbt-management' },
   ];
 
   const korlasMenuItems: MenuItem[] = [

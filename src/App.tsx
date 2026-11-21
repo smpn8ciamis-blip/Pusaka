@@ -125,6 +125,7 @@ const DispensasiSiswa = lazy(() => import("./pages/DispensasiSiswa"));
 const BukuTamu = lazy(() => import("./pages/BukuTamu"));
 const SeedDatabase = lazy(() => import("./pages/SeedDatabase"));
 const CbtExamManagement = lazy(() => import("./pages/CbtExamManagement"));
+const CbtMonitor = lazy(() => import("./pages/CbtMonitor"));
 const CbtStudentExam = lazy(() => import("./pages/CbtStudentExam"));
 const NedelcisHub = lazy(() => import("./pages/NedelcisHub"));
 const PortalTautanGuru = lazy(() => import("./pages/PortalTautanGuru"));
@@ -389,7 +390,8 @@ const App = () => (
               <Route path="/ekskul-members" element={<EkskulAccessRoute><EkskulMembers /></EkskulAccessRoute>} />
               <Route path="/ekskul-coaches" element={<ProtectedRoute allowedRoles={['kesiswaan', 'admin']}><EkskulCoaches /></ProtectedRoute>} />
               <Route path="/ekskul-types" element={<ProtectedRoute allowedRoles={['kesiswaan', 'admin']}><EkskulTypes /></ProtectedRoute>} />
-              <Route path="/cbt-management" element={<ProtectedRoute allowedRoles={['teacher', 'admin']}><CbtExamManagement /></ProtectedRoute>} />
+              <Route path="/cbt-management" element={<ProtectedRoute allowedRoles={['teacher', 'admin', 'panitia_ujian']}><CbtExamManagement /></ProtectedRoute>} />
+              <Route path="/cbt-monitor" element={<ProtectedRoute allowedRoles={['teacher', 'admin', 'super_admin', 'panitia_ujian']}><CbtMonitor /></ProtectedRoute>} />
               <Route path="/cbt-student" element={<ProtectedRoute allowedRoles={['siswa']}><CbtStudentExam /></ProtectedRoute>} />
               <Route path="/nedelcis-hub" element={<NedelcisHub />} />
               <Route path="/portal-tautan-guru" element={<PortalTautanGuru />} />
