@@ -23,6 +23,7 @@ import { DraftNumberInput } from "@/components/exam/DraftNumberInput";
 import { buildRooms, filterRoomsKeepNumbers, validateStartNumbers, DEFAULT_START_NUMBERS, snakeTableNumber } from "@/lib/examSeating";
 import { buildClassColorMap, createImageLoader, fitText, ellipsize, shortDateLabel } from "@/lib/examPdf";
 import { PAPER_LABEL, paperFormat, type PdfPaper } from "@/lib/pdfPaper";
+import { layoutIdentityRows } from "@/lib/examCardLayout";
 
 
 interface Student {
@@ -192,6 +193,25 @@ const ExamAdministration = () => {
     gcTime: 10 * 60 * 1000, // 10 minutes
   });
 
+  // Username (email login) siswa untuk kartu peserta, lewat fungsi server (panitia tidak membaca tabel akun langsung).
+  // Bila migrasi 20261121170000_exam_student_usernames.sql belum dijalankan, kartu tetap tercetak dengan "-".
+  const { data: usernameMap, refetch: refetchUsernames } = useQuery({
+    queryKey: ['exam-student-usernames'],
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const map = new Map<string, string>();
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await (supabase as any).rpc('exam_student_usernames').range(from, from + 999);
+        if (error) throw error;
+        (data || []).forEach((r: any) => { if (r?.student_id && r?.username) map.set(r.student_id, String(r.username)); });
+        if (!data || data.length < 1000) break;
+      }
+      return map;
+    },
+  });
+  const usernameOf = (studentId: string): string => usernameMap?.get(studentId) || '-'; // pratinjau layar
+
   // Semua pengaturan yang disimpan (kartu + ruang + nomor peserta) dalam satu objek
   const startNumbers: Record<string, number> = {
     '7': startingExamNumberGrade7, '8': startingExamNumberGrade8, '9': startingExamNumberGrade9,
@@ -342,10 +362,19 @@ const ExamAdministration = () => {
     setPrintProgress({ open: true, value: 0, current: 0, total: totalCards, label: 'Menyiapkan kartu ujian...' });
     startKeepAlive();
 
+    // username siswa: pakai data yang sudah dimuat, atau muat sekarang; gagal (migrasi belum dijalankan) → kartu tetap dicetak dengan "-"
+    let unameMap = usernameMap;
+    if (!unameMap) {
+      try { unameMap = (await refetchUsernames()).data; } catch { unameMap = undefined; }
+    }
+    if (!unameMap) toast.warning('Username siswa tidak dapat dimuat, kolom Username dicetak "-". Pastikan migrasi 20261121170000_exam_student_usernames.sql sudah dijalankan.', { duration: 9000 });
+
     try {
       const doc = new jsPDF('portrait', 'mm', paperFormat(paper));
       const loadImg = createImageLoader(); // logo, tanda tangan, stempel hanya dimuat sekali
       let scheduleHidden = 0; // jumlah sesi jadwal yang tidak muat pada kartu
+      let signatureSkipped = 0; // kartu yang tanda tangannya dilewati karena tidak ada ruang
+      let identityOverflow = 0; // kelebihan tinggi data peserta melampaui tepi kartu (mm)
 
       // Card layout based on selected size
       let cardsPerPage: number;
@@ -412,7 +441,7 @@ const ExamAdministration = () => {
           const innerW = cardWidth - pad * 2;
 
           // Reserved heights
-          const sigReserved = Math.max(16, cardHeight * 0.22); // bottom area for signature
+          const sigReserved = Math.max(16, Math.min(cardHeight * 0.2, 20)); // bottom area for signature (dibatasi agar jadwal tetap muat)
           const usableH = cardHeight - sigReserved - pad;
 
           // Background + border
@@ -449,7 +478,8 @@ const ExamAdministration = () => {
             doc.text(t, centerX, currentY + 2.5, { align: "center" });
             currentY += fs(3);
           }
-          if (settings?.school_address) {
+          const compact = cardHeight < 70; // kartu pendek: alamat dilewati, tahun pelajaran digabung ke nama ujian
+          if (settings?.school_address && !compact) {
             doc.setFont("helvetica", "normal");
             doc.setTextColor(71, 85, 105);
             const t = fitText(doc, settings.school_address, headerTextW, fs(4.5), 3);
@@ -473,10 +503,11 @@ const ExamAdministration = () => {
           currentY += fs(3);
           if (settings?.exam_name) {
             doc.setTextColor(30, 41, 59);
-            doc.text(fitText(doc, settings.exam_name, innerW, fs(5), 3), centerX, currentY, { align: "center" });
+            const examLine = compact && settings?.academic_year ? `${settings.exam_name} • TP ${settings.academic_year}` : settings.exam_name;
+            doc.text(fitText(doc, examLine, innerW, fs(5), 3), centerX, currentY, { align: "center" });
             currentY += fs(2.5);
           }
-          if (settings?.academic_year) {
+          if (settings?.academic_year && !compact) {
             doc.setFontSize(fs(4.5));
             doc.setFont("helvetica", "normal");
             doc.setTextColor(71, 85, 105);
@@ -513,37 +544,44 @@ const ExamAdministration = () => {
             }
           }
 
-          // Identity rows (left of photo, or full width when photo hidden)
-          const labelX = cardX + pad;
-          const labelW = Math.max(18, innerW * 0.22);
-          const valueX = labelX + labelW;
-          const valueW = showPhotoOnCard
-            ? (cardWidth - pad - photoW - 2) - valueX + cardX
-            : (cardX + cardWidth - pad) - valueX;
-          const rowH = fs(3.2);
+          // Identity rows: kolom sempit di kiri foto; baris yang jatuh di bawah foto memakai lebar penuh
           const infoFs = fs(4.8);
+          const rowH = fs(2.9);
           const ttlBirth = [seat.student.birth_place, seat.student.birth_date ? formatDateWithMonthName(new Date(seat.student.birth_date)) : ''].filter(Boolean).join(', ');
 
-          const idRows: Array<[string, string]> = [
-            ["No. Peserta", seat.examNumber.toString()],
-            ["NIS", seat.student.nis || '-'],
-            ["NISN", seat.student.nisn || '-'],
-            ["Nama", toTitleCase(seat.student.full_name)],
-            ["TTL", ttlBirth || '-'],
-            ["Kelas", seat.student.classes.name],
+          const idRows: Array<{ label: string; value: string; maxLines?: number }> = [
+            { label: "No. Peserta", value: seat.examNumber.toString(), maxLines: 1 },
+            { label: "NIS", value: seat.student.nis || '-', maxLines: 1 },
+            { label: "NISN", value: seat.student.nisn || '-', maxLines: 1 },
+            { label: "Nama", value: toTitleCase(seat.student.full_name), maxLines: 2 },
+            { label: "Kelas", value: seat.student.classes.name, maxLines: 1 },
+            { label: "TTL", value: ttlBirth || '-', maxLines: 2 },
+            { label: "Username", value: unameMap?.get(seat.student.id) || '-', maxLines: 2 },
           ];
 
-          doc.setFontSize(infoFs);
-          let infoY = currentY + fs(2.2);
-          idRows.forEach(([label, value]) => {
+          // lebar kolom label mengikuti label terpanjang (bukan angka tetap) agar tidak menabrak nilai
+          doc.setFont("helvetica", "bold"); doc.setFontSize(infoFs);
+          const labelW = Math.min(innerW * 0.4, Math.max(...idRows.map(r => doc.getTextWidth(r.label))) + 3.5);
+          const labelX = cardX + pad;
+          const valueX = labelX + labelW;
+          const rightLimit = cardX + cardWidth - pad;
+          const narrowW = (showPhotoOnCard ? rightLimit - photoW - 2 : rightLimit) - valueX;
+          const fullW = rightLimit - valueX;
+          doc.setFont("helvetica", "normal"); // pengukuran nilai memakai huruf biasa
+          const infoStartY = currentY + fs(2.2);
+          const { placed, endY } = layoutIdentityRows(
+            (t) => doc.getTextWidth(t), idRows,
+            { startY: infoStartY, rowH, narrowW, fullW, photoBottom: showPhotoOnCard ? photoY + photoH + 1.8 : -1 },
+          );
+          placed.forEach((r) => {
             doc.setFont("helvetica", "bold"); doc.setTextColor(71, 85, 105);
-            doc.text(label, labelX, infoY);
+            doc.text(r.label, labelX, r.y);
             doc.setFont("helvetica", "normal"); doc.setTextColor(30, 41, 59);
-            doc.text(":", labelX + labelW - 2, infoY);
-            const lines = doc.splitTextToSize(value, valueW);
-            doc.text(lines.slice(0, 2), valueX, infoY);
-            infoY += rowH * Math.max(1, Math.min(2, lines.length));
+            doc.text(":", valueX - 2, r.y);
+            r.lines.forEach((ln, li) => doc.text(ln, valueX, r.y + li * rowH));
           });
+          const infoY = endY;
+          identityOverflow = Math.max(identityOverflow, infoY - (cardY + cardHeight - 2));
           currentY = Math.max(infoY, photoY + photoH) + 1.5;
 
 
@@ -610,46 +648,51 @@ const ExamAdministration = () => {
           }
 
           // ---------- SIGNATURE (strictly inside reserved area, no overlap) ----------
-          const sigTop = cardY + cardHeight - sigReserved + 1;
-          const sigCenterX = cardX + cardWidth * 0.72; // right-aligned block
-          const sigBlockW = cardWidth * 0.5;
-          const today = new Date();
-          const dateStr = formatDateWithMonthName(today);
-          doc.setFontSize(fs(4.2));
-          doc.setFont("helvetica", "normal");
-          doc.setTextColor(71, 85, 105);
-          doc.text(`${(settings as any)?.city_name || 'Ciamis'}, ${dateStr}`, sigCenterX, sigTop, { align: "center", maxWidth: sigBlockW });
-          doc.setFont("helvetica", "bold");
-          doc.setTextColor(30, 41, 59);
-          doc.text((settings as any)?.headmaster_position || "Kepala Sekolah", sigCenterX, sigTop + fs(2.2), { align: "center", maxWidth: sigBlockW });
-
-          // Signature image (centered in sig column)
-          const sigImgW = Math.min(sigBlockW * 0.55, 18);
-          const sigImgH = sigImgW * 0.55;
-          const sigImgY = sigTop + fs(3);
-          if (settings?.headmaster_signature_url) {
-            const sg = await loadImg(settings.headmaster_signature_url);
-            if (sg) doc.addImage(sg, 'PNG', sigCenterX - sigImgW / 2, sigImgY, sigImgW, sigImgH, 'kartuTtd');
-          }
-          // Stamp - placed to the LEFT of name signature, half-overlapping signature only
-          if (settings?.school_stamp_url) {
-            const st = await loadImg(settings.school_stamp_url);
-            if (st) {
-              const stampSize = Math.min(sigReserved * 0.7, 14);
-              doc.addImage(st, 'PNG', sigCenterX - sigImgW * 0.6 - stampSize * 0.3, sigImgY - stampSize * 0.2, stampSize, stampSize, 'kartuStempel');
-            }
-          }
-          // Headmaster name + NIP
-          const nameY = sigTop + sigReserved - fs(3);
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(fs(4.2));
-          doc.setTextColor(30, 41, 59);
-          doc.text(settings?.headmaster_name || "___________________", sigCenterX, nameY, { align: "center", maxWidth: sigBlockW });
-          if (settings?.headmaster_nip) {
+          // tanda tangan hanya digambar bila tidak menimpa data peserta/jadwal di atasnya
+          if (cardY + cardHeight - sigReserved + 1 >= currentY - 0.5) {
+            const sigTop = cardY + cardHeight - sigReserved + 1;
+            const sigCenterX = cardX + cardWidth * 0.72; // right-aligned block
+            const sigBlockW = cardWidth * 0.5;
+            const today = new Date();
+            const dateStr = formatDateWithMonthName(today);
+            doc.setFontSize(fs(4.2));
             doc.setFont("helvetica", "normal");
-            doc.setFontSize(fs(3.5));
             doc.setTextColor(71, 85, 105);
-            doc.text(`NIP. ${settings.headmaster_nip}`, sigCenterX, nameY + fs(2), { align: "center", maxWidth: sigBlockW });
+            doc.text(`${(settings as any)?.city_name || 'Ciamis'}, ${dateStr}`, sigCenterX, sigTop, { align: "center", maxWidth: sigBlockW });
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(30, 41, 59);
+            doc.text((settings as any)?.headmaster_position || "Kepala Sekolah", sigCenterX, sigTop + fs(2.2), { align: "center", maxWidth: sigBlockW });
+
+            // Signature image (centered in sig column)
+            const sigImgW = Math.min(sigBlockW * 0.55, 18);
+            const sigImgH = sigImgW * 0.55;
+            const sigImgY = sigTop + fs(3);
+            if (settings?.headmaster_signature_url) {
+              const sg = await loadImg(settings.headmaster_signature_url);
+              if (sg) doc.addImage(sg, 'PNG', sigCenterX - sigImgW / 2, sigImgY, sigImgW, sigImgH, 'kartuTtd');
+            }
+            // Stamp - placed to the LEFT of name signature, half-overlapping signature only
+            if (settings?.school_stamp_url) {
+              const st = await loadImg(settings.school_stamp_url);
+              if (st) {
+                const stampSize = Math.min(sigReserved * 0.7, 14);
+                doc.addImage(st, 'PNG', sigCenterX - sigImgW * 0.6 - stampSize * 0.3, sigImgY - stampSize * 0.2, stampSize, stampSize, 'kartuStempel');
+              }
+            }
+            // Headmaster name + NIP
+            const nameY = sigTop + sigReserved - fs(3);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(fs(4.2));
+            doc.setTextColor(30, 41, 59);
+            doc.text(settings?.headmaster_name || "___________________", sigCenterX, nameY, { align: "center", maxWidth: sigBlockW });
+            if (settings?.headmaster_nip) {
+              doc.setFont("helvetica", "normal");
+              doc.setFontSize(fs(3.5));
+              doc.setTextColor(71, 85, 105);
+              doc.text(`NIP. ${settings.headmaster_nip}`, sigCenterX, nameY + fs(2), { align: "center", maxWidth: sigBlockW });
+            }
+          } else {
+            signatureSkipped++;
           }
 
           cardCount++;
@@ -668,6 +711,14 @@ const ExamAdministration = () => {
       setPrintProgress(p => ({ ...p, value: 100, label: 'Menyimpan PDF...' }));
       doc.save(`kartu-ujian-${rooms.length}-ruangan-${cardCount}-kartu.pdf`);
       toast.success(`${cardCount} kartu ujian berhasil dicetak (${Math.ceil(cardCount/cardsPerPage)} halaman ${paper.toUpperCase()})`);
+      if (identityOverflow > 0.5 || signatureSkipped > 0) {
+        toast.warning(
+          identityOverflow > 0.5
+            ? 'Ukuran kartu terlalu kecil: data peserta melewati tepi kartu. Pilih ukuran 63x103 atau 100x80 mm, atau kecilkan skala tulisan.'
+            : `Tanda tangan tidak dicetak karena kartu terlalu pendek (${signatureSkipped} kartu). Pilih ukuran 63x103 atau 100x80 mm.`,
+          { duration: 9000 },
+        );
+      }
       if (scheduleHidden > 0) {
         toast.warning(`Jadwal pada kartu tidak muat (${scheduleHidden} sesi tidak tampil). Perbesar ukuran kartu atau kecilkan skala tulisan.`, { duration: 9000 });
       }
@@ -2093,7 +2144,7 @@ const ExamAdministration = () => {
             <CardTitle>Informasi</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <p><strong>Kartu Ujian:</strong> Mencetak kartu peserta untuk setiap siswa dengan nomor ruangan, nomor meja, NIS, nama, dan kelas.</p>
+            <p><strong>Kartu Ujian:</strong> Mencetak kartu peserta untuk setiap siswa dengan nomor ruangan, nomor meja, NIS, nama, kelas, dan username.</p>
             <p><strong>Denah Duduk:</strong> Mencetak peta ruangan dengan posisi duduk setiap siswa untuk semua ruangan yang diperlukan.</p>
             <p><strong>Nomor Meja:</strong> Mencetak 30 nomor meja per halaman F4 (5 kolom x 6 baris) dengan desain modern yang menampilkan ruang, nomor meja, nama peserta, nomor peserta, dan kelas. Kartu dapat ditempel di setiap meja ujian.</p>
             <p><strong>Rekap Komposisi Ruangan:</strong> Mencetak rekap lengkap semua peserta ujian yang diurutkan berdasarkan kelas, termasuk statistik distribusi siswa per ruangan.</p>
@@ -2209,6 +2260,10 @@ const ExamAdministration = () => {
                         <div className="flex">
                           <span className="font-bold w-24">Kelas:</span>
                           <span>{seat.student.classes.name}</span>
+                        </div>
+                        <div className="flex">
+                          <span className="font-bold w-24">Username:</span>
+                          <span className="break-all">{usernameOf(seat.student.id)}</span>
                         </div>
                       </div>
                       {/* Photo Frame */}
