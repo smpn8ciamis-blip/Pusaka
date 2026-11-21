@@ -688,3 +688,6 @@ mark {
 [data-radix-popper-content-wrapper] {
   pointer-events: auto;
 }
+
+/* Soal/jawaban CBT: campuran Arab (kanan-ke-kiri) dan Latin. Tiap paragraf menentukan arahnya sendiri dari huruf pertamanya. */
+.bidi-auto p, .bidi-auto li, .bidi-auto h1, .bidi-auto h2, .bidi-auto h3 { unicode-bidi: plaintext; text-align: start; }
