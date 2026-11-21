@@ -25,6 +25,8 @@ import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { format } from 'date-fns';
 import { RichTextEditor, RichTextDisplay } from '@/components/cbt/RichTextEditor';
+import { OptionDisplay } from '@/components/cbt/OptionDisplay';
+import { optionToEditorHtml, optionToStorage } from '@/lib/cbtOption';
 import { CbtRemedialDialog } from '@/components/cbt/CbtRemedialDialog';
 import { violationLabel } from '@/lib/cbtAntiCheat';
 
@@ -69,6 +71,8 @@ export default function CbtExamManagement() {
   };
   const [questionForm, setQuestionForm] = useState(initialQuestionForm);
   const [editingQuestion, setEditingQuestion] = useState<any>(null);
+  // naik setiap formulir soal diganti total (edit/batal/simpan) agar editor teks ikut dimuat ulang
+  const [formKey, setFormKey] = useState(0);
 
   const [templateForm, setTemplateForm] = useState({ title: '', subject: '', description: '' });
 
@@ -273,7 +277,7 @@ export default function CbtExamManagement() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cbt-questions'] });
       queryClient.invalidateQueries({ queryKey: ['cbt-exams'] });
-      setQuestionForm(initialQuestionForm);
+      setQuestionForm(initialQuestionForm); setFormKey(k => k + 1);
       toast.success('Soal berhasil ditambahkan');
     },
     onError: (e: any) => toast.error(e.message),
@@ -303,7 +307,7 @@ export default function CbtExamManagement() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cbt-questions'] });
       setEditingQuestion(null);
-      setQuestionForm(initialQuestionForm);
+      setQuestionForm(initialQuestionForm); setFormKey(k => k + 1);
       toast.success('Soal berhasil diperbarui');
     },
     onError: (e: any) => toast.error(e.message),
@@ -891,23 +895,25 @@ export default function CbtExamManagement() {
                     </SelectContent>
                   </Select>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="space-y-3" key={formKey}>
                   <div>
                     <Label>Pertanyaan</Label>
                     <RichTextEditor value={questionForm.question_text} onChange={v => setQuestionForm(p => ({ ...p, question_text: v }))} minHeight="100px" />
                   </div>
                   {questionForm.question_type === 'multiple_choice' ? (
                     <>
-                      <div className="grid grid-cols-2 gap-3">
-                        {(['a', 'b', 'c', 'd'] as const).map(opt => (
+                      <p className="text-xs text-muted-foreground">Pilihan jawaban boleh berisi gambar: klik <b>Upload</b>, atau tempel (Ctrl+V) / seret gambar ke kotak pilihan. Gambar dikompres otomatis dan disimpan di Google Drive.</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {(['a', 'b', 'c', 'd', 'e'] as const).map(opt => (
                           <div key={opt}>
-                            <Label className="uppercase">{opt}</Label>
-                            <Input value={(questionForm as any)[`option_${opt}`]} onChange={e => setQuestionForm(p => ({ ...p, [`option_${opt}`]: e.target.value }))} />
+                            <Label className="uppercase">{opt}{opt === 'e' ? ' (opsional)' : ''}</Label>
+                            <RichTextEditor compact minHeight="40px"
+                              value={optionToEditorHtml((questionForm as any)[`option_${opt}`])}
+                              onChange={v => setQuestionForm(p => ({ ...p, [`option_${opt}`]: optionToStorage(v) }))} />
                           </div>
                         ))}
                       </div>
-                      <div className="grid grid-cols-3 gap-3">
-                        <div><Label>E (opsional)</Label><Input value={questionForm.option_e} onChange={e => setQuestionForm(p => ({ ...p, option_e: e.target.value }))} /></div>
+                      <div className="grid grid-cols-2 gap-3">
                         <div><Label>Kunci</Label>
                           <Select value={questionForm.correct_answer} onValueChange={v => setQuestionForm(p => ({ ...p, correct_answer: v }))}>
                             <SelectTrigger><SelectValue /></SelectTrigger>
@@ -933,7 +939,7 @@ export default function CbtExamManagement() {
                     }} disabled={!questionForm.question_text}>
                       {editingQuestion ? 'Simpan Perubahan' : 'Tambah Soal'}
                     </Button>
-                    {editingQuestion && <Button variant="ghost" onClick={() => { setEditingQuestion(null); setQuestionForm(initialQuestionForm); }}>Batal</Button>}
+                    {editingQuestion && <Button variant="ghost" onClick={() => { setEditingQuestion(null); setQuestionForm(initialQuestionForm); setFormKey(k => k + 1); }}>Batal</Button>}
                   </div>
                 </CardContent>
               </Card>
@@ -956,7 +962,7 @@ export default function CbtExamManagement() {
                               if (!val) return null;
                               return (
                                 <span key={opt} className={`px-2 py-1 rounded ${q.correct_answer === opt ? 'bg-primary/10 text-primary font-medium' : 'bg-muted'}`}>
-                                  {opt}. {val}
+                                  {opt}. <OptionDisplay value={val} />
                                 </span>
                               );
                             })}
@@ -971,7 +977,7 @@ export default function CbtExamManagement() {
                       </div>
                       <div className="flex gap-1">
                         <Button variant="ghost" size="icon" onClick={() => {
-                          setEditingQuestion(q);
+                          setEditingQuestion(q); setFormKey(k => k + 1);
                           setQuestionForm({
                             question_text: q.question_text || '',
                             option_a: q.option_a || '', option_b: q.option_b || '', option_c: q.option_c || '',

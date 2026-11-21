@@ -17,12 +17,14 @@ interface Props {
   placeholder?: string;
   minHeight?: string;
   className?: string;
+  /** Mode ringkas (pilihan jawaban): hanya tebal/miring/garis bawah dan Upload gambar. */
+  compact?: boolean;
 }
 
 /** Gambar tertanam (data:/file:/blob:) pada HTML tempelan dibuang: harus lewat unggah agar terkompres dan tersimpan di Drive. */
 const EMBEDDED_IMG_RE = /<img\b[^>]*\bsrc\s*=\s*(["'])(?:data:|file:|blob:)[^"']*\1[^>]*>/gi;
 
-export function RichTextEditor({ value, onChange, placeholder, minHeight = '120px', className }: Props) {
+export function RichTextEditor({ value, onChange, placeholder, minHeight = '120px', className, compact }: Props) {
   const [uploading, setUploading] = useState(0);
   const filesRef = useRef<((files: File[], pos?: number) => void) | null>(null);
   const editor = useEditor({
@@ -120,19 +122,23 @@ export function RichTextEditor({ value, onChange, placeholder, minHeight = '120p
         <Button type="button" size="sm" variant={editor.isActive('bold') ? 'default' : 'ghost'} className="h-7 w-7 p-0" onClick={() => editor.chain().focus().toggleBold().run()}><Bold className="h-3.5 w-3.5" /></Button>
         <Button type="button" size="sm" variant={editor.isActive('italic') ? 'default' : 'ghost'} className="h-7 w-7 p-0" onClick={() => editor.chain().focus().toggleItalic().run()}><Italic className="h-3.5 w-3.5" /></Button>
         <Button type="button" size="sm" variant={editor.isActive('underline') ? 'default' : 'ghost'} className="h-7 w-7 p-0" onClick={() => editor.chain().focus().toggleUnderline().run()}><UIcon className="h-3.5 w-3.5" /></Button>
+        {!compact && (<>
         <Button type="button" size="sm" variant={editor.isActive('heading', { level: 2 }) ? 'default' : 'ghost'} className="h-7 w-7 p-0" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}><Heading2 className="h-3.5 w-3.5" /></Button>
         <Button type="button" size="sm" variant={editor.isActive('bulletList') ? 'default' : 'ghost'} className="h-7 w-7 p-0" onClick={() => editor.chain().focus().toggleBulletList().run()}><List className="h-3.5 w-3.5" /></Button>
         <Button type="button" size="sm" variant={editor.isActive('orderedList') ? 'default' : 'ghost'} className="h-7 w-7 p-0" onClick={() => editor.chain().focus().toggleOrderedList().run()}><ListOrdered className="h-3.5 w-3.5" /></Button>
         <Button type="button" size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={addLink}><LinkIcon className="h-3.5 w-3.5" /></Button>
         <Button type="button" size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={addImage}><ImgIcon className="h-3.5 w-3.5" /></Button>
+        </>)}
         <label className={cn('inline-flex items-center justify-center h-7 px-2 text-xs rounded hover:bg-accent cursor-pointer', uploading > 0 && 'opacity-60 pointer-events-none')}>
           {uploading > 0 ? `Mengunggah… (${uploading})` : 'Upload'}
           <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageFile} />
         </label>
+        {!compact && (
         <div className="ml-auto flex gap-1">
           <Button type="button" size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => editor.chain().focus().undo().run()}><Undo className="h-3.5 w-3.5" /></Button>
           <Button type="button" size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => editor.chain().focus().redo().run()}><Redo className="h-3.5 w-3.5" /></Button>
         </div>
+        )}
       </div>
       <EditorContent editor={editor} placeholder={placeholder} />
     </div>
