@@ -21,6 +21,7 @@ import { OptionDisplay } from '@/components/cbt/OptionDisplay';
 import { SymbolPalette } from '@/components/cbt/SymbolPalette';
 import { useCbtAntiCheat } from '@/hooks/useCbtAntiCheat';
 import { createDeadline, violationLabel } from '@/lib/cbtAntiCheat';
+import { fireAlarm, stopAlarm, primeAlarm } from '@/lib/cbtAlarm';
 import {
   clearProgress, deletePaper, emptyProgress, loadPaper, loadProgress, makeImageUrlMap, prefetchPaper, purgeOldPapers, purgeOldProgress,
   releaseTabLock, resumeTimeLeft, rewriteImages, saveProgress, tryAcquireTabLock,
@@ -129,6 +130,7 @@ export default function CbtStudentExam() {
   const beatingRef = useRef(false);
   const beginningRef = useRef(false);
   const violationsRef = useRef(0);
+  const alarmPendingRef = useRef(false); // pelanggaran terjadi saat layar tidak terlihat: getar diulang ketika siswa kembali
   const revokeImagesRef = useRef<(() => void) | null>(null);
   const prepCtxRef = useRef<{ exam: any; token: string | null; session: any; pubExam: any } | null>(null);
   // Percobaan mulai terakhir (untuk "Coba Lagi" bila panggilan mulai gagal karena jaringan) + penanda putaran agar "Batal" saat antre bisa dibatalkan
@@ -191,6 +193,7 @@ export default function CbtStudentExam() {
     const sess = sessionRef.current;
     if (sess) releaseTabLock(sess.id, tabIdRef.current);
     revokeImagesRef.current?.(); revokeImagesRef.current = null;
+    stopAlarm(); alarmPendingRef.current = false;
     setActiveSession(null); setActiveExam(null); setAnswers({}); setEssayAnswers({}); setOrderedQuestions([]); setImageMap({});
     setViolations(0); setPaused(false); setTimeLeft(0); setCurrentIdx(0); setNeedFullscreen(false); setWarningOpen(null);
     answersRef.current = {}; essaysRef.current = {}; violationsRef.current = 0; localRef.current = emptyProgress();
@@ -407,6 +410,8 @@ export default function CbtStudentExam() {
     violationsRef.current = nv; setViolations(nv);
     persistLocalNow();
     const max = exam.max_violations || 3;
+    fireAlarm(nv >= max); // getar + alarm di perangkat siswa
+    if (document.hidden) alarmPendingRef.current = true; // getar tidak jalan saat aplikasi di latar belakang
     if (nv >= max) {
       setWarningOpen(`Pelanggaran terdeteksi (${violationLabel(type)}). Anda telah ${nv} kali melanggar. Ujian diakhiri otomatis dan jawaban dikirim.`);
       setTimeout(() => handleSubmitExam(), 2000);
@@ -415,6 +420,15 @@ export default function CbtStudentExam() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handleSubmitExam, persistLocalNow]);
+
+  // Siswa kembali ke halaman setelah melanggar saat di luar: getar/alarm diulang agar peringatan tidak terlewat
+  useEffect(() => {
+    const onVisible = () => {
+      if (!document.hidden && alarmPendingRef.current) { alarmPendingRef.current = false; fireAlarm(false); }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { document.removeEventListener('visibilitychange', onVisible); stopAlarm(); };
+  }, []);
 
   // Mode fokus selama mengerjakan soal: tanpa menu samping/logout/kembali/popup umum, layar tetap menyala, tombol kembali browser diredam
   const inExam = !!activeSession;
@@ -520,6 +534,7 @@ export default function CbtStudentExam() {
   const beginExam = async (exam: any, token: string | null, opts?: { noDelay?: boolean; pledge?: boolean }) => {
     if (beginningRef.current) return;
     beginningRef.current = true;
+    primeAlarm(); // dari klik siswa: izinkan alarm pelanggaran berbunyi nanti
     if (opts?.pledge !== undefined) needPledgeRef.current = opts.pledge; // Mulai baru = minta pernyataan; Lanjutkan = tidak
     const run = ++beginRunRef.current;
     startArgsRef.current = { exam, token };
@@ -677,7 +692,7 @@ export default function CbtStudentExam() {
           {activeExam?.anti_cheat_enabled && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 p-2.5 text-xs flex items-start gap-2">
               <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-              <p>Mode Anti Curang aktif. Jangan pindah tab/aplikasi, membuka layar belah atau jendela lain, keluar layar penuh, menyalin/menempel, mencetak, atau menangkap layar. Pelanggaran tercatat otomatis.</p>
+              <p>Mode Anti Curang aktif. Jangan pindah tab/aplikasi, membuka layar belah atau jendela lain, keluar layar penuh, menyalin/menempel, mencetak, atau menangkap layar. Pelanggaran tercatat otomatis dan akan membunyikan alarm serta getar di HP-mu (pastikan volume media tidak 0).</p>
             </div>
           )}
 
@@ -806,7 +821,7 @@ export default function CbtStudentExam() {
         </Dialog>
 
         {/* Violation warning */}
-        <Dialog open={!!warningOpen} onOpenChange={() => setWarningOpen(null)}>
+        <Dialog open={!!warningOpen} onOpenChange={() => { stopAlarm(); setWarningOpen(null); }}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle className="text-destructive flex items-center gap-2"><ShieldAlert className="h-5 w-5" /> Peringatan Anti Curang</DialogTitle>
@@ -814,6 +829,7 @@ export default function CbtStudentExam() {
             </DialogHeader>
             <DialogFooter>
               <Button onClick={() => {
+                stopAlarm();
                 setWarningOpen(null);
                 if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
               }}>Saya Mengerti</Button>
