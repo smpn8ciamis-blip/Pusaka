@@ -8,12 +8,13 @@
  *    - berkas .env / .env.production di server (di samping VITE_SUPABASE_URL):
  *        VITE_TURNSTILE_SITE_KEY=0x4AAAAAAA...
  *      lalu build ulang; atau
- *    - ganti string kosong pada TURNSTILE_FALLBACK_SITE_KEY di bawah, lalu commit.
+ *    - ubah TURNSTILE_FALLBACK_SITE_KEY di bawah (sudah terisi site key sekolah), lalu commit.
+ *    Secret Key JANGAN pernah ditaruh di kode/frontend; itu hanya untuk server (GoTrue).
  *
  * Jika kunci belum diisi, halaman login TIDAK menampilkan verifikasi dan tidak memintanya
  * (supaya siswa tidak terkunci di luar). Isi kuncinya agar verifikasi aktif.
  */
-const TURNSTILE_FALLBACK_SITE_KEY = "";
+const TURNSTILE_FALLBACK_SITE_KEY = "0x4AAAAAAGNOoDGzUtm6lkfB";
 
 export const TURNSTILE_SITE_KEY: string =
   ((import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined) || TURNSTILE_FALLBACK_SITE_KEY).trim();
