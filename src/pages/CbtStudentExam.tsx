@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Progress } from '@/components/ui/progress';
+import CalmWait, { AdviceLine } from '@/components/cbt/CalmWait';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
@@ -107,6 +108,7 @@ export default function CbtStudentExam() {
   const [finishOpen, setFinishOpen] = useState(false);
   const [finishText, setFinishText] = useState('');
   const [overviewWait, setOverviewWait] = useState(0);
+  const [overviewWaitTotal, setOverviewWaitTotal] = useState(0);
   const [pendingExam, setPendingExam] = useState<any>(null);
   const [violations, setViolations] = useState(0);
   const [exitTokenOpen, setExitTokenOpen] = useState(false);
@@ -151,8 +153,9 @@ export default function CbtStudentExam() {
       if (!dashboardJitterDone) {
         dashboardJitterDone = true;
         const sec = randomDelaySeconds(CBT_DASHBOARD_DELAY);
+        setOverviewWaitTotal(sec);
         if (sec > 0) await waitWithCountdown(sec * 1000, (left) => setOverviewWait(left));
-        setOverviewWait(0);
+        setOverviewWait(0); setOverviewWaitTotal(0);
       }
       const { data, error } = await (supabase as any).rpc('cbt_student_exams');
       if (error) throw error;
@@ -510,7 +513,7 @@ export default function CbtStudentExam() {
   /** Hitung mundur acak sebelum unduh soal; sisa detik tampil di tombol "Unduh Soal" pada dialog. */
   const waitBeforeDownload = async (sec: number) => {
     if (sec <= 0) return;
-    setPrep((s) => ({ ...s, open: true, error: null, canRetry: false, percent: 0, label: 'Menunggu giliran mulai', waitLeft: sec, waitTotal: sec }));
+    setPrep((s) => ({ ...s, open: true, error: null, canRetry: false, percent: 0, label: 'Bersiap memulai', waitLeft: sec, waitTotal: sec }));
     await waitWithCountdown(sec * 1000, (left) => setPrep((s) => ({ ...s, waitLeft: left })));
     setPrep((s) => ({ ...s, waitLeft: 0, waitTotal: 0, percent: 2, label: 'Mulai mengunduh…' }));
   };
@@ -591,8 +594,8 @@ export default function CbtStudentExam() {
           <ol className="space-y-2.5 text-sm">
             <SubmitStep
               state={submitState.phase === 'wait' ? 'active' : 'done'}
-              label="Antre pengumpulan"
-              detail={submitState.phase === 'wait' ? `Giliran Anda dalam ${submitState.waitLeft} dtk (agar tidak berebut dengan siswa lain)` : undefined} />
+              label="Menyiapkan pengumpulan"
+              detail={undefined} />
             <SubmitStep
               state={submitState.phase === 'wait' ? 'todo' : submitState.phase === 'error' ? 'error' : 'active'}
               label={submitState.phase === 'error' ? 'Jawaban belum terkirim' : 'Mengirim jawaban ke server'}
@@ -601,7 +604,7 @@ export default function CbtStudentExam() {
                 : submitState.phase === 'error' ? 'Periksa koneksi internet, lalu tekan Kirim Lagi.' : undefined} />
             <SubmitStep state="todo" label="Nilai dihitung dan ujian selesai" />
           </ol>
-          {submitState.phase === 'wait' && <p className="text-[11px] text-muted-foreground">Jangan tutup halaman ini sampai proses selesai.</p>}
+          {submitState.phase === 'wait' && <AdviceLine />}
           {(submitState.phase === 'retry' || submitState.phase === 'error') && submitState.error && (
             <p className="text-[11px] text-destructive break-words">{submitState.error}</p>
           )}
@@ -891,9 +894,8 @@ export default function CbtStudentExam() {
           </div>
 
           {overviewLoading ? (
-            <Card><CardContent className="py-12 text-center text-muted-foreground">
-              Memuat daftar ujian…
-              {overviewWait > 0 && <span className="block text-xs mt-1">Menunggu giliran ({overviewWait} dtk) agar server tidak kewalahan. Jangan tutup halaman ini.</span>}
+            <Card><CardContent className="py-12 flex justify-center">
+              <CalmWait className="w-full max-w-md" title="Menyiapkan halaman ujian…" left={overviewWait} total={overviewWaitTotal} />
             </CardContent></Card>
           ) : (!availableExams || availableExams.length === 0) ? (
             <Card><CardContent className="py-12 text-center text-muted-foreground"><FileText className="h-12 w-12 mx-auto mb-3 opacity-30" /><p>Tidak ada ujian saat ini</p></CardContent></Card>
@@ -992,7 +994,7 @@ export default function CbtStudentExam() {
             </DialogHeader>
             <Input value={tokenInput} onChange={e => setTokenInput(e.target.value.toUpperCase())} placeholder="Token (6 karakter)" className="font-mono text-center text-lg" maxLength={12} autoFocus />
             <p className="text-[11px] text-muted-foreground">
-              Setelah menekan Mulai, Anda menunggu giliran beberapa detik (agar server tidak kewalahan), lalu soal diunduh ke perangkat ini. Selanjutnya Anda diminta mengetik pernyataan kejujuran sebelum timer berjalan.
+              Setelah menekan Mulai, soal disiapkan beberapa saat lalu diunduh ke perangkat ini. Selanjutnya kamu diminta mengetik pernyataan kejujuran sebelum timer berjalan. Kerjakan dengan tenang dan jujur.
             </p>
             <DialogFooter>
               <Button variant="outline" onClick={() => { setTokenInputOpen(false); setTokenInput(''); }}>Batal</Button>
@@ -1005,18 +1007,14 @@ export default function CbtStudentExam() {
         <Dialog open={prep.open}>
           <DialogContent onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><HardDriveDownload className="h-5 w-5" /> {prep.error ? 'Soal belum siap' : prep.waitLeft > 0 ? 'Bersiap mengunduh soal' : 'Mengunduh soal ke perangkat'}</DialogTitle>
+              <DialogTitle className="flex items-center gap-2"><HardDriveDownload className="h-5 w-5" /> {prep.error ? 'Soal belum siap' : prep.waitLeft > 0 ? 'Bersiap memulai ujian' : 'Mengunduh soal ke perangkat'}</DialogTitle>
               <DialogDescription className="pt-1">{prep.examTitle}</DialogDescription>
             </DialogHeader>
             {prep.error ? (
               <p className="text-sm text-destructive">{prep.error}</p>
             ) : prep.waitLeft > 0 ? (
-              <div className="space-y-3">
-                <p className="text-sm">Agar server tidak kewalahan saat banyak siswa mulai bersamaan, ujian dimulai otomatis setelah hitung mundur selesai (token diperiksa dan soal diunduh setelah itu). Jangan tutup halaman ini.</p>
-                <Progress value={prep.waitTotal > 0 ? (1 - prep.waitLeft / prep.waitTotal) * 100 : 0} className="h-2" />
-                <Button className="w-full gap-2" disabled>
-                  <HardDriveDownload className="h-4 w-4" /> Mulai Ujian ({prep.waitLeft} dtk)
-                </Button>
+              <div className="space-y-4">
+                <CalmWait left={prep.waitLeft} total={prep.waitTotal} />
                 <Button className="w-full" variant="ghost" size="sm" onClick={cancelPrepWait}>Batal</Button>
               </div>
             ) : (
