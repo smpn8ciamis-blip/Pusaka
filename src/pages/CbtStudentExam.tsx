@@ -413,10 +413,15 @@ export default function CbtStudentExam() {
     fireAlarm(nv >= max); // getar + alarm di perangkat siswa
     if (document.hidden) alarmPendingRef.current = true; // getar tidak jalan saat aplikasi di latar belakang
     if (nv >= max) {
-      setWarningOpen(`Pelanggaran terdeteksi (${violationLabel(type)}). Anda telah ${nv} kali melanggar. Ujian diakhiri otomatis dan jawaban dikirim.`);
+      setWarningOpen(`Pelanggaran terdeteksi (${violationLabel(type)}). Anda telah ${nv} kali melanggar; tercatat dan terlihat oleh pengawas. Ujian diakhiri otomatis dan jawaban dikirim.`);
       setTimeout(() => handleSubmitExam(), 2000);
     } else {
-      setWarningOpen(`⚠ Pelanggaran terdeteksi: ${violationLabel(type)}. ${nv}/${max} kesempatan.`);
+      setWarningOpen(
+        `⚠ Pelanggaran terdeteksi: ${violationLabel(type)}. Tercatat dan terlihat oleh pengawas. ${nv} dari ${max} kesempatan sudah terpakai. `
+        + (nv === max - 1
+          ? 'Ini peringatan terakhir: satu pelanggaran lagi, ujian Anda langsung diakhiri.'
+          : `Pada pelanggaran ke-${max}, ujian otomatis diakhiri.`),
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handleSubmitExam, persistLocalNow]);
@@ -692,7 +697,7 @@ export default function CbtStudentExam() {
           {activeExam?.anti_cheat_enabled && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 p-2.5 text-xs flex items-start gap-2">
               <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-              <p>Mode Anti Curang aktif. Jangan pindah tab/aplikasi, membuka layar belah atau jendela lain, keluar layar penuh, menyalin/menempel, mencetak, atau menangkap layar. Pelanggaran tercatat otomatis dan akan membunyikan alarm serta getar di HP-mu (pastikan volume media tidak 0).</p>
+              <p>Mode Anti Curang aktif. Setiap pelanggaran langsung terdeteksi: pindah tab/aplikasi, membuka layar belah atau jendela lain, keluar layar penuh, menyalin/menempel, mencetak, atau menangkap layar. Pelanggaran dicatat, terlihat oleh pengawas, dan membunyikan alarm serta getar di HP. Jika melanggar {activeExam.max_violations || 3} kali, ujian otomatis diakhiri.</p>
             </div>
           )}
 
@@ -776,7 +781,7 @@ export default function CbtStudentExam() {
           <DialogContent onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><Maximize className="h-5 w-5" /> Masuk layar penuh</DialogTitle>
-              <DialogDescription className="pt-2">Ujian ini memakai mode anti curang. Klik tombol di bawah untuk masuk layar penuh, lalu kerjakan ujian tanpa membuka aplikasi lain atau layar belah.</DialogDescription>
+              <DialogDescription className="pt-2">Ujian ini memakai mode anti curang. Klik tombol di bawah untuk masuk layar penuh, lalu kerjakan ujian tanpa membuka aplikasi lain atau layar belah. Setiap pelanggaran terdeteksi, dicatat, dan membunyikan alarm.</DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <Button onClick={() => { document.documentElement.requestFullscreen?.().catch(() => {}); setNeedFullscreen(false); }}>Masuk Layar Penuh</Button>
