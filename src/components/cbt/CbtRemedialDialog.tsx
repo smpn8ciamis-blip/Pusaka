@@ -1,6 +1,7 @@
+import { formatWibDateTime } from '@/lib/wib';
+import { wibInputToIso, wibInputFromNow } from '@/lib/wib';
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
 import { Search, RotateCcw, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -47,13 +48,8 @@ const FILTER_LABEL: Record<RowFilter, string> = {
 
 const fmt = (v: number | null | undefined) => (v == null ? '-' : Number(v).toFixed(1));
 
-/** Nilai default batas waktu: 3 hari lagi pukul 15.00 (format input datetime-local). */
-const defaultDeadline = () => {
-  const d = new Date();
-  d.setDate(d.getDate() + 3);
-  d.setHours(15, 0, 0, 0);
-  return format(d, "yyyy-MM-dd'T'HH:mm");
-};
+/** Nilai default batas waktu: 3 hari lagi pukul 15.00 WIB (format input datetime-local). */
+const defaultDeadline = () => wibInputFromNow(3, 15);
 
 interface Props {
   exam: { id: string; title: string; subject?: string; pass_score?: number | null } | null;
@@ -136,12 +132,12 @@ export function CbtRemedialDialog({ exam, open, onOpenChange }: Props) {
 
   const grantMutation = useMutation({
     mutationFn: async () => {
-      const when = new Date(deadline);
-      if (!deadline || Number.isNaN(when.getTime())) throw new Error('Isi batas waktu remidial.');
+      const whenIso = wibInputToIso(deadline); // jam yang dipilih = WIB
+      if (!whenIso) throw new Error('Isi batas waktu remidial.');
       const { data, error } = await supabase.rpc('cbt_remedial_grant' as never, {
         p_exam_id: examId,
         p_student_ids: selectedBelow.map((r) => r.student_id),
-        p_expires_at: when.toISOString(),
+        p_expires_at: whenIso,
         p_extra_attempts: extraAttempts,
       } as never);
       if (error) throw error;
@@ -179,7 +175,7 @@ export function CbtRemedialDialog({ exam, open, onOpenChange }: Props) {
     if (r.grant.active)
       return (
         <Badge className="bg-emerald-600 text-[10px]">
-          Dibuka s.d. {format(new Date(r.grant.expires_at), 'd MMM HH:mm')}
+          Dibuka s.d. {formatWibDateTime(r.grant.expires_at)}
         </Badge>
       );
     if (r.grant.revoked) return <Badge variant="outline" className="text-[10px]">Ditutup</Badge>;

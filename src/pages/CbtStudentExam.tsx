@@ -1,3 +1,4 @@
+import { formatWibDateTime } from '@/lib/wib';
 import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
@@ -15,8 +16,6 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Clock, CheckCircle, FileText, Play, KeyRound, RotateCcw, AlertTriangle, Shield, ShieldAlert, HardDriveDownload, Maximize, Send, Loader2, Download } from 'lucide-react';
 import { toast } from 'sonner';
-import { format } from 'date-fns';
-import { id as idLocale } from 'date-fns/locale';
 import { RichTextDisplay } from '@/components/cbt/RichTextEditor';
 import { OptionDisplay } from '@/components/cbt/OptionDisplay';
 import { SymbolPalette } from '@/components/cbt/SymbolPalette';
@@ -931,7 +930,7 @@ export default function CbtStudentExam() {
                         <span className="px-2 py-0.5 rounded-full bg-muted">{exam.duration_minutes} menit</span>
                         <span className="px-2 py-0.5 rounded-full bg-muted">KKM {exam.pass_score}</span>
                         <span className="px-2 py-0.5 rounded-full bg-muted">{attemptsUsed}/{exam.max_attempts || 1}</span>
-                        {exam.remedial && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-medium">Remidial s.d. {format(new Date(exam.remedial_until), 'dd MMM HH:mm', { locale: idLocale })}</span>}
+                        {exam.remedial && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-medium">Remidial s.d. {formatWibDateTime(exam.remedial_until)}</span>}
                         {exam.require_token && <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 flex items-center gap-1"><KeyRound className="h-2.5 w-2.5" />Token</span>}
                         {exam.anti_cheat_enabled && <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300 flex items-center gap-1"><Shield className="h-2.5 w-2.5" />Anti-cheat</span>}
                       </div>
@@ -974,7 +973,7 @@ export default function CbtStudentExam() {
                     <div key={s.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
                       <div>
                         <p className="text-sm font-medium">Percobaan #{s.attempt_number || 1}{s.is_remedial && <Badge variant="outline" className="ml-2 text-[10px] border-amber-500 text-amber-600">Remidial</Badge>}</p>
-                        <p className="text-xs text-muted-foreground">{format(new Date(s.created_at), 'dd MMM yyyy HH:mm', { locale: idLocale })}</p>
+                        <p className="text-xs text-muted-foreground">{formatWibDateTime(s.created_at)}</p>
                       </div>
                       {s.grading_status === 'pending_essay' ? <Badge variant="outline">Menunggu Koreksi</Badge> :
                         <Badge variant={(s.score || 0) >= 70 ? 'default' : 'destructive'}>{Number(s.score ?? 0).toFixed(1)}</Badge>}
