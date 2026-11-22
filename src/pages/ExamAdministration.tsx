@@ -441,8 +441,13 @@ const ExamAdministration = () => {
           const innerW = cardWidth - pad * 2;
 
           // Reserved heights
-          const sigReserved = Math.max(16, Math.min(cardHeight * 0.2, 20)); // bottom area for signature (dibatasi agar jadwal tetap muat)
-          const usableH = cardHeight - sigReserved - pad;
+          // Tanda tangan: tumpukan tetap dari bawah kartu (tanggal, jabatan, ruang TTD+stempel, nama, NIP), tinggi dihitung dari isinya
+          const sigLh = fs(2.4); // jarak antarbaris
+          const sigZoneH = Math.min(11, Math.max(7.5, cardHeight * 0.085)); // ruang tanda tangan + stempel
+          const sigHasNip = !!settings?.headmaster_nip;
+          const sigNeed = sigLh * (3 + (sigHasNip ? 1 : 0)) + sigZoneH + 1; // 2 baris atas + nama (+NIP) + ruang gambar
+          const sigTop = cardY + cardHeight - pad - sigNeed; // batas atas blok tanda tangan (baris tanggal)
+          const usableH = sigTop - 0.2 - cardY; // area jadwal berakhir tepat di atas blok tanda tangan (tabel sendiri menyisakan ±4 mm)
 
           // Background + border
           doc.setFillColor(250, 250, 252);
@@ -647,50 +652,43 @@ const ExamAdministration = () => {
             doc.rect(tStartX, currentY - (showRows + 1) * rowHeight, tW, (showRows + 1) * rowHeight);
           }
 
-          // ---------- SIGNATURE (strictly inside reserved area, no overlap) ----------
+          // ---------- SIGNATURE (ditumpuk dari bawah kartu; stempel/tanda tangan di ruangnya sendiri, tidak menimpa teks) ----------
           // tanda tangan hanya digambar bila tidak menimpa data peserta/jadwal di atasnya
-          if (cardY + cardHeight - sigReserved + 1 >= currentY - 0.5) {
-            const sigTop = cardY + cardHeight - sigReserved + 1;
-            const sigCenterX = cardX + cardWidth * 0.72; // right-aligned block
-            const sigBlockW = cardWidth * 0.5;
-            const today = new Date();
-            const dateStr = formatDateWithMonthName(today);
-            doc.setFontSize(fs(4.2));
-            doc.setFont("helvetica", "normal");
-            doc.setTextColor(71, 85, 105);
-            doc.text(`${(settings as any)?.city_name || 'Ciamis'}, ${dateStr}`, sigCenterX, sigTop, { align: "center", maxWidth: sigBlockW });
-            doc.setFont("helvetica", "bold");
-            doc.setTextColor(30, 41, 59);
-            doc.text((settings as any)?.headmaster_position || "Kepala Sekolah", sigCenterX, sigTop + fs(2.2), { align: "center", maxWidth: sigBlockW });
+          if (sigTop - 0.2 >= currentY - 0.5) {
+            const sigBlockW = Math.min(cardWidth * 0.52, 36);
+            const sigCenterX = cardX + cardWidth - pad - sigBlockW / 2; // rata kanan sejajar tepi tabel
+            const dateStr = formatDateWithMonthName(new Date());
+            const line = (txt: string, y: number, style: 'normal' | 'bold', size: number, rgb: [number, number, number]) => {
+              doc.setFont("helvetica", style);
+              doc.setTextColor(rgb[0], rgb[1], rgb[2]);
+              doc.text(fitText(doc, txt, sigBlockW, size, 3), sigCenterX, y, { align: "center" }); // satu baris, tidak pernah turun/meluber
+            };
+            const y1 = sigTop + sigLh * 0.8;            // tanggal
+            const y2 = y1 + sigLh;                      // jabatan
+            const zoneTop = y2 + 0.8;                   // ruang tanda tangan + stempel
+            const y3 = zoneTop + sigZoneH + sigLh * 0.8; // nama
+            const y4 = y3 + sigLh;                      // NIP
+            line(`${(settings as any)?.city_name || 'Ciamis'}, ${dateStr}`, y1, 'normal', fs(4.2), [71, 85, 105]);
+            line((settings as any)?.headmaster_position || "Kepala Sekolah", y2, 'bold', fs(4.2), [30, 41, 59]);
 
-            // Signature image (centered in sig column)
-            const sigImgW = Math.min(sigBlockW * 0.55, 18);
+            // tanda tangan di tengah ruangnya (tetap dalam rasio gambar bawaan 0.55)
+            const sigImgW = Math.min(sigBlockW * 0.6, sigZoneH / 0.55);
             const sigImgH = sigImgW * 0.55;
-            const sigImgY = sigTop + fs(3);
             if (settings?.headmaster_signature_url) {
               const sg = await loadImg(settings.headmaster_signature_url);
-              if (sg) doc.addImage(sg, 'PNG', sigCenterX - sigImgW / 2, sigImgY, sigImgW, sigImgH, 'kartuTtd');
+              if (sg) doc.addImage(sg, 'PNG', sigCenterX - sigImgW / 2 + 1.5, zoneTop + (sigZoneH - sigImgH) / 2, sigImgW, sigImgH, 'kartuTtd');
             }
-            // Stamp - placed to the LEFT of name signature, half-overlapping signature only
+            // stempel di sisi kiri tanda tangan, sebagian saja bertumpuk dengan tanda tangan, tetap di dalam ruang TTD
             if (settings?.school_stamp_url) {
               const st = await loadImg(settings.school_stamp_url);
               if (st) {
-                const stampSize = Math.min(sigReserved * 0.7, 14);
-                doc.addImage(st, 'PNG', sigCenterX - sigImgW * 0.6 - stampSize * 0.3, sigImgY - stampSize * 0.2, stampSize, stampSize, 'kartuStempel');
+                const stampSize = sigZoneH;
+                const stampX = Math.max(cardX + pad, sigCenterX - sigImgW / 2 - stampSize * 0.55);
+                doc.addImage(st, 'PNG', stampX, zoneTop + (sigZoneH - stampSize) / 2, stampSize, stampSize, 'kartuStempel');
               }
             }
-            // Headmaster name + NIP
-            const nameY = sigTop + sigReserved - fs(3);
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(fs(4.2));
-            doc.setTextColor(30, 41, 59);
-            doc.text(settings?.headmaster_name || "___________________", sigCenterX, nameY, { align: "center", maxWidth: sigBlockW });
-            if (settings?.headmaster_nip) {
-              doc.setFont("helvetica", "normal");
-              doc.setFontSize(fs(3.5));
-              doc.setTextColor(71, 85, 105);
-              doc.text(`NIP. ${settings.headmaster_nip}`, sigCenterX, nameY + fs(2), { align: "center", maxWidth: sigBlockW });
-            }
+            line(settings?.headmaster_name || "___________________", y3, 'bold', fs(4.2), [30, 41, 59]);
+            if (sigHasNip) line(`NIP. ${settings.headmaster_nip}`, y4, 'normal', fs(3.5), [71, 85, 105]);
           } else {
             signatureSkipped++;
           }
@@ -2327,18 +2325,22 @@ const ExamAdministration = () => {
                       </div>
                     )}
 
-                    {/* Signature Section */}
+                    {/* Signature Section (sama dengan PDF: tanggal, jabatan, ruang TTD + stempel, nama, NIP) */}
                     <div className="pt-2 border-t mt-auto">
-                      <div className="text-right">
-                        <div className="text-[9px]">Ciamis, {formatDateWithMonthName(new Date())}</div>
-                        <div className="text-[9px] mb-8">{(settings as any)?.headmaster_position || 'Kepala Sekolah'}</div>
-                        <div className="text-[9px] font-bold">
-                          {settings?.headmaster_name || "___________________"}
+                      <div className="ml-auto w-[52%] max-w-[260px] text-center text-[9px] leading-tight">
+                        <div>{(settings as any)?.city_name || 'Ciamis'}, {formatDateWithMonthName(new Date())}</div>
+                        <div className="font-bold">{(settings as any)?.headmaster_position || 'Kepala Sekolah'}</div>
+                        <div className="relative h-12 flex items-center justify-center">
+                          {settings?.school_stamp_url && (
+                            <img src={settings.school_stamp_url} alt="" className="absolute left-0 top-1/2 -translate-y-1/2 h-11 w-11 object-contain" />
+                          )}
+                          {settings?.headmaster_signature_url && (
+                            <img src={settings.headmaster_signature_url} alt="" className="relative h-10 max-w-[60%] object-contain ml-3" />
+                          )}
                         </div>
+                        <div className="font-bold">{settings?.headmaster_name || "___________________"}</div>
                         {settings?.headmaster_nip && (
-                          <div className="text-[8px] text-muted-foreground">
-                            NIP. {settings.headmaster_nip}
-                          </div>
+                          <div className="text-[8px] text-muted-foreground">NIP. {settings.headmaster_nip}</div>
                         )}
                       </div>
                     </div>
