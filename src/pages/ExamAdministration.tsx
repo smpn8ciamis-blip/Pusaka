@@ -443,9 +443,9 @@ const ExamAdministration = () => {
           // Reserved heights
           // Tanda tangan: tumpukan tetap dari bawah kartu (tanggal, jabatan, ruang TTD+stempel, nama, NIP), tinggi dihitung dari isinya
           const sigLh = fs(2.4); // jarak antarbaris
-          const sigZoneH = Math.min(11, Math.max(7.5, cardHeight * 0.085)); // ruang tanda tangan + stempel
+          const sigZoneH = Math.min(11.5, Math.max(8, cardHeight * 0.1)); // ruang tanda tangan; stempel sedikit lebih besar dari ruang ini (menjorok ±1 mm ke atas/bawah)
           const sigHasNip = !!settings?.headmaster_nip;
-          const sigNeed = sigLh * (3 + (sigHasNip ? 1 : 0)) + sigZoneH + 1; // 2 baris atas + nama (+NIP) + ruang gambar
+          const sigNeed = sigLh * (3 + (sigHasNip ? 1 : 0)) + sigZoneH + 1.4; // 2 baris atas + nama (+NIP) + ruang gambar + celah
           const sigTop = cardY + cardHeight - pad - sigNeed; // batas atas blok tanda tangan (baris tanggal)
           const usableH = sigTop - 0.2 - cardY; // area jadwal berakhir tepat di atas blok tanda tangan (tabel sendiri menyisakan ±4 mm)
 
@@ -596,7 +596,7 @@ const ExamAdministration = () => {
             const remaining = (cardY + usableH) - currentY;
             const rowHeight = Math.max(2.6, fs(3));
             const headerH = rowHeight;
-            const maxRows = Math.max(1, Math.floor((remaining - headerH - 4) / rowHeight));
+            const maxRows = Math.max(1, Math.floor((remaining - headerH - 2.4) / rowHeight));
             const showRows = Math.min(examSchedule.length, maxRows);
             if (showRows < examSchedule.length) scheduleHidden = Math.max(scheduleHidden, examSchedule.length - showRows);
 
@@ -665,8 +665,8 @@ const ExamAdministration = () => {
             };
             const y1 = sigTop + sigLh * 0.8;            // tanggal
             const y2 = y1 + sigLh;                      // jabatan
-            const zoneTop = y2 + 0.8;                   // ruang tanda tangan + stempel
-            const y3 = zoneTop + sigZoneH + sigLh * 0.8; // nama
+            const zoneTop = y2 + 1.0;                   // ruang tanda tangan + stempel
+            const y3 = zoneTop + sigZoneH + sigLh * 0.9; // nama
             const y4 = y3 + sigLh;                      // NIP
             line(`${(settings as any)?.city_name || 'Ciamis'}, ${dateStr}`, y1, 'normal', fs(4.2), [71, 85, 105]);
             line((settings as any)?.headmaster_position || "Kepala Sekolah", y2, 'bold', fs(4.2), [30, 41, 59]);
@@ -678,12 +678,14 @@ const ExamAdministration = () => {
               const sg = await loadImg(settings.headmaster_signature_url);
               if (sg) doc.addImage(sg, 'PNG', sigCenterX - sigImgW / 2 + 1.5, zoneTop + (sigZoneH - sigImgH) / 2, sigImgW, sigImgH, 'kartuTtd');
             }
-            // stempel di sisi kiri tanda tangan, sebagian saja bertumpuk dengan tanda tangan, tetap di dalam ruang TTD
+            // stempel resmi: lebih besar (sebanding dengan tanda tangan), di sisi kiri, dan MENIMPA sebagian kecil
+            // (±28% lebar) ujung kiri tanda tangan, digambar setelah tanda tangan sehingga cap berada di atasnya
             if (settings?.school_stamp_url) {
               const st = await loadImg(settings.school_stamp_url);
               if (st) {
-                const stampSize = sigZoneH;
-                const stampX = Math.max(cardX + pad, sigCenterX - sigImgW / 2 - stampSize * 0.55);
+                const stampSize = Math.min(sigZoneH * 1.3, 14);
+                const sigLeft = sigCenterX - sigImgW / 2 + 1.5;
+                const stampX = Math.max(cardX + pad, sigLeft + sigImgW * 0.28 - stampSize);
                 doc.addImage(st, 'PNG', stampX, zoneTop + (sigZoneH - stampSize) / 2, stampSize, stampSize, 'kartuStempel');
               }
             }
@@ -2330,12 +2332,13 @@ const ExamAdministration = () => {
                       <div className="ml-auto w-[52%] max-w-[260px] text-center text-[9px] leading-tight">
                         <div>{(settings as any)?.city_name || 'Ciamis'}, {formatDateWithMonthName(new Date())}</div>
                         <div className="font-bold">{(settings as any)?.headmaster_position || 'Kepala Sekolah'}</div>
-                        <div className="relative h-12 flex items-center justify-center">
-                          {settings?.school_stamp_url && (
-                            <img src={settings.school_stamp_url} alt="" className="absolute left-0 top-1/2 -translate-y-1/2 h-11 w-11 object-contain" />
-                          )}
+                        <div className="relative h-14 flex items-center justify-center">
                           {settings?.headmaster_signature_url && (
-                            <img src={settings.headmaster_signature_url} alt="" className="relative h-10 max-w-[60%] object-contain ml-3" />
+                            <img src={settings.headmaster_signature_url} alt="" className="relative h-11 max-w-[60%] object-contain ml-5" />
+                          )}
+                          {/* stempel menimpa sebagian kecil ujung kiri tanda tangan, seperti dokumen resmi */}
+                          {settings?.school_stamp_url && (
+                            <img src={settings.school_stamp_url} alt="" className="absolute left-0 top-1/2 -translate-y-1/2 z-10 h-14 w-14 object-contain" />
                           )}
                         </div>
                         <div className="font-bold">{settings?.headmaster_name || "___________________"}</div>
