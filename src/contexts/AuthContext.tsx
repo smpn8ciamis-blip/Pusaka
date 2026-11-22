@@ -11,8 +11,8 @@ interface AuthContextType {
   userRole: 'admin' | 'teacher' | 'bendahara' | 'tata_usaha' | 'siswa' | 'kesiswaan' | 'polling' | 'billing' | 'super_admin' | 'guru_piket' | 'admin_web' | 'pembina_ekskul' | 'staf' | 'bendahara_komite' | 'korlas' | 'panitia_ujian' | null;
   schoolId: string | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: any }>;
-  signUp: (email: string, password: string, fullName: string) => Promise<{ error: any }>;
+  signIn: (email: string, password: string, captchaToken?: string) => Promise<{ error: any }>;
+  signUp: (email: string, password: string, fullName: string, captchaToken?: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
 }
 
@@ -158,15 +158,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => subscription.unsubscribe();
   }, [fetchUserRole]);
 
-  const signIn = useCallback(async (email: string, password: string) => {
+  const signIn = useCallback(async (email: string, password: string, captchaToken?: string) => {
+    // captchaToken (Cloudflare Turnstile) hanya diperiksa server bila GoTrue captcha diaktifkan; selain itu diabaikan.
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
+      ...(captchaToken ? { options: { captchaToken } } : {}),
     });
     return { error };
   }, []);
 
-  const signUp = useCallback(async (email: string, password: string, fullName: string) => {
+  const signUp = useCallback(async (email: string, password: string, fullName: string, captchaToken?: string) => {
     const redirectUrl = `${window.location.origin}/`;
     
     const { error } = await supabase.auth.signUp({
@@ -174,6 +176,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       password,
       options: {
         emailRedirectTo: redirectUrl,
+        ...(captchaToken ? { captchaToken } : {}),
         data: {
           full_name: fullName,
         },

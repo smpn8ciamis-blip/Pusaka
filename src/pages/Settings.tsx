@@ -159,7 +159,7 @@ const Settings = () => {
                 <div>
                   <Label className="text-base font-semibold">Verifikasi CAPTCHA</Label>
                   <p className="text-sm text-muted-foreground mt-1">
-                    Nonaktifkan jika CAPTCHA tidak bisa dimuat (misalnya di VPS tanpa akses Google)
+                    Verifikasi keamanan Cloudflare Turnstile di halaman login. Nonaktifkan jika tidak bisa dimuat (misalnya jaringan memblokir challenges.cloudflare.com)
                   </p>
                 </div>
                 <Switch
