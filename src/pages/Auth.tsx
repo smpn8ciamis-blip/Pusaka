@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import { useAuth } from '@/contexts/AuthContext';
@@ -17,8 +17,8 @@ import { z } from 'zod';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { AppFooter } from '@/components/AppFooter';
-import ReCAPTCHA from 'react-google-recaptcha';
-import { RECAPTCHA_SITE_KEY } from '@/config/recaptcha';
+import { TurnstileWidget, type TurnstileHandle } from '@/components/TurnstileWidget';
+import { TURNSTILE_SITE_KEY } from '@/config/turnstile';
 import { useCaptchaConfig } from '@/hooks/useCaptchaConfig';
 import { cn } from '@/lib/utils';
 
@@ -39,12 +39,16 @@ const ROLE_ROUTES: Record<string, string> = {
 const DEFAULT_APP_NAME = 'Sistem Manajemen Sekolah';
 const DEFAULT_ROUTE = '/dashboard';
 
+const passwordSchema = z.string().min(6, { message: 'Password minimal 6 karakter' });
+// Username siswa/guru berbentuk teks akun (bisa berupa alamat email), jadi tidak dipaksa berformat email.
 const loginSchema = z.object({
-  email: z.string().email({ message: 'Email tidak valid' }),
-  password: z.string().min(6, { message: 'Password minimal 6 karakter' }),
+  username: z.string().trim().min(1, { message: 'Username wajib diisi' }),
+  password: passwordSchema,
 });
-const signupSchema = loginSchema
-  .extend({
+const signupSchema = z
+  .object({
+    email: z.string().email({ message: 'Email tidak valid' }),
+    password: passwordSchema,
     fullName: z.string().min(3, { message: 'Nama lengkap minimal 3 karakter' }),
     confirmPassword: z.string(),
   })
@@ -81,10 +85,11 @@ const logDev = (...args: unknown[]) => { if (import.meta.env.DEV) console.log(..
 
 /** Kolom isian dengan ikon; kolom password punya tombol tampilkan/sembunyikan. */
 function Field({
-  id, name, type = 'text', label, placeholder, icon: Icon, autoComplete,
+  id, name, type = 'text', label, placeholder, icon: Icon, autoComplete, extra,
 }: {
   id: string; name: string; type?: string; label: string;
   placeholder: string; icon: React.ElementType; autoComplete?: string;
+  extra?: React.InputHTMLAttributes<HTMLInputElement>;
 }) {
   const [show, setShow] = useState(false);
   const isPassword = type === 'password';
@@ -97,6 +102,7 @@ function Field({
           id={id} name={name} type={isPassword && show ? 'text' : type}
           autoComplete={autoComplete} placeholder={placeholder} required
           className={cn('h-11 rounded-lg pl-10 text-base sm:text-sm', isPassword && 'pr-11')}
+          {...extra}
         />
         {isPassword && (
           <button
@@ -125,17 +131,18 @@ function SubmitButton({ children, loading, disabled }: { children: React.ReactNo
   );
 }
 
+/** Verifikasi keamanan Cloudflare Turnstile; tidak tampil bila dinonaktifkan di Pengaturan atau kunci belum dipasang. */
 function CaptchaField({
-  enabled, setCaptchaRef, onChange,
+  enabled, widgetRef, onChange,
 }: {
-  enabled: boolean; captchaRef: ReCAPTCHA | null;
-  setCaptchaRef: (r: ReCAPTCHA | null) => void;
+  enabled: boolean;
+  widgetRef: React.Ref<TurnstileHandle>;
   onChange: (t: string | null) => void;
 }) {
   if (!enabled) return null;
   return (
-    <div className="flex justify-center overflow-x-auto py-1">
-      <ReCAPTCHA ref={(ref) => setCaptchaRef(ref)} sitekey={RECAPTCHA_SITE_KEY} onChange={onChange} />
+    <div className="overflow-x-auto py-1">
+      <TurnstileWidget ref={widgetRef} siteKey={TURNSTILE_SITE_KEY} onToken={onChange} />
     </div>
   );
 }
@@ -220,12 +227,14 @@ function AuthShell({ children }: { children: React.ReactNode }) {
 export default function Auth() {
   const [isLoading, setIsLoading] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
-  const [captchaRef, setCaptchaRef] = useState<ReCAPTCHA | null>(null);
+  const captchaRef = useRef<TurnstileHandle>(null);
   const [showMfaVerify, setShowMfaVerify] = useState(false);
   const [pendingAuthCheck, setPendingAuthCheck] = useState(false);
   const [dismissedNotifications, setDismissedNotifications] = useState<string[]>([]);
   const { signIn, signUp, user } = useAuth();
-  const { captchaEnabled } = useCaptchaConfig();
+  const { captchaEnabled: captchaSettingOn } = useCaptchaConfig();
+  // Verifikasi wajib hanya bila diaktifkan di Pengaturan DAN site key Turnstile sudah dipasang.
+  const captchaEnabled = captchaSettingOn && TURNSTILE_SITE_KEY !== '';
   const navigate = useNavigate();
 
   const { data: settings, isLoading: isLoadingSettings, isError: isSettingsError, error: settingsError } = useQuery({
@@ -292,25 +301,30 @@ export default function Auth() {
   }, [user, showMfaVerify, pendingAuthCheck, navigate, routeForRole]);
 
   const resetCaptcha = useCallback(() => {
-    captchaRef?.reset();
+    captchaRef.current?.reset();
     setCaptchaToken(null);
-  }, [captchaRef]);
+  }, []);
 
   const handleLogin = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (isSystemLocked) return toast.error('Sistem sedang dikunci. Silakan coba lagi nanti.');
-    if (captchaEnabled && !captchaToken) return toast.error('Silakan verifikasi captcha terlebih dahulu');
+    if (captchaEnabled && !captchaToken) return toast.error('Tunggu verifikasi keamanan selesai terlebih dahulu');
 
     const fd = new FormData(e.currentTarget);
-    const parsed = loginSchema.safeParse({ email: fd.get('email'), password: fd.get('password') });
+    const parsed = loginSchema.safeParse({ username: fd.get('username'), password: fd.get('password') });
     if (!parsed.success) return toast.error(parsed.error.errors[0].message);
 
     setIsLoading(true); setPendingAuthCheck(true);
     try {
-      const { error } = await signIn(parsed.data.email, parsed.data.password);
+      const { error } = await signIn(parsed.data.username, parsed.data.password, captchaToken ?? undefined);
       if (error) {
         setPendingAuthCheck(false);
-        toast.error(error.message.includes('Invalid') ? 'Email atau password salah' : `Gagal login: ${error.message}`);
+        const msg = String(error.message ?? '');
+        toast.error(
+          /captcha/i.test(msg) ? 'Verifikasi keamanan gagal. Muat ulang halaman lalu coba lagi.'
+            : msg.includes('Invalid') ? 'Username atau password salah'
+            : `Gagal login: ${msg}`,
+        );
         resetCaptcha(); return;
       }
       const { data: { user: currentUser } } = await supabase.auth.getUser();
@@ -341,7 +355,7 @@ export default function Auth() {
 
   const handleSignup = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (captchaEnabled && !captchaToken) return toast.error('Silakan verifikasi captcha terlebih dahulu');
+    if (captchaEnabled && !captchaToken) return toast.error('Tunggu verifikasi keamanan selesai terlebih dahulu');
 
     const fd = new FormData(e.currentTarget);
     const parsed = signupSchema.safeParse({
@@ -352,7 +366,7 @@ export default function Auth() {
 
     setIsLoading(true);
     try {
-      const { error } = await signUp(parsed.data.email, parsed.data.password, parsed.data.fullName);
+      const { error } = await signUp(parsed.data.email, parsed.data.password, parsed.data.fullName, captchaToken ?? undefined);
       if (error) {
         toast.error(error.message.includes('already registered') ? 'Email sudah terdaftar' : `Gagal registrasi: ${error.message}`);
         resetCaptcha(); return;
@@ -506,9 +520,12 @@ export default function Auth() {
                       <p className="text-sm text-muted-foreground">Masuk untuk melanjutkan ke dasbor Anda.</p>
                     </div>
                     <form onSubmit={handleLogin} className="space-y-4">
-                      <Field id="login-email" name="email" type="email" label="Email" placeholder="nama@sekolah.com" icon={Mail} autoComplete="email" />
+                      <Field
+                        id="login-username" name="username" label="Username" placeholder="Username Anda" icon={User}
+                        autoComplete="username" extra={{ autoCapitalize: 'none', autoCorrect: 'off', spellCheck: false }}
+                      />
                       <Field id="login-password" name="password" type="password" label="Password" placeholder="Password Anda" icon={Lock} autoComplete="current-password" />
-                      <CaptchaField enabled={captchaEnabled} captchaRef={captchaRef} setCaptchaRef={setCaptchaRef} onChange={setCaptchaToken} />
+                      <CaptchaField enabled={captchaEnabled} widgetRef={captchaRef} onChange={setCaptchaToken} />
                       <SubmitButton loading={isLoading} disabled={captchaEnabled && !captchaToken}>Masuk ke Sistem</SubmitButton>
                     </form>
                   </TabsContent>
@@ -523,7 +540,7 @@ export default function Auth() {
                       <Field id="signup-email" name="email" type="email" label="Email" placeholder="nama@sekolah.com" icon={Mail} autoComplete="email" />
                       <Field id="signup-password" name="password" type="password" label="Password" placeholder="Minimal 6 karakter" icon={Lock} autoComplete="new-password" />
                       <Field id="signup-confirm-password" name="confirmPassword" type="password" label="Konfirmasi Password" placeholder="Ketik ulang password" icon={Lock} autoComplete="new-password" />
-                      <CaptchaField enabled={captchaEnabled} captchaRef={captchaRef} setCaptchaRef={setCaptchaRef} onChange={setCaptchaToken} />
+                      <CaptchaField enabled={captchaEnabled} widgetRef={captchaRef} onChange={setCaptchaToken} />
                       <SubmitButton loading={isLoading} disabled={captchaEnabled && !captchaToken}>Daftar Sekarang</SubmitButton>
                     </form>
                   </TabsContent>
