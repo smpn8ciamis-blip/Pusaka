@@ -1,3 +1,5 @@
+import { formatWibShort } from '@/lib/wib';
+import { wibInputToIso, isoToWibInput } from '@/lib/wib';
 import { useState, useMemo, useEffect } from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
@@ -24,7 +26,6 @@ import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
-import { format } from 'date-fns';
 import { RichTextEditor, RichTextDisplay } from '@/components/cbt/RichTextEditor';
 import { OptionDisplay } from '@/components/cbt/OptionDisplay';
 import { optionToEditorHtml, optionToStorage } from '@/lib/cbtOption';
@@ -197,8 +198,8 @@ export default function CbtExamManagement() {
         teacher_id: teacherData?.id || user!.id,
         academic_year: selectedYear,
         created_by: user!.id,
-        start_datetime: data.start_datetime || null,
-        end_datetime: data.end_datetime || null,
+        start_datetime: wibInputToIso(data.start_datetime), // jam yang dipilih = WIB
+        end_datetime: wibInputToIso(data.end_datetime),
         class_id: cIds[0] || data.class_id || null,
         class_ids: cIds.length > 0 ? cIds : null,
         exam_token: data.require_token ? (data.exam_token || generateToken()) : null,
@@ -223,8 +224,8 @@ export default function CbtExamManagement() {
         ...data,
         class_id: cIds[0] || data.class_id || null,
         class_ids: cIds.length > 0 ? cIds : null,
-        start_datetime: data.start_datetime || null,
-        end_datetime: data.end_datetime || null,
+        start_datetime: wibInputToIso(data.start_datetime), // jam yang dipilih = WIB
+        end_datetime: wibInputToIso(data.end_datetime),
         exam_token: data.require_token ? (data.exam_token || generateToken()) : null,
         grade_component: data.grade_component || null,
       };
@@ -447,8 +448,8 @@ export default function CbtExamManagement() {
       class_ids: Array.isArray(exam.class_ids) ? exam.class_ids : (exam.class_id ? [exam.class_id] : []),
       duration_minutes: exam.duration_minutes, pass_score: exam.pass_score,
       is_active: exam.is_active, show_result_to_student: exam.show_result_to_student,
-      start_datetime: exam.start_datetime ? format(new Date(exam.start_datetime), "yyyy-MM-dd'T'HH:mm") : '',
-      end_datetime: exam.end_datetime ? format(new Date(exam.end_datetime), "yyyy-MM-dd'T'HH:mm") : '',
+      start_datetime: exam.start_datetime ? isoToWibInput(exam.start_datetime) : '',
+      end_datetime: exam.end_datetime ? isoToWibInput(exam.end_datetime) : '',
       shuffle_questions: exam.shuffle_questions, shuffle_options: exam.shuffle_options,
       require_token: exam.require_token || false,
       exam_token: exam.exam_token || '',
@@ -642,8 +643,8 @@ export default function CbtExamManagement() {
         </TabsContent>
         <TabsContent value="schedule" className="space-y-3 mt-0">
           <div className="grid grid-cols-2 gap-3">
-            <div><Label>Waktu Mulai</Label><Input type="datetime-local" value={examForm.start_datetime} onChange={e => setExamForm(p => ({ ...p, start_datetime: e.target.value }))} /></div>
-            <div><Label>Waktu Selesai</Label><Input type="datetime-local" value={examForm.end_datetime} onChange={e => setExamForm(p => ({ ...p, end_datetime: e.target.value }))} /></div>
+            <div><Label>Waktu Mulai (WIB)</Label><Input type="datetime-local" value={examForm.start_datetime} onChange={e => setExamForm(p => ({ ...p, start_datetime: e.target.value }))} /></div>
+            <div><Label>Waktu Selesai (WIB)</Label><Input type="datetime-local" value={examForm.end_datetime} onChange={e => setExamForm(p => ({ ...p, end_datetime: e.target.value }))} /></div>
           </div>
           <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
             <div>
@@ -1310,7 +1311,7 @@ export default function CbtExamManagement() {
                                   <span>{sess?.students?.full_name || 'Tidak diketahui'}</span>
                                   <span className="flex items-center gap-2">
                                     <Badge variant="destructive" className="text-[10px]" title={v.detail || undefined}>{violationLabel(v.violation_type)}</Badge>
-                                    <span className="text-muted-foreground">{format(new Date(v.created_at), 'dd/MM HH:mm')}</span>
+                                    <span className="text-muted-foreground">{formatWibShort(v.created_at)}</span>
                                   </span>
                                 </div>
                               );

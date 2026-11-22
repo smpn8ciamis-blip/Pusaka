@@ -1,3 +1,4 @@
+import { formatWibClock } from '@/lib/wib';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
@@ -512,7 +513,7 @@ export default function CbtMonitor() {
 
   // ---------------------------------------------------------------- tampilan
   const loadingFirst = (examsLoading || sessionsQ.isLoading) && !sessionsQ.data;
-  const updatedAt = sessionsQ.dataUpdatedAt ? new Date(sessionsQ.dataUpdatedAt).toLocaleTimeString('id-ID') : '–';
+  const updatedAt = sessionsQ.dataUpdatedAt ? formatWibClock(sessionsQ.dataUpdatedAt) : '–';
   const rowProps = (r: MonRow): RowProps => ({
     r, totalQ, passScore: exam?.pass_score || 70, now, selected: !!r.sessionId && selected.has(r.sessionId), antiCheat,
     onToggle: toggleRow, onOpen: setDetail, onAction: onRowAction,
@@ -763,7 +764,7 @@ function DetailSheet({ row, exam, totalQ, now, onClose, onAction }: { row: MonRo
               <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
                 <dt className="text-muted-foreground">Progres</dt><dd>{r.answered}/{totalQ} ({r.progress}%)</dd>
                 <dt className="text-muted-foreground">Sisa waktu</dt><dd className="font-mono">{formatClock(r.timeLeft)}</dd>
-                <dt className="text-muted-foreground">Mulai</dt><dd>{r.startMs ? new Date(r.startMs).toLocaleTimeString('id-ID') : '–'}</dd>
+                <dt className="text-muted-foreground">Mulai</dt><dd>{r.startMs ? formatWibClock(r.startMs) : '–'}</dd>
                 <dt className="text-muted-foreground">Aktivitas</dt><dd className={r.offline && r.status !== 'selesai' ? 'text-destructive font-medium' : ''}>{formatAgo(r.lastActivityMs, now)}</dd>
                 {r.status === 'selesai' && <><dt className="text-muted-foreground">Skor</dt><dd className="font-semibold">{r.score != null ? r.score.toFixed(1) : '–'}{r.needsGrading ? ' (perlu koreksi)' : ''}</dd></>}
               </dl>
@@ -775,7 +776,7 @@ function DetailSheet({ row, exam, totalQ, now, onClose, onAction }: { row: MonRo
                       {(vq.data || []).map((v) => (
                         <li key={v.id} className="flex justify-between gap-2 text-xs border-b pb-1">
                           <span>{violationLabel(v.violation_type)}{v.detail ? <span className="text-muted-foreground"> — {v.detail}</span> : null}</span>
-                          <span className="text-muted-foreground whitespace-nowrap">{new Date(v.created_at).toLocaleTimeString('id-ID')}</span>
+                          <span className="text-muted-foreground whitespace-nowrap">{formatWibClock(v.created_at)}</span>
                         </li>
                       ))}
                     </ul>

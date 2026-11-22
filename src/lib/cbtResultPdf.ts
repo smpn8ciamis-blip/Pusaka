@@ -2,6 +2,7 @@
  * PDF "Daftar Hasil Ujian CBT" dari halaman Pantau CBT: isi mengikuti saringan yang aktif, urut kelas lalu nama (atau nama saja).
  * Kertas A4 / F4, kop sekolah, rekap nilai, dan blok tanda tangan yang tidak terpotong (pindah halaman bila tidak muat).
  */
+import { formatWibDate } from '@/lib/wib';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { addLetterheadToPDF, type LetterheadSettings } from '@/lib/pdfLetterhead';
@@ -125,7 +126,7 @@ export async function buildCbtResultPdf(opts: CbtResultPdfOptions, settings: Rep
   setFont('bold', 12);
   doc.text('DAFTAR HASIL UJIAN CBT', pw / 2, startY, { align: 'center' });
 
-  const dateText = exam.start_datetime ? new Date(exam.start_datetime).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+  const dateText = formatWibDate(exam.start_datetime);
   const info: [string, string][] = [
     ['Ujian', clean(exam.title) || '-'],
     ['Mata Pelajaran', clean(exam.subject) || '-'],
