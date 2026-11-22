@@ -9,6 +9,7 @@ import {
   DAY_NAMES, greetingFor, humanMinutes, safeFormatDate, toMinutes,
   type AttendanceSummary, type HeroNews, type LessonState,
 } from "@/lib/studentDashboard";
+import { FeaturedLinks } from "./FeaturedLinks";
 
 export interface DesktopStat {
   label: string;
@@ -41,6 +42,8 @@ interface Props {
   attendancePercent: number;
   logsNode: ReactNode;
   onNavigate: (tab: string) => void;
+  /** Buka halaman Ujian CBT siswa. */
+  onOpenCbt: () => void;
 }
 
 const TONES: Record<DesktopStat["tone"], { chip: string; icon: string }> = {
@@ -113,6 +116,9 @@ export function DesktopOverview(p: Props) {
 
   return (
     <div className="space-y-6">
+      {/* E-Learning & Ujian CBT: paling atas agar mudah ditemukan */}
+      <FeaturedLinks variant="desktop" onElearning={() => p.onNavigate("elearning")} onCbt={p.onOpenCbt} />
+
       {/* BARIS 1: hero + pelajaran/kehadiran */}
       <div className="grid grid-cols-12 gap-6">
         <section
