@@ -19,7 +19,7 @@ import {
   Phone, Mail, User, Save, Settings, Loader2, History, LogOut,
   MapPin, CalendarDays, Hash, Users, GraduationCap, CreditCard, IdCard,
   UserCircle, Home, Box, BarChart3, ChevronRight, AlertCircle, BadgeCheck,
-  Search, Grid3X3, CalendarCheck, Megaphone, Hourglass, ExternalLink, Link2,
+  Search, Grid3X3, CalendarCheck, Megaphone, Hourglass, FileCheck, Link2,
   Trash2, X, Upload, CheckCircle2, Wifi, WifiOff, Monitor, Sunrise,
 } from "lucide-react";
 import { format, isValid, formatDistanceToNow } from "date-fns";
@@ -33,6 +33,7 @@ import { EnablePushButton } from "@/components/EnablePushButton";
 
 import StudentUploadTab from "@/components/dashboard/StudentUploadTab";
 import StudentElearningTab from "@/components/dashboard/StudentElearningTab";
+import { FeaturedLinks } from "@/components/student-dashboard/FeaturedLinks";
 import AttendanceTrendChart from "@/components/dashboard/AttendanceTrendChart";
 import StudentIdCardTab from "@/components/dashboard/StudentIdCardTab";
 import AttendanceLogList from "@/components/dashboard/AttendanceLogList";
@@ -801,10 +802,11 @@ const StudentDashboardPage = () => {
 
   // ─── Shortcut menus ────────────────────────────────────────────────────
   const shortcutMenus = useMemo(() => [
+    { tab: 'elearning', label: 'E-Learning', icon: GraduationCap, color: 'bg-sky-500', featured: true },
+    { url: '/cbt-student', label: 'Ujian CBT', icon: FileCheck, color: 'bg-teal-500', isExternal: true, featured: true },
     { tab: 'schedule', label: 'Jadwal', icon: Calendar, color: 'bg-blue-500' },
     { tab: 'idcard', label: 'Kartu OSIS', icon: IdCard, color: 'bg-rose-500' },
     { tab: 'grades', label: 'Nilai', icon: BookOpen, color: 'bg-emerald-500' },
-    { tab: 'elearning', label: 'E-Learning', icon: GraduationCap, color: 'bg-sky-500' },
     { tab: 'attendance', label: 'Absensi', icon: CalendarCheck, color: 'bg-amber-500' },
     { url: '/jurnal-kaih', label: 'Jurnal 7 Kebiasaan', icon: Sunrise, color: 'bg-orange-500', isExternal: true },
     { tab: 'violations', label: 'Pelanggaran', icon: AlertTriangle, color: 'bg-red-500' },
@@ -816,7 +818,6 @@ const StudentDashboardPage = () => {
     { tab: 'uploads', label: 'Upload Berkas', icon: Upload, color: 'bg-emerald-500' },
     { tab: 'settings', label: 'Pengaturan', icon: Settings, color: 'bg-slate-500' },
     { tab: 'profile', label: 'Profil Saya', icon: UserCircle, color: 'bg-pink-500' },
-    { url: '/cbt-student', label: 'CBT Student', icon: ExternalLink, color: 'bg-teal-500', isExternal: true },
     { url: '/nedelcis-hub', label: 'Nedelcis Hub', icon: Link2, color: 'bg-violet-500', isExternal: true },
   ], []);
 
@@ -877,7 +878,9 @@ const StudentDashboardPage = () => {
     };
     const FALLBACK = { tile: 'bg-[#E1F0FF]', icon: 'text-[#1E6FE0]' };
     const VISIBLE = 7;
-    const menusShown = showAllMenu ? shortcutMenus : shortcutMenus.slice(0, VISIBLE);
+    // E-Learning & Ujian CBT tampil sebagai kartu besar di paling atas, jadi tidak diulang di grid layanan
+    const gridMenus = shortcutMenus.filter((m: any) => !m.featured);
+    const menusShown = showAllMenu ? gridMenus : gridMenus.slice(0, VISIBLE);
 
     const stats = [
       { label: 'Kehadiran', value: showData ? `${attendancePercentage}%` : '•••', unit: 'Hari ini ' + (showData ? `${attendanceSummary?.hadir || 0}/${attendanceSummary?.total || 0}` : '•••'), tab: 'attendance', icon: CalendarCheck, grad: 'from-[#CFE6FF] to-[#E9F3FF]' },
@@ -888,6 +891,8 @@ const StudentDashboardPage = () => {
 
     return (
       <div className="space-y-6 px-4 pb-4">
+        <FeaturedLinks variant="mobile" onElearning={() => handleTabChange('elearning')} onCbt={() => navigate('/cbt-student')} />
+
         <CurrentLessonCard
           state={lesson}
           onOpenSchedule={() => handleTabChange('schedule')}
@@ -923,14 +928,14 @@ const StudentDashboardPage = () => {
                 </button>
               );
             })}
-            {!showAllMenu && shortcutMenus.length > VISIBLE && (
+            {!showAllMenu && gridMenus.length > VISIBLE && (
               <button
                 onClick={() => setShowAllMenu(true)}
                 className="flex flex-col items-center gap-2 rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1E6FE0] active:scale-95 transition-transform"
               >
                 <span className="relative flex aspect-square w-full items-center justify-center rounded-[1.75rem] bg-[#EFEFF2] dark:bg-slate-800">
                   <span className="absolute -top-1.5 -left-1.5 rounded-full bg-slate-800/85 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur">
-                    {shortcutMenus.length - VISIBLE} lagi
+                    {gridMenus.length - VISIBLE} lagi
                   </span>
                   <Grid3X3 className="h-8 w-8 text-slate-500" strokeWidth={1.75} />
                 </span>
@@ -2005,6 +2010,7 @@ const StudentDashboardPage = () => {
               attendancePercent={attendancePercentage}
               logsNode={<AttendanceLogList logs={attendanceLogs} loading={logsLoading} limit={6} onSeeAll={() => handleTabChange('attendance')} />}
               onNavigate={handleTabChange}
+              onOpenCbt={() => navigate('/cbt-student')}
             />
           ) : (
             // Konten tab lain memakai tampilan yang sama dengan mobile, dibatasi lebarnya agar tetap nyaman dibaca

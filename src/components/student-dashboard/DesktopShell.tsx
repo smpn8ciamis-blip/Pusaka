@@ -3,8 +3,8 @@
 import type { ReactNode } from "react";
 import {
   Home, Calendar, BookOpen, GraduationCap, CalendarCheck, AlertTriangle, Trophy, Users,
-  Star, Hourglass, Megaphone, IdCard, Upload, UserCircle, Settings, ExternalLink, Link2,
-  LogOut, Search, Smartphone, Sunrise,
+  Star, Hourglass, Megaphone, IdCard, Upload, UserCircle, Settings, Link2,
+  LogOut, Search, Smartphone, Sunrise, FileCheck,
 } from "lucide-react";
 
 interface NavItem {
@@ -19,9 +19,10 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
     label: "Utama",
     items: [
       { tab: "overview", label: "Beranda", icon: Home },
+      { tab: "elearning", label: "E-Learning", icon: GraduationCap },
+      { url: "/cbt-student", label: "Ujian CBT", icon: FileCheck },
       { tab: "schedule", label: "Jadwal", icon: Calendar },
       { tab: "grades", label: "Nilai", icon: BookOpen },
-      { tab: "elearning", label: "E-Learning", icon: GraduationCap },
       { tab: "attendance", label: "Kehadiran", icon: CalendarCheck },
     ],
   },
@@ -49,7 +50,6 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: "Aplikasi Lain",
     items: [
-      { url: "/cbt-student", label: "CBT Student", icon: ExternalLink },
       { url: "/nedelcis-hub", label: "Nedelcis Hub", icon: Link2 },
     ],
   },
