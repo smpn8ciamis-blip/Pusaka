@@ -691,3 +691,15 @@ mark {
 
 /* Soal/jawaban CBT: campuran Arab (kanan-ke-kiri) dan Latin. Tiap paragraf menentukan arahnya sendiri dari huruf pertamanya. */
 .bidi-auto p, .bidi-auto li, .bidi-auto h1, .bidi-auto h2, .bidi-auto h3 { unicode-bidi: plaintext; text-align: start; }
+
+/* Bar tunggu CBT (CalmWait): mengisi halus tiap detik / geser terus bila lama tak diketahui */
+.calm-wait-fill { transition: width 1s linear; }
+.calm-wait-slide { animation: calm-wait-slide 1.6s ease-in-out infinite; }
+@keyframes calm-wait-slide {
+  0% { left: -40%; }
+  100% { left: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .calm-wait-slide { animation: none; left: 30%; }
+  .calm-wait-fill { transition: none; }
+}
