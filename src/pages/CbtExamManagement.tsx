@@ -20,7 +20,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAcademicYear } from '@/contexts/AcademicYearContext';
-import { Plus, Search, Edit, Trash2, FileSpreadsheet, Users, Download, Printer, KeyRound, Activity, BookmarkPlus, Library, RefreshCcw, Pause, Play, Power, Clock, BarChart3, ShieldAlert, RotateCcw } from 'lucide-react';
+import { ClipboardPaste, Plus, Search, Edit, Trash2, FileSpreadsheet, Users, Download, Printer, KeyRound, Activity, BookmarkPlus, Library, RefreshCcw, Pause, Play, Power, Clock, BarChart3, ShieldAlert, RotateCcw } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
@@ -30,6 +30,7 @@ import { RichTextEditor, RichTextDisplay } from '@/components/cbt/RichTextEditor
 import { OptionDisplay } from '@/components/cbt/OptionDisplay';
 import { optionToEditorHtml, optionToStorage } from '@/lib/cbtOption';
 import { CbtRemedialDialog } from '@/components/cbt/CbtRemedialDialog';
+import { WordPasteDialog } from '@/components/cbt/WordPasteDialog';
 import { violationLabel } from '@/lib/cbtAntiCheat';
 
 const ITEMS_PER_PAGE = 10;
@@ -47,6 +48,7 @@ export default function CbtExamManagement() {
   const [isQuestionsOpen, setIsQuestionsOpen] = useState(false);
   const [isResultsOpen, setIsResultsOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isWordOpen, setIsWordOpen] = useState(false);
   const [isGradingOpen, setIsGradingOpen] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [isAnalysisOpen, setIsAnalysisOpen] = useState(false);
@@ -838,6 +840,7 @@ export default function CbtExamManagement() {
                 <DialogDescription>Total: {questions?.length || 0} soal</DialogDescription>
               </DialogHeader>
               <div className="flex flex-wrap gap-2 mb-3">
+                <Button size="sm" onClick={() => setIsWordOpen(true)}><ClipboardPaste className="h-4 w-4 mr-1" /> Tempel dari Word</Button>
                 <Button size="sm" variant="outline" onClick={() => setIsImportOpen(true)}><FileSpreadsheet className="h-4 w-4 mr-1" /> Import Excel</Button>
                 <Button size="sm" variant="outline" onClick={downloadTemplate}><Download className="h-4 w-4 mr-1" /> Template Excel</Button>
                 <Button size="sm" variant="outline" onClick={() => setIsTemplatesOpen(true)}><Library className="h-4 w-4 mr-1" /> Bank Soal</Button>
@@ -956,6 +959,20 @@ export default function CbtExamManagement() {
               </div>
             </DialogContent>
           </Dialog>
+
+          {/* Tempel banyak soal dari Word */}
+          {selectedExam && (
+            <WordPasteDialog
+              open={isWordOpen}
+              onOpenChange={setIsWordOpen}
+              examId={selectedExam.id}
+              startNumber={(questions?.length || 0) + 1}
+              onImported={() => {
+                queryClient.invalidateQueries({ queryKey: ['cbt-questions'] });
+                queryClient.invalidateQueries({ queryKey: ['cbt-exams'] });
+              }}
+            />
+          )}
 
           {/* Import */}
           <Dialog open={isImportOpen} onOpenChange={setIsImportOpen}>

@@ -9,6 +9,7 @@ import { Bold, Italic, Underline as UIcon, List, ListOrdered, Image as ImgIcon, 
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { SymbolPalette } from '@/components/cbt/SymbolPalette';
+import { Superscript, Subscript, CbtTable, CbtTableRow, CbtTableCell } from '@/components/cbt/editorExtensions';
 import { compressAndUploadQuestionImage } from '@/lib/driveImage';
 import { driveFileId, driveFallbackUrl, driveImageUrl } from '@/lib/driveLinks';
 
@@ -35,6 +36,7 @@ export function RichTextEditor({ value, onChange, placeholder, minHeight = '120p
       // allowBase64 tetap true agar gambar lama (base64) di soal yang sudah ada tidak hilang saat soal dibuka untuk diedit
       Image.configure({ inline: true, allowBase64: true, HTMLAttributes: { referrerpolicy: 'no-referrer' } }),
       Link.configure({ openOnClick: false }),
+      Superscript, Subscript, CbtTable, CbtTableRow, CbtTableCell,
     ],
     content: value || '',
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
@@ -123,6 +125,8 @@ export function RichTextEditor({ value, onChange, placeholder, minHeight = '120p
         <Button type="button" size="sm" variant={editor.isActive('bold') ? 'default' : 'ghost'} className="h-7 w-7 p-0" onClick={() => editor.chain().focus().toggleBold().run()}><Bold className="h-3.5 w-3.5" /></Button>
         <Button type="button" size="sm" variant={editor.isActive('italic') ? 'default' : 'ghost'} className="h-7 w-7 p-0" onClick={() => editor.chain().focus().toggleItalic().run()}><Italic className="h-3.5 w-3.5" /></Button>
         <Button type="button" size="sm" variant={editor.isActive('underline') ? 'default' : 'ghost'} className="h-7 w-7 p-0" onClick={() => editor.chain().focus().toggleUnderline().run()}><UIcon className="h-3.5 w-3.5" /></Button>
+        <Button type="button" size="sm" variant={editor.isActive('superscript') ? 'default' : 'ghost'} className="h-7 w-7 p-0 text-xs" title="Pangkat (x²)" onClick={() => editor.chain().focus().toggleMark('superscript').run()}>x²</Button>
+        <Button type="button" size="sm" variant={editor.isActive('subscript') ? 'default' : 'ghost'} className="h-7 w-7 p-0 text-xs" title="Indeks (H₂O)" onClick={() => editor.chain().focus().toggleMark('subscript').run()}>x₂</Button>
         {!compact && (<>
         <Button type="button" size="sm" variant={editor.isActive('heading', { level: 2 }) ? 'default' : 'ghost'} className="h-7 w-7 p-0" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}><Heading2 className="h-3.5 w-3.5" /></Button>
         <Button type="button" size="sm" variant={editor.isActive('bulletList') ? 'default' : 'ghost'} className="h-7 w-7 p-0" onClick={() => editor.chain().focus().toggleBulletList().run()}><List className="h-3.5 w-3.5" /></Button>
