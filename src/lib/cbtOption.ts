@@ -23,7 +23,7 @@ export function optionToEditorHtml(v: string | null | undefined): string {
 export function optionToStorage(html: string | null | undefined): string {
   const h = (html || '').trim();
   if (!h) return '';
-  if (/<img\b/i.test(h) || /<(strong|em|u|ul|ol|li|h[1-6]|a)\b/i.test(h)) return h;
+  if (/<img\b/i.test(h) || /<(strong|em|u|ul|ol|li|h[1-6]|a|sub|sup|table)\b/i.test(h)) return h;
   const text = unescapeHtml(h.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>\s*<p[^>]*>/gi, '\n').replace(/<[^>]+>/g, '')).trim();
   if (isRichOption(text)) return h; // teks yang kebetulan berbentuk tag: simpan versi ter-escape agar tidak terbaca sebagai HTML
   return text;
