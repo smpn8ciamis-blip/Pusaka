@@ -298,6 +298,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         { icon: GraduationCap, label: 'Nilai', href: '/grades' },
         { icon: TrendingUp, label: 'Analytics Nilai', href: '/grade-analytics' },
         { icon: FileCheck, label: 'Administrasi Ujian', href: '/exam-administration' },
+        { icon: UserCheck, label: 'Jadwal Pengawas Ujian', href: '/panitia-ujian/pengawas' },
         { icon: FileCheck, label: 'Ujian CBT', href: '/cbt-management' },
         { icon: Activity, label: 'Pantau CBT', href: '/cbt-monitor' },
       ],
@@ -646,6 +647,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const panitiaUjianMenuItems: MenuItem[] = [
     { icon: LayoutDashboard, label: 'Dashboard Panitia Ujian', href: '/panitia-ujian-dashboard' },
     { icon: CalendarClock, label: 'Nama & Jadwal Ujian', href: '/panitia-ujian/jadwal' },
+    { icon: UserCheck, label: 'Jadwal Pengawas', href: '/panitia-ujian/pengawas' },
     { icon: FileCheck, label: 'Administrasi Ujian', href: '/exam-administration' },
     { icon: Activity, label: 'Pantau CBT', href: '/cbt-monitor' },
     { icon: FileCheck, label: 'Ujian CBT', href: '/cbt-management' },
