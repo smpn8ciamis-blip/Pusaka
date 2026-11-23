@@ -543,6 +543,7 @@ function ReminderTab() {
   const [assignWa, setAssignWa] = useState(true);
   const [assignFu, setAssignFu] = useState(true);
   const [parentQuery, setParentQuery] = useState(true);
+  const [studentAccountWa, setStudentAccountWa] = useState(true);
   const [parentAbsence, setParentAbsence] = useState(true);
   const [waMenu, setWaMenu] = useState(true);
   const [waButtons, setWaButtons] = useState(false);
@@ -586,6 +587,7 @@ function ReminderTab() {
       setAssignWa(data.assignment_wa_enabled !== false);
       setAssignFu(data.assignment_followup_enabled !== false);
       setParentQuery(data.parent_query_enabled !== false);
+      setStudentAccountWa(data.student_account_wa_enabled !== false);
       setParentAbsence(data.parent_absence_wa_enabled !== false);
       setWaMenu(data.wa_menu_enabled !== false);
       setWaButtons(data.wa_buttons_enabled === true);
@@ -623,6 +625,7 @@ function ReminderTab() {
         assignment_wa_enabled: assignWa,
         assignment_followup_enabled: assignFu,
         parent_query_enabled: parentQuery,
+        student_account_wa_enabled: studentAccountWa,
         parent_absence_wa_enabled: parentAbsence,
         wa_menu_enabled: waMenu,
         wa_buttons_enabled: waButtons,
@@ -857,6 +860,15 @@ function ReminderTab() {
           </div>
           <p className="text-xs text-muted-foreground">
             Orang tua yang nomornya sudah tertaut ke siswa (kirim <b>DAFTAR</b> ke bot, lalu isi NISN dan tanggal lahir) dapat mengetik <b>cek poin</b> untuk melihat total poin dan rincian pelanggaran, atau <b>absen</b> untuk rekap kehadiran 30 hari terakhir. Nomor yang belum tertaut dibalas petunjuk menautkan. Bot hanya menjawab saat dichat (tidak memeriksa berkala). Isi balasan bisa diubah di tab Template.
+          </p>
+        </div>
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="sa-en">Siswa/orang tua menanyakan akun Pusaka lewat WA ("akun pusaka")</Label>
+            <Switch id="sa-en" checked={studentAccountWa} onCheckedChange={setStudentAccountWa} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Mengetik <b>akun pusaka</b> ke bot dibalas username dan password awal siswa, disertai petunjuk mengganti password setelah login (Pengaturan → Keamanan). Nomor yang sudah tertaut ke siswa langsung dijawab; nomor lain diminta NISN dan tanggal lahir (DDMMYYYY) dulu, dengan batas percobaan gagal. Password awal diatur lewat <code>STUDENT_DEFAULT_PASSWORD</code> di server bot. Isi balasan bisa diubah di tab Template.
           </p>
         </div>
         <div className="space-y-2 rounded-lg border p-3">

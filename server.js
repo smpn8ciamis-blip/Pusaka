@@ -315,6 +315,7 @@ DEFAULT_TEMPLATES.assignment_followup = `⏰ *PENGINGAT BUKTI KUNJUNGAN*\n\nYth.
 DEFAULT_TEMPLATES.parent_points = `⚠️ *POIN PELANGGARAN*\n\nSiswa: *{{nama_siswa}}* ({{kelas}})\nTotal poin: *{{total_poin}}* ({{jumlah_catatan}} catatan)\n\n{{rincian}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.parent_violation_new = `⚠️ *PELANGGARAN BARU*\n\nYth. Bapak/Ibu Orang Tua/Wali,\nAnanda *{{nama_siswa}}* ({{kelas}}) mendapat catatan pelanggaran:\n• Tanggal: {{tanggal}}\n• Pelanggaran: *{{pelanggaran}}* ({{kategori}})\n• Poin: *+{{poin}}*\n• Keterangan: {{keterangan}}\n\nTotal poin ananda saat ini: *{{total_poin}}* ({{jumlah_catatan}} catatan).\nMohon bimbingan Bapak/Ibu di rumah. Ketik *cek poin* untuk melihat rinciannya.\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.parent_attendance = `📅 *REKAP KEHADIRAN*\n\nSiswa: *{{nama_siswa}}* ({{kelas}})\nPeriode: {{periode}} (30 hari terakhir)\n\n✅ Hadir: *{{hadir}}* hari ({{persen}}%)\n⏰ Terlambat: {{terlambat}} hari (sudah termasuk hadir)\n🤒 Sakit: {{sakit}} hari\n📝 Izin: {{izin}} hari\n❌ Alfa: {{alpa}} hari\nTotal hari tercatat: {{total_hari}}\n\n{{rincian}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.student_account = `🔐 *AKUN PUSAKA*\n\nNama: *{{nama_siswa}}* ({{kelas}})\n\n• Username: *{{username}}*\n• Password awal: *{{password}}*\n• Alamat: {{alamat}}\n\n⚠️ *Setelah berhasil login, segera ganti password* agar akunmu aman:\nBuka menu *Pengaturan* → *Keamanan*, isi *Password Lama* (password awal di atas) dan *Password Baru*, lalu ketuk *Simpan Password*.\n\nSudah pernah mengganti password lalu lupa? Hubungi wali kelas untuk diatur ulang. Jangan bagikan username dan password kepada siapa pun.\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.piket_punch = `🕒 *ABSENSI PIKET TERCATAT*\n\nYth. Bapak/Ibu *{{nama}}*,\nAbsen *{{jenis}}* {{shift}} Anda tercatat pada {{tanggal}} pukul *{{jam}} WIB* melalui mesin absensi.\n\nTerima kasih atas pengabdiannya.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.teacher_saturday_greeting = `🌿 *SELAMAT AKHIR PEKAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\n\nTerima kasih atas dedikasi dan kerja keras Bapak/Ibu dalam mendidik anak-anak kita sepanjang pekan ini.\n\nHari {{hari}} adalah waktu untuk berhenti sejenak. Nikmatilah akhir pekan bersama keluarga, karena keluarga adalah sumber kekuatan terbesar seorang pendidik. Istirahatlah yang cukup dan siapkan energi terbaik untuk mengajar kembali di hari Senin.\n\nSemoga sehat dan bahagia selalu. 🙏\n_Pusaka - SMP Negeri 8 Ciamis_`;
 const DEFAULT_BOT_SETTINGS = {
@@ -349,7 +350,8 @@ const DEFAULT_BOT_SETTINGS = {
     weekly_absence_threshold: 3,      // "sering": total hari tidak hadir >= nilai ini, atau alfa >= 2
     weekly_absence_to_group: false,   // kirim juga ringkasan siswa yang sering tidak hadir ke grup rekap
     violation_wa_enabled: true,       // WA ke orang tua (nomor tertaut) saat siswa mendapat catatan pelanggaran baru
-    ekskul_journal_wa_enabled: true   // pembina ekskul (nomor HP profil cocok) bisa isi jurnal & kirim foto kegiatan lewat chat bot
+    ekskul_journal_wa_enabled: true,  // pembina ekskul (nomor HP profil cocok) bisa isi jurnal & kirim foto kegiatan lewat chat bot
+    student_account_wa_enabled: true  // siswa/ortu mengetik "akun pusaka" -> bot membalas username + password awal (setelah nomor/NISN+tgl lahir diverifikasi)
 };
 const CONFIG_TTL_MS = 30 * 1000;
 let templateCache = { at: 0, rows: new Map() };
@@ -566,12 +568,12 @@ async function startBot() {
             const senderPhone = getSenderPhoneNumber(msg);
             await sock.readMessages([msg.key]).catch(() => {});
             // Balasan angka setelah menu ("1", "2", ...) diubah menjadi perintahnya. Tidak berlaku saat sesi lain sedang berjalan.
-            if (!ekskulSessions.has(from) && !regSessions.has(from) && !suratSessions.has(from) && !absenceSessions.has(from)) {
+            if (!ekskulSessions.has(from) && !regSessions.has(from) && !suratSessions.has(from) && !absenceSessions.has(from) && !accountSessions.has(from)) {
                 const picked = menuPick(from, cleanText);
                 if (picked) { text = picked; cleanText = picked; }
             }
             // Chat pertama yang memakai perintah bot: kirim kartu kontak agar nomor bot bisa disimpan pengirim.
-            if (menuCommand(cleanText) === 'explicit' || parentCommand(cleanText) || cleanText === 'daftar' || ekskulCommand(cleanText) || suratCommand(cleanText) || absenceCommand(cleanText)) {
+            if (menuCommand(cleanText) === 'explicit' || parentCommand(cleanText) || accountCommand(cleanText) || cleanText === 'daftar' || ekskulCommand(cleanText) || suratCommand(cleanText) || absenceCommand(cleanText)) {
                 await maybeSendContactCard(from).catch(function(e) { console.error('[KONTAK WA]', e.message); });
             }
             // Pembina ekskul: JURNAL / FOTO dan seluruh jawaban selama sesi. Dicek paling awal agar jawaban bebas (mis. "cek ...") tidak tertukar perintah lain.
@@ -586,13 +588,18 @@ async function startBot() {
                 const handledA = await handleAbsenceMessage(msg, from, text, cleanText, senderPhone, quotedId).catch(function(e) { console.error('[IZIN WA]', e.message); return false; });
                 if (handledA) continue;
             }
+            // "akun pusaka": username + password awal siswa (nomor tertaut, atau verifikasi NISN + tanggal lahir).
+            if (accountSessions.has(from) || accountCommand(cleanText)) {
+                const handledAk = await handleAccountMessage(msg, from, text, cleanText, senderPhone).catch(function(e) { console.error('[AKUN WA]', e.message); return false; });
+                if (handledAk) continue;
+            }
             // Surat tugas saya (bukti kunjungan lewat chat) dan menu perintah.
             if (suratSessions.has(from) || suratCommand(cleanText)) {
                 const handledS = await handleSuratMessage(msg, from, cleanText, senderPhone).catch(function(e) { console.error('[SURAT WA]', e.message); return false; });
                 if (handledS) continue;
             }
             const menuKind = menuCommand(cleanText);
-            if (menuKind && !regSessions.has(from) && !suratSessions.has(from) && !absenceSessions.has(from)) {
+            if (menuKind && !regSessions.has(from) && !suratSessions.has(from) && !absenceSessions.has(from) && !accountSessions.has(from)) {
                 await sendMenu(from, msg, menuKind).catch(function(e) { console.error('[MENU WA]', e.message); });
                 continue;
             }
@@ -1505,6 +1512,131 @@ async function handleParentQuery(kind, msg, from) {
     }
 }
 
+// ===================== AKUN PUSAKA: username + password awal lewat WA =====================
+// Siswa/orang tua mengetik "akun pusaka".
+//  * Nomor yang sudah tertaut ke siswa (lewat DAFTAR) langsung dijawab.
+//  * Nomor lain diminta NISN lalu tanggal lahir (DDMMYYYY); bila cocok baru dijawab. Pesan galat sengaja sama untuk NISN salah
+//    maupun tanggal lahir salah, dan percobaan gagal dibatasi per nomor dan per NISN (anti tebak-tebakan).
+// Password yang ditampilkan adalah password awal sekolah (env STUDENT_DEFAULT_PASSWORD); siswa diminta menggantinya setelah login.
+const STUDENT_DEFAULT_PASSWORD = process.env.STUDENT_DEFAULT_PASSWORD || 'Nedelcis1234';
+const ACCOUNT_WORDS = ['akun pusaka', 'akunpusaka', 'akun', 'akun saya', 'username', 'info akun'];
+function accountCommand(cleanText) {
+    return ACCOUNT_WORDS.indexOf(String(cleanText).replace(/\s+/g, ' ').trim()) !== -1;
+}
+const ACCOUNT_SESSION_TTL = 10 * 60 * 1000;
+const ACCOUNT_GAP_MS = 10000;                 // jeda antar perintah per nomor
+const ACCOUNT_MAX_STUDENTS = 5;               // maksimal akun yang dibalas untuk satu nomor tertaut
+const ACCOUNT_SENDER_MAX_FAILS = 5, ACCOUNT_SENDER_LOCK_MS = 30 * 60 * 1000;
+const ACCOUNT_NISN_MAX_FAILS = 8, ACCOUNT_NISN_LOCK_MS = 60 * 60 * 1000;
+const accountSessions = new Map();            // chat JID -> { step: 'NISN' | 'DOB', nisn, student, at }
+const accountLast = new Map();
+const accountFails = new Map();               // 'p:<nomor>' / 'n:<nisn>' -> { n, until, at }
+function accountLocked(key) { const f = accountFails.get(key); return !!(f && f.until && f.until > Date.now()); }
+function accountFailed(key, max, lockMs) {
+    const now = Date.now();
+    let f = accountFails.get(key);
+    if (!f || (f.until && f.until <= now) || now - f.at > lockMs) f = { n: 0, until: 0, at: now };
+    f.n++; f.at = now;
+    if (f.n >= max) f.until = now + lockMs;
+    accountFails.set(key, f);
+    if (accountFails.size > 5000) accountFails.clear();
+}
+async function accountFindStudent(digits) {
+    const sel = 'id, full_name, nisn, nis, birth_date, status, is_alumni, classes(name)';
+    for (const col of ['nisn', 'nis']) {
+        const r = await supabase.from('students').select(sel).eq(col, digits).eq('status', 'aktif').eq('is_alumni', false).limit(1).maybeSingle();
+        if (r.error) throw r.error;
+        if (r.data) return r.data;
+    }
+    return null;
+}
+async function sendAccountInfo(st, reply) {
+    const a = await supabase.from('student_accounts').select('user_id').eq('student_id', st.id).limit(1).maybeSingle();
+    if (a.error) throw a.error;
+    let email = null;
+    if (a.data && a.data.user_id) {
+        const p = await supabase.from('profiles').select('email').eq('id', a.data.user_id).maybeSingle();
+        if (p.error) throw p.error;
+        email = p.data && p.data.email ? String(p.data.email).trim() : null;
+    }
+    if (!email) { reply('Akun Pusaka untuk *' + st.full_name + '* belum dibuat. Silakan hubungi wali kelas.'); return; }
+    const text = await renderMessage('student_account', {
+        nama_siswa: st.full_name, kelas: (st.classes && st.classes.name) || '-', username: email, password: STUDENT_DEFAULT_PASSWORD, alamat: SITE_URL
+    });
+    if (text) reply(text);
+}
+// Mengembalikan true bila pesan ini ditangani (tidak diteruskan ke penangan lain).
+async function handleAccountMessage(msg, from, text, cleanText, senderPhone) {
+    const cfg = await getBotSettings();
+    if (!cfg.student_account_wa_enabled) { accountSessions.delete(from); return false; }
+    const reply = function(t) { enqueueTask(function() { return sendSafeMessage(from, { text: t }, { quoted: msg }); }, { to: from, kind: 'balasan' }); };
+    const who = senderPhone || from;
+    let sess = accountSessions.get(from);
+    if (sess && Date.now() - sess.at > ACCOUNT_SESSION_TTL) { accountSessions.delete(from); sess = undefined; }
+    const LOCKED = 'Terlalu banyak percobaan yang tidak cocok. Coba lagi nanti, atau hubungi wali kelas.';
+
+    if (!sess) {
+        if (!accountCommand(cleanText)) return false;
+        if (Date.now() - (accountLast.get(who) || 0) < ACCOUNT_GAP_MS) return true;   // terlalu cepat: abaikan
+        accountLast.set(who, Date.now());
+        if (accountLast.size > 2000) accountLast.clear();
+        regSessions.delete(from);                                                      // pindah dari alur DAFTAR bila sedang berjalan
+        if (accountLocked('p:' + who)) { reply(LOCKED); return true; }
+        if (senderPhone) {
+            const sRes = await supabase.from('students').select('id, full_name, classes(name)')
+                .in('parent_phone', phoneVariants(senderPhone)).eq('status', 'aktif').eq('is_alumni', false).order('full_name').limit(ACCOUNT_MAX_STUDENTS);
+            if (sRes.error) { console.error('[AKUN WA]', sRes.error.message); reply('Database sedang gangguan. Coba lagi nanti.'); return true; }
+            if ((sRes.data || []).length > 0) {
+                for (const st of sRes.data) {
+                    try { await sendAccountInfo(st, reply); }
+                    catch (e) { console.error('[AKUN WA]', e.message); reply('Data akun ' + st.full_name + ' gagal dimuat. Coba lagi nanti.'); }
+                }
+                return true;
+            }
+        }
+        accountSessions.set(from, { step: 'NISN', at: Date.now() });
+        reply('🔐 *AKUN PUSAKA*\n\nAgar data akun hanya dilihat pemiliknya, mohon verifikasi dulu.\n\nMasukkan *NISN* siswa:\n\n(Ketik BATAL untuk membatalkan)');
+        return true;
+    }
+
+    // Sesi verifikasi berjalan.
+    if (cleanText === 'batal') { accountSessions.delete(from); reply('Dibatalkan.'); return true; }
+    const digits = String(text).replace(/\D/g, '');
+    const hasLetters = /[a-z]/i.test(text);
+    if (hasLetters && digits.length < 6) { accountSessions.delete(from); return false; }   // sepertinya perintah lain: lepas sesi, biarkan penangan lain
+    sess.at = Date.now();
+    if (sess.step === 'NISN') {
+        if (digits.length < 5 || digits.length > 20) { reply('Masukkan *NISN* berupa angka. Ketik BATAL untuk membatalkan.'); return true; }
+        if (accountLocked('p:' + who) || accountLocked('n:' + digits)) { accountSessions.delete(from); reply(LOCKED); return true; }
+        let student = null;
+        try { student = await accountFindStudent(digits); }
+        catch (e) { console.error('[AKUN WA]', e.message); accountSessions.delete(from); reply('Database sedang gangguan. Coba lagi nanti.'); return true; }
+        sess.nisn = digits; sess.student = student; sess.step = 'DOB';        // NISN tak dikenal diperlakukan sama: tidak membocorkan ada/tidaknya
+        reply('Masukkan *tanggal lahir* siswa dengan format *DDMMYYYY* (contoh: 17082010):');
+        return true;
+    }
+    if (sess.step === 'DOB') {
+        const iso = parseInputDate(String(text));
+        if (!iso) { reply('Format salah. Gunakan *DDMMYYYY* (contoh: 17082010). Ketik BATAL untuk membatalkan.'); return true; }
+        if (accountLocked('p:' + who) || accountLocked('n:' + sess.nisn)) { accountSessions.delete(from); reply(LOCKED); return true; }
+        const st = sess.student;
+        const ok = !!(st && st.birth_date && String(st.birth_date).slice(0, 10) === iso);
+        accountSessions.delete(from);
+        if (!ok) {
+            accountFailed('p:' + who, ACCOUNT_SENDER_MAX_FAILS, ACCOUNT_SENDER_LOCK_MS);
+            accountFailed('n:' + sess.nisn, ACCOUNT_NISN_MAX_FAILS, ACCOUNT_NISN_LOCK_MS);
+            reply('NISN atau tanggal lahir tidak cocok. Periksa lagi, lalu ketik *akun pusaka* untuk mencoba kembali. Bila tetap gagal, hubungi wali kelas.');
+            return true;
+        }
+        accountFails.delete('p:' + who); accountFails.delete('n:' + sess.nisn);
+        try { await sendAccountInfo(st, reply); }
+        catch (e) { console.error('[AKUN WA]', e.message); reply('Data akun gagal dimuat. Coba lagi nanti.'); }
+        return true;
+    }
+    accountSessions.delete(from);
+    return false;
+}
+
 // ===================== MENU PERINTAH (ketik MENU) + TOMBOL + "SURAT TUGAS SAYA" =====================
 // Menu bernomor (balas 1/2/3) selalu berfungsi. Tombol asli WhatsApp hanya dikirim bila admin menyalakan
 // saklar "wa_buttons_enabled" (default mati) dan SELALU sebagai pesan tambahan setelah menu teks, supaya bila
@@ -1515,6 +1647,7 @@ const MENU_ACTIONS = {
     sakit:  { label: 'Anak Sakit',        cmd: 'sakit',       hint: 'beri tahu wali kelas (sertakan surat dokter)' },
     izin:   { label: 'Anak Izin',         cmd: 'izin',        hint: 'beri tahu wali kelas (sertakan surat orang tua)' },
     daftar: { label: 'Tautkan Nomor',     cmd: 'daftar',      hint: 'hubungkan nomor ini dengan NISN anak' },
+    akun:   { label: 'Akun Pusaka',       cmd: 'akun pusaka', hint: 'username & password akun siswa' },
     jurnal: { label: 'Isi Jurnal Ekskul', cmd: 'jurnal',      hint: 'buat jurnal kegiatan ekskul' },
     foto:   { label: 'Foto Ekskul',       cmd: 'foto',        hint: 'tambah foto ke jurnal ekskul' },
     surat:  { label: 'Surat Tugas Saya',  cmd: 'surat tugas', hint: 'kirim foto bukti kunjungan' }
@@ -1607,6 +1740,7 @@ async function sendMenu(from, msg, kind) {
         if (kind === 'greeting') return;                           // nomor tidak dikenal: salam biasa tidak dibalas
         keys.push('daftar');
     }
+    if (cfg.student_account_wa_enabled) keys.push('akun');
     const lines = keys.map(function(k, i) { return (i + 1) + '. *' + MENU_ACTIONS[k].label + '* - ' + MENU_ACTIONS[k].hint; });
     const text = '📋 *MENU PUSAKA*\nSMP Negeri 8 Ciamis\n\nBalas dengan *nomor* pilihan Anda:\n\n' + lines.join('\n') +
         '\n\n_Atau ketik perintahnya: ' + keys.map(function(k) { return '*' + MENU_ACTIONS[k].cmd + '*'; }).join(', ') + '._' +
