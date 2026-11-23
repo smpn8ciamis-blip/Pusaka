@@ -245,6 +245,19 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     defaultBody: `⏰ *PENGINGAT BUKTI KUNJUNGAN*\n\nYth. Bapak/Ibu *{{nama}}*,\nSurat tugas berikut sudah selesai, namun *foto bukti kunjungan* Anda belum diunggah:\n• Nomor: {{nomor_surat}}\n• Jenis tugas: *{{jenis}}*\n• Waktu: {{waktu}}\n• Lokasi: {{lokasi}}\n\nMohon segera unggah di akun Pusaka, menu *Surat Tugas & SPPD*.\n\n📸 *Cara cepat:* balas (reply) pesan ini dengan foto bukti kunjungan, foto otomatis tersimpan di akun Anda (maks. 3 foto).\n\nTerima kasih.\n_Pusaka - SMP Negeri 8 Ciamis_`,
   },
   {
+    key: 'student_account',
+    title: 'Siswa: Akun Pusaka (username & password awal)',
+    description: 'Balasan bot saat siswa/orang tua mengetik "akun pusaka": username, password awal, dan petunjuk mengganti password setelah login.',
+    variables: [
+      { name: 'nama_siswa', sample: 'Ahmad Fauzi', hint: 'Nama siswa' },
+      { name: 'kelas', sample: 'VII-A', hint: 'Kelas siswa' },
+      { name: 'username', sample: '12345677@nedelcis.com', hint: 'Username (email akun) siswa' },
+      { name: 'password', sample: 'Nedelcis1234', hint: 'Password awal (env STUDENT_DEFAULT_PASSWORD di server bot)' },
+      { name: 'alamat', sample: 'https://pusaka.smpn8ciamis.sch.id', hint: 'Alamat aplikasi' },
+    ],
+    defaultBody: `🔐 *AKUN PUSAKA*\n\nNama: *{{nama_siswa}}* ({{kelas}})\n\n• Username: *{{username}}*\n• Password awal: *{{password}}*\n• Alamat: {{alamat}}\n\n⚠️ *Setelah berhasil login, segera ganti password* agar akunmu aman:\nBuka menu *Pengaturan* → *Keamanan*, isi *Password Lama* (password awal di atas) dan *Password Baru*, lalu ketuk *Simpan Password*.\n\nSudah pernah mengganti password lalu lupa? Hubungi wali kelas untuk diatur ulang. Jangan bagikan username dan password kepada siapa pun.\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
+  },
+  {
     key: 'parent_points',
     title: 'Orang Tua: Cek Poin Pelanggaran',
     description: 'Balasan bot saat orang tua (nomor sudah tertaut ke NISN) mengetik "cek poin": total poin dan rincian pelanggaran anaknya.',
