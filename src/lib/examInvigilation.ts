@@ -22,10 +22,15 @@ export interface InvSession {
   dateLabel: string; // "01 Desember 2026"
 }
 
+export type InvMethod = 'putar' | 'seimbang';
+
 export interface InvConfig {
   rooms: number;
   perRoom: number;
-  excluded: string[];
+  /** Guru pengawas terpilih; urutannya = nomor guru di matriks dan cetakan. */
+  pool: string[];
+  /** 'putar': guru pindah satu ruang tiap sesi (A: sesi 1 ruang 1, sesi 2 ruang 2, ...). 'seimbang': beban dibagi rata. */
+  method: InvMethod;
   avoidOwnSubject: boolean;
 }
 
@@ -120,6 +125,17 @@ export function fromRows(rows: { exam_date: string; start_time: string; room_no:
   return a;
 }
 
+/** Daftar bernomor untuk matriks/cetakan: guru terpilih sesuai urutan, lalu guru lain yang terlanjur dijadwalkan (urut nama). */
+export function numberedTeachers(teachers: InvTeacher[], pool: string[], assign: Assignment): InvTeacher[] {
+  const byId = new Map(teachers.map((t) => [t.id, t]));
+  const out: InvTeacher[] = [];
+  const seen = new Set<string>();
+  for (const id of pool) { const t = byId.get(id); if (t && !seen.has(id)) { out.push(t); seen.add(id); } }
+  const extra = [...new Set(Object.values(assign))].filter((id) => !seen.has(id)).map((id) => byId.get(id)).filter(Boolean) as InvTeacher[];
+  extra.sort((a, b) => a.name.localeCompare(b.name, 'id'));
+  return out.concat(extra);
+}
+
 export interface GenerateResult {
   assignment: Assignment;
   /** sel yang tidak bisa diisi karena guru tidak cukup */
@@ -131,7 +147,7 @@ export interface GenerateResult {
 /**
  * Susun jadwal otomatis. Aturan:
  *  1. satu guru tidak mengawas dua ruang pada sesi yang jamnya beririsan;
- *  2. guru yang dikecualikan tidak dipakai;
+ *  2. hanya guru terpilih (cfg.pool) yang dipakai;
  *  3. (opsional) guru tidak mengawas sesi mapelnya sendiri, kecuali tidak ada pilihan lain;
  *  4. beban dibagi rata: yang tugasnya paling sedikit dipilih dulu, lalu yang paling sedikit hari itu,
  *     lalu yang paling lama beristirahat, lalu urutan nama (hasil selalu sama untuk masukan yang sama).
@@ -144,19 +160,64 @@ export function generateInvigilation(
   existing: Assignment = {},
   mode: 'all' | 'empty' = 'all',
 ): GenerateResult {
-  const pool = teachers
-    .filter((t) => !cfg.excluded.includes(t.id))
-    .sort((a, b) => a.name.localeCompare(b.name, 'id'));
+  return cfg.method === 'seimbang'
+    ? generateBalanced(sessions, teachers, cfg, existing, mode)
+    : generateRotation(sessions, teachers, cfg, existing, mode);
+}
+
+const validExisting = (sessions: InvSession[], teachers: InvTeacher[], cfg: InvConfig, existing: Assignment): Assignment => {
   const byId = new Map(teachers.map((t) => [t.id, t]));
+  const keys = new Set(sessions.map((s) => s.key));
+  const out: Assignment = {};
+  for (const [k, v] of Object.entries(existing)) {
+    const { sessionKey, room, slot } = parseCellKey(k);
+    if (keys.has(sessionKey) && room >= 1 && room <= cfg.rooms && slot >= 1 && slot <= cfg.perRoom && byId.has(v)) out[k] = v;
+  }
+  return out;
+};
+
+/**
+ * Pola putar: guru terpilih disusun melingkar sesuai nomor urut. Pada sesi pertama guru nomor 1 di ruang 1, nomor 2 di
+ * ruang 2, dst.; tiap sesi berikutnya semua guru bergeser satu ruang (guru nomor 1: sesi 2 di ruang 2, sesi 3 di ruang 3, ...)
+ * dan yang melewati ruang terakhir lanjut ke guru cadangan/istirahat lalu kembali ke ruang 1. Bila guru terpilih lebih banyak
+ * dari jumlah tempat, sisanya bergiliran libur; bila kurang, tempat paling akhir dibiarkan kosong.
+ * Penyusunan ini tidak memeriksa mapel sendiri (lihat tab Peringatan); pergeseran dihitung menurut urutan sesi di jadwal.
+ */
+function generateRotation(sessions: InvSession[], teachers: InvTeacher[], cfg: InvConfig, existing: Assignment, mode: 'all' | 'empty'): GenerateResult {
+  const byId = new Map(teachers.map((t) => [t.id, t]));
+  const ring = cfg.pool.map((id) => byId.get(id)).filter(Boolean) as InvTeacher[];
+  const N = ring.length;
+  const assign: Assignment = mode === 'empty' ? validExisting(sessions, teachers, cfg, existing) : {};
+  const used = sessions.map(() => new Set<string>());
+  const sIndex = new Map(sessions.map((s, i) => [s.key, i]));
+  for (const [k, v] of Object.entries(assign)) used[sIndex.get(parseCellKey(k).sessionKey)!].add(v);
+  let unfilled = 0;
+  let own = 0;
+  sessions.forEach((s, si) => {
+    for (let slot = 1; slot <= cfg.perRoom; slot++) {
+      for (let room = 1; room <= cfg.rooms; room++) {
+        const k = cellKey(s.key, room, slot);
+        if (assign[k]) continue;
+        const p = (slot - 1) * cfg.rooms + (room - 1);
+        if (N === 0 || p >= N) { unfilled++; continue; }
+        const t = ring[(((p - si) % N) + N) % N];
+        if (used[si].has(t.id)) { unfilled++; continue; }
+        assign[k] = t.id; used[si].add(t.id);
+        if (cfg.avoidOwnSubject && isOwnSubject(t.subject, s.subject)) own++;
+      }
+    }
+  });
+  return { assignment: assign, unfilled, relaxedOwnSubject: own };
+}
+
+function generateBalanced(sessions: InvSession[], teachers: InvTeacher[], cfg: InvConfig, existing: Assignment, mode: 'all' | 'empty'): GenerateResult {
+  const poolSet = new Set(cfg.pool);
+  const pool = teachers
+    .filter((t) => poolSet.has(t.id))
+    .sort((a, b) => a.name.localeCompare(b.name, 'id'));
   const sIndex = new Map(sessions.map((s, i) => [s.key, i]));
 
-  const assign: Assignment = {};
-  if (mode === 'empty') {
-    for (const [k, v] of Object.entries(existing)) {
-      const { sessionKey, room, slot } = parseCellKey(k);
-      if (sIndex.has(sessionKey) && room >= 1 && room <= cfg.rooms && slot >= 1 && slot <= cfg.perRoom && byId.has(v)) assign[k] = v;
-    }
-  }
+  const assign: Assignment = mode === 'empty' ? validExisting(sessions, teachers, cfg, existing) : {};
 
   const load = new Map<string, number>();
   const dayLoad = new Map<string, number>();       // `${teacher}|${date}`
@@ -196,7 +257,7 @@ export function generateInvigilation(
   return { assignment: assign, unfilled, relaxedOwnSubject: relaxed };
 }
 
-export type ProblemKind = 'bentrok' | 'kosong' | 'mapel_sendiri' | 'dikecualikan' | 'guru_hilang';
+export type ProblemKind = 'bentrok' | 'kosong' | 'mapel_sendiri' | 'di_luar_daftar' | 'guru_hilang';
 export interface Problem { kind: ProblemKind; message: string; cell?: string }
 
 /** Periksa jadwal yang sedang disusun (dipakai untuk peringatan di layar sebelum disimpan). */
@@ -213,7 +274,7 @@ export function findProblems(sessions: InvSession[], teachers: InvTeacher[], cfg
     const s = sBy.get(sessionKey)!;
     const t = byId.get(tid);
     if (!t) { out.push({ kind: 'guru_hilang', message: `${label(s)} Ruang ${room}: guru tidak ditemukan lagi`, cell: k }); continue; }
-    if (cfg.excluded.includes(tid)) out.push({ kind: 'dikecualikan', message: `${t.name} ditandai tidak mengawas, tetapi masih dijadwalkan (${label(s)} Ruang ${room})`, cell: k });
+    if (cfg.pool.length > 0 && !cfg.pool.includes(tid)) out.push({ kind: 'di_luar_daftar', message: `${t.name} belum dipilih sebagai guru pengawas, tetapi dijadwalkan (${label(s)} Ruang ${room})`, cell: k });
     if (isOwnSubject(t.subject, s.subject)) out.push({ kind: 'mapel_sendiri', message: `${t.name} mengawas mapelnya sendiri (${s.subject}) — ${label(s)} Ruang ${room}`, cell: k });
     const l = perTeacher.get(tid) || []; l.push({ cell: k, session: s, room }); perTeacher.set(tid, l);
   }
