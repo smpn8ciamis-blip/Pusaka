@@ -267,3 +267,11 @@ export function filterRoomsKeepNumbers<S extends SeatStudent>(rooms: SeatRoom<S>
     .map((r) => ({ roomNumber: r.roomNumber, seats: r.seats.filter((x) => keep(x.student)) }))
     .filter((r) => r.seats.length > 0);
 }
+
+/** Daftar siswa → ruang/meja/nomor peserta (untuk disimpan agar bot WA tahu ruang siswa saat ada pelanggaran ujian). */
+export interface RoomAssignmentRow { student_id: string; room_no: number; table_no: number; exam_number: string; class_name: string }
+export function roomAssignments<S extends SeatStudent>(rooms: SeatRoom<S>[]): RoomAssignmentRow[] {
+  return rooms.flatMap((r) => r.seats.map((x) => ({
+    student_id: x.student.id, room_no: r.roomNumber, table_no: x.tableNumber, exam_number: String(x.examNumber), class_name: x.student.classes.name,
+  })));
+}

@@ -288,6 +288,23 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     defaultBody: `⚠️ *PELANGGARAN BARU*\n\nYth. Bapak/Ibu Orang Tua/Wali,\nAnanda *{{nama_siswa}}* ({{kelas}}) mendapat catatan pelanggaran:\n• Tanggal: {{tanggal}}\n• Pelanggaran: *{{pelanggaran}}* ({{kategori}})\n• Poin: *+{{poin}}*\n• Keterangan: {{keterangan}}\n\nTotal poin ananda saat ini: *{{total_poin}}* ({{jumlah_catatan}} catatan).\nMohon bimbingan Bapak/Ibu di rumah. Ketik *cek poin* untuk melihat rinciannya.\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
   },
   {
+    key: 'invigilator_exam_violation',
+    title: 'Pengawas: Pelanggaran Ujian CBT',
+    description: 'Dikirim langsung ke pengawas ruang (menurut Jadwal Pengawas) saat siswa di ruang itu melanggar aturan CBT mode anti curang.',
+    variables: [
+      { name: 'nama_pengawas', sample: 'Bu Siti', hint: 'Nama pengawas penerima' },
+      { name: 'nama_siswa', sample: 'Ahmad Fauzi', hint: 'Nama siswa' },
+      { name: 'kelas', sample: 'VII-A', hint: 'Kelas siswa' },
+      { name: 'ruang', sample: '5', hint: 'Nomor ruang siswa' },
+      { name: 'meja', sample: ' (meja 12)', hint: 'Nomor meja bila ada (sudah berisi spasi dan tanda kurung)' },
+      { name: 'pelanggaran', sample: 'pindah tab/aplikasi', hint: 'Jenis pelanggaran' },
+      { name: 'jumlah', sample: 'ke-2 dari 3', hint: 'Pelanggaran ke berapa dari batas ujian diakhiri' },
+      { name: 'ujian', sample: 'PAS Matematika', hint: 'Judul ujian CBT' },
+      { name: 'jam', sample: '08:15', hint: 'Jam kejadian (WIB)' },
+    ],
+    defaultBody: `🚨 *PELANGGARAN UJIAN (CBT)*\n\nYth. {{nama_pengawas}},\nSiswa di ruang yang Bapak/Ibu awasi melanggar aturan ujian:\n\n• Siswa: *{{nama_siswa}}* ({{kelas}})\n• Ruang: *{{ruang}}*{{meja}}\n• Pelanggaran: *{{pelanggaran}}* ({{jumlah}})\n• Ujian: {{ujian}}\n• Waktu: {{jam}} WIB\n\nMohon dicek ke tempat duduk siswa tersebut.\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
+  },
+  {
     key: 'parent_attendance',
     title: 'Orang Tua: Cek Rekap Kehadiran',
     description: 'Balasan bot saat orang tua (nomor sudah tertaut ke NISN) mengetik "absen": rekap kehadiran anaknya 30 hari terakhir.',
@@ -425,6 +442,20 @@ export async function notifyBotViolationCreated(violationId: string): Promise<st
     return res.status;
   } catch (e) {
     console.warn('[WA Pelanggaran] tidak dapat memberi tahu bot:', (e as Error)?.message);
+    return 'error';
+  }
+}
+
+/**
+ * Dipanggil siswa tepat setelah pelanggaran CBT (anti curang) tersimpan: bot mengirim WA ke pengawas ruang siswa itu.
+ * Bot memastikan pemanggil adalah pemilik sesi ujian. Gagal diam-diam agar tidak mengganggu ujian siswa.
+ */
+export async function notifyBotExamViolation(violationId: string): Promise<string> {
+  try {
+    const res = await waAdminFetch<{ status: string }>('/exam-violation-created', { method: 'POST', body: { violation_id: violationId } });
+    return res.status;
+  } catch (e) {
+    console.warn('[WA Pelanggaran Ujian] tidak dapat memberi tahu bot:', (e as Error)?.message);
     return 'error';
   }
 }

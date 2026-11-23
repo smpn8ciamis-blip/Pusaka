@@ -21,6 +21,7 @@ import { OptionDisplay } from '@/components/cbt/OptionDisplay';
 import { SymbolPalette } from '@/components/cbt/SymbolPalette';
 import { useCbtAntiCheat } from '@/hooks/useCbtAntiCheat';
 import { createDeadline, violationLabel } from '@/lib/cbtAntiCheat';
+import { notifyBotExamViolation } from '@/lib/waBot';
 import { fireAlarm, stopAlarm, primeAlarm } from '@/lib/cbtAlarm';
 import {
   clearProgress, deletePaper, emptyProgress, loadPaper, loadProgress, makeImageUrlMap, prefetchPaper, purgeOldPapers, purgeOldProgress,
@@ -213,14 +214,19 @@ export default function CbtStudentExam() {
   };
 
   // ---------- pelanggaran (anti curang) ----------
-  const sendViolation = async (rec: { type: string; detail: string | null }) => {
+  const sendViolation = async (rec: { type: string; detail: string | null; id?: string }) => {
     const sess = sessionRef.current; const exam = examRef.current;
     if (!sess || !exam) return false;
+    // id dibuat di perangkat agar pengiriman ulang tidak menggandakan catatan dan bot bisa diberi tahu tanpa membaca ulang
+    if (!rec.id) rec.id = (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? crypto.randomUUID() : undefined;
     try {
       const { error } = await supabase.from('cbt_session_violations').insert({
+        ...(rec.id ? { id: rec.id } : {}),
         session_id: sess.id, exam_id: exam.id, student_id: sess.student_id, violation_type: rec.type, detail: rec.detail,
       });
-      return !error;
+      if (error && (error as { code?: string }).code !== '23505') return false; // 23505 = sudah tersimpan sebelumnya
+      if (rec.id && !error) notifyBotExamViolation(rec.id); // WA real-time ke pengawas ruang; gagal diam-diam
+      return true;
     } catch { return false; }
   };
   const flushViolations = async () => {
