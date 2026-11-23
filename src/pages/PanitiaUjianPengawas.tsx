@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { AlertTriangle, CalendarClock, Eraser, Plus, Printer, Save, Trash2, Wand2 } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, CalendarClock, Eraser, Plus, Printer, Save, Trash2, Wand2, X } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
@@ -15,19 +15,20 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { supabase } from '@/integrations/supabase/client';
 import { scheduleOf, useExamSettings } from '@/hooks/useExamSettings';
 import { buildRooms, DEFAULT_START_NUMBERS } from '@/lib/examSeating';
 import {
-  buildInvSessions, cellKey, findProblems, fromRows, generateInvigilation, isOwnSubject, parseCellKey,
+  buildInvSessions, cellKey, findProblems, fromRows, generateInvigilation, isOwnSubject, numberedTeachers, parseCellKey,
   sessionsOverlap, teacherLoads, toRows,
-  type Assignment, type InvConfig, type InvSession, type InvTeacher,
+  type Assignment, type InvConfig, type InvMethod, type InvSession, type InvTeacher,
 } from '@/lib/examInvigilation';
-import { buildInvigilationPdf, invigilationFileName } from '@/lib/examInvigilationPdf';
+import { buildInvigilationPdf, DEFAULT_INVIGILATION_NOTES, invigilationFileName } from '@/lib/examInvigilationPdf';
 import { PAPER_LABEL, type PdfPaper } from '@/lib/pdfPaper';
 
-const MIGRATION = '20261123100000_exam_pengawas.sql';
+const MIGRATION = '20261123100000_exam_pengawas.sql dan 20261123140000_exam_pengawas_urutan.sql';
 const db = supabase as any;
 
 const isMissingTable = (e: any) => {
@@ -67,7 +68,7 @@ function useSuggestedRooms(settings: any) {
   });
 }
 
-const DEFAULT_CFG: InvConfig = { rooms: 1, perRoom: 2, excluded: [], avoidOwnSubject: true };
+const DEFAULT_CFG: InvConfig = { rooms: 1, perRoom: 1, pool: [], method: 'putar', avoidOwnSubject: true };
 
 export default function PanitiaUjianPengawas() {
   const qc = useQueryClient();
@@ -117,7 +118,7 @@ export default function PanitiaUjianPengawas() {
     if (!savedQ.data || dirty) return;
     const c = savedQ.data.config;
     const next: InvConfig = c
-      ? { rooms: Number(c.rooms_count) || 1, perRoom: Number(c.per_room) || 2, excluded: c.excluded_teacher_ids || [], avoidOwnSubject: c.avoid_own_subject !== false }
+      ? { rooms: Number(c.rooms_count) || 1, perRoom: Number(c.per_room) || 1, pool: c.pool_teacher_ids || [], method: (c.method === 'seimbang' ? 'seimbang' : 'putar') as InvMethod, avoidOwnSubject: c.avoid_own_subject !== false }
       : { ...DEFAULT_CFG, rooms: suggested.data || 1 };
     const a = fromRows(savedQ.data.rows);
     setCfg(next); setAssign(a);
@@ -129,7 +130,7 @@ export default function PanitiaUjianPengawas() {
   useEffect(() => {
     if (savedQ.data && !savedQ.data.config && suggested.data && !dirty) {
       const next = { ...DEFAULT_CFG, rooms: suggested.data };
-      setCfg((cur) => (cur.rooms === 1 && cur.perRoom === 2 ? next : cur));
+      setCfg((cur) => (cur.rooms === 1 && cur.pool.length === 0 ? next : cur));
       setSnapshot((s) => (s === null ? s : JSON.stringify([{ ...DEFAULT_CFG, rooms: suggested.data }, fromRows(savedQ.data!.rows)])));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -151,7 +152,17 @@ export default function PanitiaUjianPengawas() {
 
   const problems = useMemo(() => findProblems(sessions, teachers, cfg, assign), [sessions, teachers, cfg, assign]);
   const problemCells = useMemo(() => new Set(problems.filter((p) => p.cell && p.kind !== 'kosong').map((p) => p.cell as string)), [problems]);
-  const loads = useMemo(() => teacherLoads(sessions, teachers, assign), [sessions, teachers, assign]);
+  const numbered = useMemo(() => numberedTeachers(teachers, cfg.pool, assign), [teachers, cfg.pool, assign]);
+  const numOf = useMemo(() => new Map(numbered.map((t, i) => [t.id, i + 1])), [numbered]);
+  const loads = useMemo(() => {
+    const m = new Map(teacherLoads(sessions, teachers, assign).map((l) => [l.id, l]));
+    return numbered.map((t) => m.get(t.id)!).filter(Boolean);
+  }, [sessions, teachers, assign, numbered]);
+  const days = useMemo(() => {
+    const g: { date: string; sessions: InvSession[] }[] = [];
+    sessions.forEach((s) => { const last = g[g.length - 1]; if (last && last.date === s.date) last.sessions.push(s); else g.push({ date: s.date, sessions: [s] }); });
+    return g;
+  }, [sessions]);
   const totalCells = sessions.length * cfg.rooms * cfg.perRoom;
   const filledCells = useMemo(() => Object.keys(assign).filter(validCell).length, [assign, sessionKeys, cfg.rooms, cfg.perRoom]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -161,7 +172,7 @@ export default function PanitiaUjianPengawas() {
       const kept: Assignment = {};
       Object.entries(assign).forEach(([k, v]) => { if (validCell(k)) kept[k] = v; });
       const { error } = await db.rpc('exam_invigilation_save', {
-        p_config: { rooms_count: cfg.rooms, per_room: cfg.perRoom, excluded_teacher_ids: cfg.excluded, avoid_own_subject: cfg.avoidOwnSubject },
+        p_config: { rooms_count: cfg.rooms, per_room: cfg.perRoom, pool_teacher_ids: cfg.pool, method: cfg.method, avoid_own_subject: cfg.avoidOwnSubject },
         p_rows: toRows(kept, sessions),
       });
       if (error) throw error;
@@ -182,17 +193,18 @@ export default function PanitiaUjianPengawas() {
   const runGenerate = (mode: 'all' | 'empty') => {
     setGenOpen(false);
     if (teachers.length === 0) { toast.error('Belum ada data guru'); return; }
+    if (cfg.pool.length === 0) { toast.error('Pilih dulu guru pengawas dari daftar guru.'); return; }
     const r = generateInvigilation(sessions, teachers, cfg, assign, mode);
     setAssign(r.assignment);
     const notes: string[] = [];
-    if (r.unfilled) notes.push(`${r.unfilled} tempat belum terisi (guru tidak cukup)`);
-    if (r.relaxedOwnSubject) notes.push(`${r.relaxedOwnSubject} penugasan terpaksa mengawas mapel sendiri`);
+    if (r.unfilled) notes.push(`${r.unfilled} tempat belum terisi (guru terpilih kurang dari jumlah tempat)`);
+    if (r.relaxedOwnSubject) notes.push(`${r.relaxedOwnSubject} penugasan jatuh pada mapel yang diajar guru itu sendiri`);
     if (notes.length) toast.warning(`Jadwal disusun. ${notes.join('; ')}. Periksa tab Peringatan, lalu simpan.`, { duration: 8000 });
     else toast.success('Jadwal disusun. Periksa matriks, ubah manual bila perlu, lalu klik Simpan.');
   };
   const onGenerateClick = () => {
     if (sessions.length === 0) { toast.error('Isi jadwal ujian dulu (tanggal dan jam mulai).'); return; }
-    if (cfg.rooms - 0 < 1) { toast.error('Jumlah ruang minimal 1'); return; }
+    if (cfg.pool.length === 0) { toast.error('Pilih dulu guru pengawas dari daftar guru.'); return; }
     if (Object.keys(assign).filter(validCell).length > 0) setGenOpen(true); else runGenerate('all');
   };
 
@@ -231,39 +243,39 @@ export default function PanitiaUjianPengawas() {
         const others = (byTeacher.get(t.id) || []).filter((x) => x.key !== pick!.key);
         const clash = others.find((x) => sessionsOverlap(x.session, pickInfo.session) || x.session.key === pickInfo.session.key);
         const reasons: string[] = [];
-        if (cfg.excluded.includes(t.id)) reasons.push('tidak mengawas');
+        if (cfg.pool.length > 0 && !cfg.pool.includes(t.id)) reasons.push('di luar daftar pengawas');
         if (isOwnSubject(t.subject, pickInfo.session.subject)) reasons.push('mapel sendiri');
         return { t, total: (byTeacher.get(t.id) || []).length - (assign[pick!.key] === t.id ? 1 : 0), clash, reasons };
       })
       .sort((a, b) => Number(!!a.clash) - Number(!!b.clash) || a.reasons.length - b.reasons.length || a.total - b.total || a.t.name.localeCompare(b.t.name, 'id'));
-  }, [pickInfo, teachers, q, byTeacher, cfg.excluded, assign, pick]);
+  }, [pickInfo, teachers, q, byTeacher, cfg.pool, assign, pick]);
 
   // ---------- cetak ----------
   const [printOpen, setPrintOpen] = useState(false);
   const [paper, setPaper] = useState<PdfPaper>('f4');
-  const [chairName, setChairName] = useState('');
-  const [chairNip, setChairNip] = useState('');
+  const [notesText, setNotesText] = useState(DEFAULT_INVIGILATION_NOTES.join('\n'));
   const [signDate, setSignDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [printing, setPrinting] = useState(false);
   useEffect(() => {
     try {
-      setChairName(localStorage.getItem('pengawas_chair_name') || '');
-      setChairNip(localStorage.getItem('pengawas_chair_nip') || '');
+      const saved = localStorage.getItem('pengawas_notes');
+      if (saved !== null) setNotesText(saved);
     } catch { /* penyimpanan peramban tidak tersedia */ }
   }, []);
   const doPrint = async () => {
     setPrinting(true);
     try {
-      try { localStorage.setItem('pengawas_chair_name', chairName); localStorage.setItem('pengawas_chair_nip', chairNip); } catch { /* abaikan */ }
+      try { localStorage.setItem('pengawas_notes', notesText); } catch { /* abaikan */ }
       const kept: Assignment = {};
       Object.entries(assign).forEach(([k, v]) => { if (validCell(k)) kept[k] = v; });
       const doc = await buildInvigilationPdf({
         examName: settings?.exam_name as string | undefined,
         academicYear: settings?.academic_year as string | undefined,
-        sessions, teachers, assignment: kept, rooms: cfg.rooms, perRoom: cfg.perRoom, paper,
+        sessions, teachers, assignment: kept, pool: cfg.pool, rooms: cfg.rooms, perRoom: cfg.perRoom, paper,
         place: (settings as any)?.city_name || 'Ciamis', signDate,
-        chairName, chairNip,
+        principalTitle: (settings as any)?.headmaster_position,
         principalName: (settings as any)?.headmaster_name, principalNip: (settings as any)?.headmaster_nip,
+        notes: notesText.split('\n'),
       }, settings as any);
       doc.save(invigilationFileName(paper));
       setPrintOpen(false);
@@ -274,12 +286,17 @@ export default function PanitiaUjianPengawas() {
     } finally { setPrinting(false); }
   };
 
-  const toggleExcluded = (id: string, on: boolean) => setCfg((c) => ({ ...c, excluded: on ? [...new Set([...c.excluded, id])] : c.excluded.filter((x) => x !== id) }));
+  const togglePool = (id: string, on: boolean) => setCfg((c) => ({ ...c, pool: on ? [...new Set([...c.pool, id])] : c.pool.filter((x) => x !== id) }));
+  const movePool = (i: number, d: -1 | 1) => setCfg((c) => {
+    const j = i + d; if (j < 0 || j >= c.pool.length) return c;
+    const pool = [...c.pool]; [pool[i], pool[j]] = [pool[j], pool[i]];
+    return { ...c, pool };
+  });
   const [exQ, setExQ] = useState('');
+  const slotsNeeded = cfg.rooms * cfg.perRoom;
   const missing = isMissingTable(savedQ.error) || isMissingTable(teachersQ.error);
   const loadError = (savedQ.error || teachersQ.error) as any;
   const sName = (s: InvSession) => `${[s.day, s.dateLabel || s.date].filter(Boolean).join(', ')} • ${s.start}${s.end ? `–${s.end}` : ''}`;
-  const initial = (n: string) => n.split(' ').slice(0, 2).join(' ');
 
   return (
     <DashboardLayout>
@@ -338,8 +355,65 @@ export default function PanitiaUjianPengawas() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Pengaturan penyusunan</CardTitle>
-            <CardDescription>Dipakai oleh tombol Generate otomatis. Pengisian manual tetap bisa dilakukan kapan saja.</CardDescription>
+            <CardTitle>1. Pilih guru pengawas</CardTitle>
+            <CardDescription>
+              Centang guru dari database yang akan mengawas. Urutannya menjadi <b>nomor guru</b> di matriks: pada pola putar,
+              guru nomor 1 mengawas ruang 1 di sesi pertama, ruang 2 di sesi kedua, dan seterusnya.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label>Daftar guru ({teachers.length})</Label>
+                  <div className="flex gap-1">
+                    <Button type="button" size="sm" variant="outline" onClick={() => setCfg((c) => ({ ...c, pool: [...c.pool, ...teachers.filter((t) => !c.pool.includes(t.id)).map((t) => t.id)] }))}>Pilih semua</Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => setCfg((c) => ({ ...c, pool: [] }))} disabled={cfg.pool.length === 0}>Kosongkan</Button>
+                  </div>
+                </div>
+                <Input placeholder="Cari nama guru…" value={exQ} onChange={(e) => setExQ(e.target.value)} />
+                <div className="max-h-72 space-y-0.5 overflow-y-auto rounded-lg border p-1">
+                  {teachers.filter((t) => !exQ.trim() || t.name.toLowerCase().includes(exQ.trim().toLowerCase())).map((t) => (
+                    <label key={t.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-muted">
+                      <Checkbox checked={cfg.pool.includes(t.id)} onCheckedChange={(v) => togglePool(t.id, v === true)} />
+                      <span className="truncate">{t.name}</span>
+                      <span className="ml-auto shrink-0 text-xs text-muted-foreground">{t.subject}</span>
+                    </label>
+                  ))}
+                  {teachers.length === 0 && <p className="p-3 text-sm text-muted-foreground">{teachersQ.isLoading ? 'Memuat guru…' : 'Belum ada data guru.'}</p>}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label>Guru terpilih &amp; urutan ({cfg.pool.length})</Label>
+                  <Button type="button" size="sm" variant="outline" disabled={cfg.pool.length < 2}
+                    onClick={() => setCfg((c) => ({ ...c, pool: [...c.pool].sort((x, y) => (teacherById.get(x)?.name || '').localeCompare(teacherById.get(y)?.name || '', 'id')) }))}>
+                    Urutkan A–Z
+                  </Button>
+                </div>
+                <div className="max-h-72 space-y-0.5 overflow-y-auto rounded-lg border p-1">
+                  {cfg.pool.map((id, i) => (
+                    <div key={id} className="flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-muted">
+                      <Badge variant="secondary" className="w-8 shrink-0 justify-center">{i + 1}</Badge>
+                      <span className="truncate">{teacherById.get(id)?.name ?? 'Guru tidak ditemukan'}</span>
+                      <span className="ml-auto flex shrink-0 gap-0.5">
+                        <Button type="button" size="icon" variant="ghost" className="h-6 w-6" disabled={i === 0} onClick={() => movePool(i, -1)} aria-label="Naikkan"><ArrowUp className="h-3.5 w-3.5" /></Button>
+                        <Button type="button" size="icon" variant="ghost" className="h-6 w-6" disabled={i === cfg.pool.length - 1} onClick={() => movePool(i, 1)} aria-label="Turunkan"><ArrowDown className="h-3.5 w-3.5" /></Button>
+                        <Button type="button" size="icon" variant="ghost" className="h-6 w-6" onClick={() => togglePool(id, false)} aria-label="Hapus dari daftar"><X className="h-3.5 w-3.5" /></Button>
+                      </span>
+                    </div>
+                  ))}
+                  {cfg.pool.length === 0 && <p className="p-3 text-sm text-muted-foreground">Belum ada guru dipilih. Centang guru di kolom kiri.</p>}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>2. Atur ruang lalu generate</CardTitle>
+            <CardDescription>Isian manual tetap bisa dilakukan kapan saja dengan mengklik sel matriks.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-4 md:grid-cols-3">
@@ -365,6 +439,18 @@ export default function PanitiaUjianPengawas() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-1.5">
+                <Label>Cara menyusun</Label>
+                <Select value={cfg.method} onValueChange={(v) => setCfg((c) => ({ ...c, method: v as InvMethod }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="putar">Putar berurutan (pindah 1 ruang tiap sesi)</SelectItem>
+                    <SelectItem value="seimbang">Seimbang otomatis (beban dibagi rata)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            {cfg.method === 'seimbang' && (
               <div className="flex items-start justify-between gap-3 rounded-lg border p-3">
                 <div>
                   <Label htmlFor="own">Hindari mapel sendiri</Label>
@@ -372,25 +458,17 @@ export default function PanitiaUjianPengawas() {
                 </div>
                 <Switch id="own" checked={cfg.avoidOwnSubject} onCheckedChange={(v) => setCfg((c) => ({ ...c, avoidOwnSubject: v }))} />
               </div>
-            </div>
-
-            <details className="rounded-lg border p-3">
-              <summary className="cursor-pointer text-sm font-medium">
-                Guru yang tidak mengawas <Badge variant="secondary" className="ml-2">{cfg.excluded.length}</Badge>
-              </summary>
-              <div className="mt-3 space-y-2">
-                <Input placeholder="Cari nama guru…" value={exQ} onChange={(e) => setExQ(e.target.value)} />
-                <div className="grid max-h-56 gap-1 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
-                  {teachers.filter((t) => !exQ.trim() || t.name.toLowerCase().includes(exQ.trim().toLowerCase())).map((t) => (
-                    <label key={t.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-muted">
-                      <Checkbox checked={cfg.excluded.includes(t.id)} onCheckedChange={(v) => toggleExcluded(t.id, v === true)} />
-                      <span className="truncate">{t.name}</span>
-                    </label>
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground">Centang guru yang tidak ikut mengawas (mis. kepala sekolah atau guru berhalangan).</p>
-              </div>
-            </details>
+            )}
+            {cfg.method === 'putar' && (
+              <p className="text-xs text-muted-foreground">
+                Pola putar mengikuti nomor guru apa adanya; guru yang kebetulan mengawas mapelnya sendiri hanya ditandai di tab Peringatan.
+              </p>
+            )}
+            {cfg.pool.length > 0 && cfg.pool.length < slotsNeeded && (
+              <p className="text-sm text-amber-700">
+                Guru terpilih ({cfg.pool.length}) lebih sedikit dari jumlah tempat per sesi ({slotsNeeded}), sehingga {slotsNeeded - cfg.pool.length} tempat tiap sesi akan kosong.
+              </p>
+            )}
 
             <div className="flex flex-wrap gap-2">
               <Button onClick={onGenerateClick} disabled={missing || teachersQ.isLoading}>
@@ -403,7 +481,7 @@ export default function PanitiaUjianPengawas() {
                 <Badge variant="outline">{sessions.length} sesi</Badge>
                 <Badge variant="outline">{cfg.rooms} ruang</Badge>
                 <Badge variant="outline">Terisi {filledCells}/{totalCells}</Badge>
-                <Badge variant="outline">{teachers.length - cfg.excluded.length} guru tersedia</Badge>
+                <Badge variant="outline">{cfg.pool.length} guru terpilih</Badge>
               </div>
             </div>
           </CardContent>
@@ -424,51 +502,68 @@ export default function PanitiaUjianPengawas() {
                 {sessions.length === 0 ? (
                   <p className="p-6 text-sm text-muted-foreground">Belum ada sesi ujian.</p>
                 ) : (
-                  <div className="max-h-[70vh] overflow-auto">
-                    <table className="min-w-full border-collapse text-sm">
-                      <thead className="sticky top-0 z-20 bg-muted">
-                        <tr>
-                          <th className="sticky left-0 z-30 min-w-[72px] border bg-muted p-2 text-center">Ruang</th>
-                          {sessions.map((s) => (
-                            <th key={s.key} className="min-w-[170px] border p-2 text-left align-top font-medium">
-                              <div>{sName(s)}</div>
-                              <div className="text-xs font-normal text-muted-foreground">{s.subject || '-'}</div>
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Array.from({ length: cfg.rooms }, (_, i) => i + 1).map((room) => (
-                          <tr key={room}>
-                            <td className="sticky left-0 z-10 border bg-background p-2 text-center font-semibold">{room}</td>
-                            {sessions.map((s) => (
-                              <td key={s.key} className="border p-1 align-top">
-                                <div className="space-y-1">
-                                  {Array.from({ length: cfg.perRoom }, (_, i) => i + 1).map((slot) => {
-                                    const k = cellKey(s.key, room, slot);
-                                    const t = teacherById.get(assign[k] ?? '');
-                                    const bad = problemCells.has(k);
-                                    return (
-                                      <button
-                                        key={slot}
-                                        type="button"
-                                        onClick={() => { setQ(''); setPick({ key: k }); }}
-                                        className={`flex w-full items-center gap-1 rounded px-2 py-1 text-left text-xs transition-colors ${
-                                          t ? (bad ? 'border border-destructive bg-destructive/10 text-destructive' : 'bg-primary/10 hover:bg-primary/20')
-                                            : 'border border-dashed text-muted-foreground hover:bg-muted'}`}
-                                        title={t ? t.name : 'Klik untuk memilih pengawas'}
-                                      >
-                                        {t ? <span className="truncate">{cfg.perRoom > 1 ? `${slot}. ` : ''}{initial(t.name)}</span> : <><Plus className="h-3 w-3" />{cfg.perRoom > 1 ? `Pengawas ${slot}` : 'Pilih'}</>}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </td>
-                            ))}
+                  <div className="flex flex-col gap-4 p-3 lg:flex-row">
+                    <div className="max-h-[70vh] min-w-0 flex-1 overflow-auto">
+                      <table className="border-collapse text-xs">
+                        <thead className="sticky top-0 z-20 bg-muted">
+                          <tr>
+                            <th rowSpan={2} className="border p-1.5">NO</th>
+                            <th rowSpan={2} className="border p-1.5">HARI / TANGGAL</th>
+                            <th rowSpan={2} className="border p-1.5">MATA PELAJARAN</th>
+                            <th rowSpan={2} className="border p-1.5">WAKTU</th>
+                            <th colSpan={cfg.rooms} className="border p-1.5">RUANG</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                          <tr>
+                            {Array.from({ length: cfg.rooms }, (_, i) => i + 1).map((r) => <th key={r} className="min-w-[34px] border p-1 text-center">{r}</th>)}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {days.map((d, di) => d.sessions.map((s, si) => (
+                            <tr key={s.key}>
+                              {si === 0 && <td rowSpan={d.sessions.length} className="border p-1.5 text-center align-middle">{di + 1}</td>}
+                              {si === 0 && <td rowSpan={d.sessions.length} className="border p-1.5 align-middle font-semibold">{[s.day, (s.dateLabel || s.date).replace(/^0/, '')].filter(Boolean).join(', ')}</td>}
+                              <td className="border p-1.5">{s.subject || '-'}</td>
+                              <td className="whitespace-nowrap border p-1.5 text-center">{s.start.replace(':', '.')}{s.end ? ` - ${s.end.replace(':', '.')}` : ''}</td>
+                              {Array.from({ length: cfg.rooms }, (_, i) => i + 1).map((room) => (
+                                <td key={room} className="border p-0.5 align-middle">
+                                  <div className="flex flex-col gap-0.5">
+                                    {Array.from({ length: cfg.perRoom }, (_, i) => i + 1).map((slot) => {
+                                      const k = cellKey(s.key, room, slot);
+                                      const t = teacherById.get(assign[k] ?? '');
+                                      const bad = problemCells.has(k);
+                                      return (
+                                        <button
+                                          key={slot}
+                                          type="button"
+                                          onClick={() => { setQ(''); setPick({ key: k }); }}
+                                          className={`h-6 w-full min-w-[30px] rounded text-center text-xs font-medium transition-colors ${
+                                            t ? (bad ? 'border border-destructive bg-destructive/10 text-destructive' : 'bg-primary/10 hover:bg-primary/20')
+                                              : 'border border-dashed text-muted-foreground hover:bg-muted'}`}
+                                          title={t ? `${numOf.get(t.id)}. ${t.name}` : 'Klik untuk memilih pengawas'}
+                                        >
+                                          {t ? (numOf.get(t.id) ?? '?') : <Plus className="mx-auto h-3 w-3" />}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </td>
+                              ))}
+                            </tr>
+                          )))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="max-h-[70vh] w-full shrink-0 overflow-auto lg:w-64">
+                      <table className="w-full border-collapse text-xs">
+                        <thead className="sticky top-0 bg-muted"><tr><th className="w-10 border p-1.5">NO</th><th className="border p-1.5 text-left">NAMA</th></tr></thead>
+                        <tbody>
+                          {numbered.map((t, i) => (
+                            <tr key={t.id}><td className="border p-1 text-center">{i + 1}</td><td className="border p-1">{t.name}</td></tr>
+                          ))}
+                          {numbered.length === 0 && <tr><td colSpan={2} className="border p-2 text-muted-foreground">Pilih guru pengawas dulu.</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </CardContent>
@@ -482,6 +577,7 @@ export default function PanitiaUjianPengawas() {
                   <table className="min-w-full border-collapse text-sm">
                     <thead className="sticky top-0 bg-muted">
                       <tr>
+                        <th className="border p-2 text-center">No</th>
                         <th className="border p-2 text-left">Guru</th>
                         <th className="border p-2 text-left">Mapel</th>
                         <th className="border p-2 text-center">Tugas</th>
@@ -492,10 +588,11 @@ export default function PanitiaUjianPengawas() {
                     <tbody>
                       {loads.map((l) => {
                         const t = teacherById.get(l.id);
-                        const ex = cfg.excluded.includes(l.id);
+                        const out = cfg.pool.length > 0 && !cfg.pool.includes(l.id);
                         return (
-                          <tr key={l.id} className={ex ? 'opacity-60' : ''}>
-                            <td className="border p-2">{l.name}{ex && <Badge variant="secondary" className="ml-2">tidak mengawas</Badge>}</td>
+                          <tr key={l.id} className={out ? 'opacity-70' : ''}>
+                            <td className="border p-2 text-center font-semibold">{numOf.get(l.id)}</td>
+                            <td className="border p-2">{l.name}{out && <Badge variant="secondary" className="ml-2">di luar daftar</Badge>}</td>
                             <td className="border p-2 text-muted-foreground">{t?.subject}</td>
                             <td className="border p-2 text-center font-semibold">{l.total}</td>
                             <td className="border p-2 text-center">{l.days}</td>
@@ -503,7 +600,7 @@ export default function PanitiaUjianPengawas() {
                               <div className="flex flex-wrap gap-1">
                                 {l.items.map((it) => (
                                   <Badge key={`${it.session.key}${it.room}${it.slot}`} variant="outline" className="font-normal">
-                                    {(it.session.dateLabel || it.session.date)} {it.session.start} • R{it.room}
+                                    {(it.session.dateLabel || it.session.date)} {it.session.start} • Ruang {it.room}
                                   </Badge>
                                 ))}
                               </div>
@@ -610,7 +707,7 @@ export default function PanitiaUjianPengawas() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Cetak jadwal pengawas</DialogTitle>
-            <DialogDescription>Berisi matriks ruang × sesi, rekap tugas per guru, dan tanda tangan.</DialogDescription>
+            <DialogDescription>Format matriks sekolah dengan kop: nomor guru per ruang dan sesi, daftar nama, keterangan, dan tanda tangan kepala sekolah.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
@@ -621,9 +718,11 @@ export default function PanitiaUjianPengawas() {
               </Select>
             </div>
             <div className="space-y-1.5"><Label>Tanggal tanda tangan</Label><Input type="date" value={signDate} onChange={(e) => setSignDate(e.target.value)} /></div>
-            <div className="space-y-1.5"><Label>Nama ketua panitia (opsional)</Label><Input value={chairName} onChange={(e) => setChairName(e.target.value)} /></div>
-            <div className="space-y-1.5"><Label>NIP ketua panitia (opsional)</Label><Input value={chairNip} onChange={(e) => setChairNip(e.target.value)} /></div>
-            <p className="text-xs text-muted-foreground">Kepala sekolah diambil dari Pengaturan Sekolah. Kolom yang dikosongkan dicetak sebagai titik-titik untuk diisi tangan.</p>
+            <div className="space-y-1.5">
+              <Label>Keterangan (satu baris = satu poin)</Label>
+              <Textarea rows={4} value={notesText} onChange={(e) => setNotesText(e.target.value)} />
+            </div>
+            <p className="text-xs text-muted-foreground">Kop surat, tempat, dan nama kepala sekolah diambil dari Pengaturan Sekolah. Matriks berisi nomor guru, tabel nomor-nama ada di sisi kanan.</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPrintOpen(false)}>Batal</Button>
