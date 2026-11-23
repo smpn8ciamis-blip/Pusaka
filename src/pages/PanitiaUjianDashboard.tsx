@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { CalendarClock, ClipboardList, FileText, Users } from 'lucide-react';
+import { CalendarClock, ClipboardList, FileText, UserCheck, Users } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -111,6 +111,13 @@ export default function PanitiaUjianDashboard() {
               <CardDescription>Denah ruang, nomor peserta, dan cetak kartu ujian.</CardDescription>
             </CardHeader>
             <CardContent><Button asChild variant="outline"><Link to="/exam-administration">Buka Administrasi Ujian</Link></Button></CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><UserCheck className="h-5 w-5" /> Jadwal Pengawas</CardTitle>
+              <CardDescription>Susun pengawas tiap ruang per sesi (otomatis atau manual), lihat matriks, dan cetak PDF.</CardDescription>
+            </CardHeader>
+            <CardContent><Button asChild variant="outline"><Link to="/panitia-ujian/pengawas">Kelola jadwal pengawas</Link></Button></CardContent>
           </Card>
         </div>
 
