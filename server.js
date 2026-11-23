@@ -315,6 +315,7 @@ DEFAULT_TEMPLATES.assignment_followup = `⏰ *PENGINGAT BUKTI KUNJUNGAN*\n\nYth.
 DEFAULT_TEMPLATES.parent_points = `⚠️ *POIN PELANGGARAN*\n\nSiswa: *{{nama_siswa}}* ({{kelas}})\nTotal poin: *{{total_poin}}* ({{jumlah_catatan}} catatan)\n\n{{rincian}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.parent_violation_new = `⚠️ *PELANGGARAN BARU*\n\nYth. Bapak/Ibu Orang Tua/Wali,\nAnanda *{{nama_siswa}}* ({{kelas}}) mendapat catatan pelanggaran:\n• Tanggal: {{tanggal}}\n• Pelanggaran: *{{pelanggaran}}* ({{kategori}})\n• Poin: *+{{poin}}*\n• Keterangan: {{keterangan}}\n\nTotal poin ananda saat ini: *{{total_poin}}* ({{jumlah_catatan}} catatan).\nMohon bimbingan Bapak/Ibu di rumah. Ketik *cek poin* untuk melihat rinciannya.\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.parent_attendance = `📅 *REKAP KEHADIRAN*\n\nSiswa: *{{nama_siswa}}* ({{kelas}})\nPeriode: {{periode}} (30 hari terakhir)\n\n✅ Hadir: *{{hadir}}* hari ({{persen}}%)\n⏰ Terlambat: {{terlambat}} hari (sudah termasuk hadir)\n🤒 Sakit: {{sakit}} hari\n📝 Izin: {{izin}} hari\n❌ Alfa: {{alpa}} hari\nTotal hari tercatat: {{total_hari}}\n\n{{rincian}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.invigilator_exam_violation = `🚨 *PELANGGARAN UJIAN (CBT)*\n\nYth. {{nama_pengawas}},\nSiswa di ruang yang Bapak/Ibu awasi melanggar aturan ujian:\n\n• Siswa: *{{nama_siswa}}* ({{kelas}})\n• Ruang: *{{ruang}}*{{meja}}\n• Pelanggaran: *{{pelanggaran}}* ({{jumlah}})\n• Ujian: {{ujian}}\n• Waktu: {{jam}} WIB\n\nMohon dicek ke tempat duduk siswa tersebut.\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.student_account = `🔐 *AKUN PUSAKA*\n\nNama: *{{nama_siswa}}* ({{kelas}})\n\n• Username: *{{username}}*\n• Password awal: *{{password}}*\n• Alamat: {{alamat}}\n\n⚠️ *Setelah berhasil login, segera ganti password* agar akunmu aman:\nBuka menu *Pengaturan* → *Keamanan*, isi *Password Lama* (password awal di atas) dan *Password Baru*, lalu ketuk *Simpan Password*.\n\nSudah pernah mengganti password lalu lupa? Hubungi wali kelas untuk diatur ulang. Jangan bagikan username dan password kepada siapa pun.\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.piket_punch = `🕒 *ABSENSI PIKET TERCATAT*\n\nYth. Bapak/Ibu *{{nama}}*,\nAbsen *{{jenis}}* {{shift}} Anda tercatat pada {{tanggal}} pukul *{{jam}} WIB* melalui mesin absensi.\n\nTerima kasih atas pengabdiannya.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.teacher_saturday_greeting = `🌿 *SELAMAT AKHIR PEKAN*\n\nYth. Bapak/Ibu *{{nama_guru}}*,\n\nTerima kasih atas dedikasi dan kerja keras Bapak/Ibu dalam mendidik anak-anak kita sepanjang pekan ini.\n\nHari {{hari}} adalah waktu untuk berhenti sejenak. Nikmatilah akhir pekan bersama keluarga, karena keluarga adalah sumber kekuatan terbesar seorang pendidik. Istirahatlah yang cukup dan siapkan energi terbaik untuk mengajar kembali di hari Senin.\n\nSemoga sehat dan bahagia selalu. 🙏\n_Pusaka - SMP Negeri 8 Ciamis_`;
@@ -351,7 +352,8 @@ const DEFAULT_BOT_SETTINGS = {
     weekly_absence_to_group: false,   // kirim juga ringkasan siswa yang sering tidak hadir ke grup rekap
     violation_wa_enabled: true,       // WA ke orang tua (nomor tertaut) saat siswa mendapat catatan pelanggaran baru
     ekskul_journal_wa_enabled: true,  // pembina ekskul (nomor HP profil cocok) bisa isi jurnal & kirim foto kegiatan lewat chat bot
-    student_account_wa_enabled: true  // siswa/ortu mengetik "akun pusaka" -> bot membalas username + password awal (setelah nomor/NISN+tgl lahir diverifikasi)
+    student_account_wa_enabled: true,  // siswa/ortu mengetik "akun pusaka" -> bot membalas username + password awal (setelah nomor/NISN+tgl lahir diverifikasi)
+    exam_violation_wa_enabled: true   // siswa melanggar aturan CBT (anti curang) -> WA langsung ke pengawas ruang siswa itu (sesuai jadwal pengawas)
 };
 const CONFIG_TTL_MS = 30 * 1000;
 let templateCache = { at: 0, rows: new Map() };
@@ -2636,6 +2638,117 @@ app.post('/violation-created', requireUser, async (req, res) => {
     if (typeof id !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(id)) return res.status(400).json({ status: 'error', message: 'violation_id tidak valid.' });
     try { return res.json(await notifyViolationCreated(id, req.userId)); }
     catch (e) { console.error('[WA PELANGGARAN]', e.message); return res.status(500).json({ status: 'error', message: e.message }); }
+});
+
+// ===================== WA PELANGGARAN UJIAN CBT KE PENGAWAS RUANG =====================
+// Dipicu aplikasi siswa tepat setelah pelanggaran anti curang tersimpan (tanpa polling). Satu pelanggaran = satu WA per pengawas.
+// Ruang siswa diambil dari exam_student_rooms (disimpan halaman Jadwal Pengawas); pengawas dari exam_invigilators.
+const EXAM_VIOLATION_LABEL = {
+    tab_switch: 'pindah tab/aplikasi', blur: 'jendela kehilangan fokus', focus_lost: 'fokus pindah ke aplikasi lain',
+    fullscreen_exit: 'keluar dari layar penuh', split_screen: 'layar belah / jendela mengecil', multi_screen: 'lebih dari satu layar',
+    copy: 'menyalin', cut: 'memotong', paste: 'menempel', print: 'mencetak', screenshot: 'tangkapan layar (PrintScreen)',
+    os_key: 'tombol Windows/Cmd', devtools: 'alat pengembang', shortcut: 'pintasan terlarang'
+};
+// Pilih sesi pengawas yang sedang berlangsung dari baris jadwal ruang itu pada hari ini.
+// Sesi cocok bila (mulai - 30 menit) <= sekarang <= (selesai + 30 menit); selesai kosong = mulai + 180 menit.
+// Bila beberapa cocok, ambil yang mulainya paling dekat sebelum sekarang. Mengembalikan semua baris (pengawas) sesi itu.
+function pickInvigilationSession(rows, nowMin) {
+    const sessions = new Map();
+    (rows || []).forEach(function(r) {
+        const st = String(r.start_time || '');
+        if (!/^\d{2}:\d{2}$/.test(st)) return;
+        const start = hhmmToMin(st);
+        const end = /^\d{2}:\d{2}$/.test(String(r.end_time || '')) ? hhmmToMin(r.end_time) : start + 180;
+        if (!sessions.has(st)) sessions.set(st, { start: start, end: end, subject: r.subject || '', rows: [] });
+        sessions.get(st).rows.push(r);
+    });
+    const hits = Array.from(sessions.values()).filter(function(x) { return nowMin >= x.start - 30 && nowMin <= x.end + 30; });
+    if (hits.length === 0) return null;
+    hits.sort(function(a, b) {
+        const ba = a.start <= nowMin ? 0 : 1, bb = b.start <= nowMin ? 0 : 1;
+        return ba - bb || Math.abs(nowMin - a.start) - Math.abs(nowMin - b.start);
+    });
+    return hits[0];
+}
+const examViolationNotified = new Map(); // id pelanggaran -> waktu; cegah kirim ganda
+async function notifyExamViolation(violationId, userId) {
+    if (examViolationNotified.has(violationId)) return { status: 'already_sent' };
+    examViolationNotified.set(violationId, Date.now());
+    if (examViolationNotified.size > 1000) examViolationNotified.delete(examViolationNotified.keys().next().value);
+    let r;
+    try { r = await notifyExamViolationInner(violationId, userId); }
+    catch (e) { examViolationNotified.delete(violationId); throw e; }
+    if (r.status !== 'queued') examViolationNotified.delete(violationId);
+    return r;
+}
+async function notifyExamViolationInner(violationId, userId) {
+    const cfg = await getBotSettings();
+    if (!cfg.exam_violation_wa_enabled) return { status: 'disabled' };
+    if (!isReady) return { status: 'bot_offline' };
+    const vr = await supabase.from('cbt_session_violations')
+        .select('id, session_id, exam_id, student_id, violation_type, detail, created_at').eq('id', violationId).maybeSingle();
+    if (vr.error) throw vr.error;
+    const v = vr.data;
+    if (!v) return { status: 'not_found' };
+    if (Date.now() - new Date(v.created_at).getTime() > 10 * 60 * 1000) return { status: 'expired' }; // hanya kejadian baru (real-time)
+    const sr = await supabase.from('cbt_exam_sessions').select('id, user_id, student_id, school_id').eq('id', v.session_id).maybeSingle();
+    if (sr.error) throw sr.error;
+    if (!sr.data || sr.data.user_id !== userId) return { status: 'forbidden' }; // hanya siswa pemilik sesi itu sendiri
+    const ex = await supabase.from('cbt_exams').select('title, subject, max_violations').eq('id', v.exam_id).maybeSingle();
+    if (ex.error) throw ex.error;
+    const st = await supabase.from('students').select('full_name, school_id, classes(name)').eq('id', v.student_id).maybeSingle();
+    if (st.error) throw st.error;
+    if (!st.data) return { status: 'not_found' };
+    const schoolId = st.data.school_id;
+    const rm = await supabase.from('exam_student_rooms').select('room_no, table_no').eq('student_id', v.student_id).eq('school_id', schoolId).maybeSingle();
+    if (rm.error) throw rm.error;
+    if (!rm.data) return { status: 'no_room' }; // denah ruang belum disimpan panitia
+    const now = wibNow();
+    const iv = await supabase.from('exam_invigilators')
+        .select('start_time, end_time, subject, teacher_id').eq('school_id', schoolId).eq('exam_date', now.date).eq('room_no', rm.data.room_no);
+    if (iv.error) throw iv.error;
+    const pick = pickInvigilationSession(iv.data, now.minutes);
+    if (!pick) return { status: 'no_invigilator' };
+    const tids = Array.from(new Set(pick.rows.map(function(x) { return x.teacher_id; })));
+    const tr = await supabase.from('teachers').select('id, user_id').in('id', tids);
+    if (tr.error) throw tr.error;
+    const uids = (tr.data || []).map(function(t) { return t.user_id; }).filter(Boolean);
+    const pr = uids.length ? await supabase.from('profiles').select('id, full_name, phone').in('id', uids) : { data: [], error: null };
+    if (pr.error) throw pr.error;
+    const cnt = await supabase.from('cbt_session_violations').select('id', { count: 'exact', head: true }).eq('session_id', v.session_id);
+    const total = cnt.count || 1;
+    const max = (ex.data && ex.data.max_violations) || 3;
+    const clean = function(x, n) { return String(x || '').replace(/[\r\n*_~`]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n); };
+    const seen = new Set();
+    let queued = 0, noPhone = 0;
+    (pr.data || []).forEach(function(p) {
+        const phone = p.phone ? formatToInternational(p.phone) : '';
+        if (!phone || phone.length < 10) { noPhone++; return; }
+        if (seen.has(phone)) return;
+        seen.add(phone);
+        const vars = {
+            nama_pengawas: clean(p.full_name, 60) || 'Bapak/Ibu Pengawas',
+            nama_siswa: clean(st.data.full_name, 80), kelas: (st.data.classes && st.data.classes.name) || '-',
+            ruang: String(rm.data.room_no), meja: rm.data.table_no ? ' (meja ' + rm.data.table_no + ')' : '',
+            pelanggaran: EXAM_VIOLATION_LABEL[v.violation_type] || clean(v.violation_type, 40),
+            jumlah: 'ke-' + total + ' dari ' + max,
+            ujian: clean((ex.data && (ex.data.title || ex.data.subject)) || '-', 80),
+            jam: new Date(v.created_at).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false }).replace('.', ':')
+        };
+        const jid = phone + '@s.whatsapp.net';
+        queued++;
+        enqueueTask(async function() {
+            const text = await renderMessage('invigilator_exam_violation', vars);
+            if (text) await sendSafeMessage(jid, { text: text });
+        }, { to: jid, kind: 'invigilator_exam_violation' });
+    });
+    return { status: queued ? 'queued' : 'no_phone', queued: queued, no_phone: noPhone };
+}
+app.post('/exam-violation-created', requireUser, async (req, res) => {
+    const id = req.body && req.body.violation_id;
+    if (typeof id !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(id)) return res.status(400).json({ status: 'error', message: 'violation_id tidak valid.' });
+    try { return res.json(await notifyExamViolation(id, req.userId)); }
+    catch (e) { console.error('[WA PELANGGARAN UJIAN]', e.message); return res.status(500).json({ status: 'error', message: e.message }); }
 });
 
 app.post('/travel-created', requireUser, async (req, res) => {

@@ -549,6 +549,7 @@ function ReminderTab() {
   const [waButtons, setWaButtons] = useState(false);
   const [waCard, setWaCard] = useState(true);
   const [violationWa, setViolationWa] = useState(true);
+  const [examViolationWa, setExamViolationWa] = useState(true);
   const [ekskulWa, setEkskulWa] = useState(true);
   const [assignFuTime, setAssignFuTime] = useState('09:00');
   const [wkOn, setWkOn] = useState(false);
@@ -593,6 +594,7 @@ function ReminderTab() {
       setWaButtons(data.wa_buttons_enabled === true);
       setWaCard(data.wa_contact_card_enabled !== false);
       setViolationWa(data.violation_wa_enabled !== false);
+      setExamViolationWa(data.exam_violation_wa_enabled !== false);
       setEkskulWa(data.ekskul_journal_wa_enabled !== false);
       setAssignFuTime(String(data.assignment_followup_time || '09:00').slice(0, 5));
       setWkOn(!!data.weekly_absence_enabled);
@@ -631,6 +633,7 @@ function ReminderTab() {
         wa_buttons_enabled: waButtons,
         wa_contact_card_enabled: waCard,
         violation_wa_enabled: violationWa,
+        exam_violation_wa_enabled: examViolationWa,
         ekskul_journal_wa_enabled: ekskulWa,
         assignment_followup_time: /^\d{2}:\d{2}$/.test(assignFuTime) ? assignFuTime : '09:00',
         weekly_absence_enabled: wkOn,
@@ -851,6 +854,15 @@ function ReminderTab() {
           </div>
           <p className="text-xs text-muted-foreground">
             Begitu guru/petugas menyimpan catatan pelanggaran di menu Pelanggaran, bot langsung mengirim WA ke nomor orang tua yang sudah tertaut: nama pelanggaran, poin baru, dan total poin. Siswa tanpa nomor tertaut dilewati. Isi pesan dapat diubah di tab Template (<b>Orang Tua: Pelanggaran Baru</b>).
+          </p>
+        </div>
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="evw-en">WA ke pengawas ruang saat siswa melanggar aturan ujian CBT</Label>
+            <Switch id="evw-en" checked={examViolationWa} onCheckedChange={setExamViolationWa} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Saat mode anti curang mendeteksi pelanggaran (pindah tab, keluar layar penuh, dll.), bot langsung mengirim WA ke pengawas ruang siswa itu: nama siswa, ruang, meja, jenis pelanggaran, dan urutannya. Pengawas ditentukan dari Jadwal Pengawas pada hari dan jam ujian; ruang siswa dari denah yang disimpan di halaman Jadwal Pengawas. Isi pesan dapat diubah di tab Template (<b>Pengawas: Pelanggaran Ujian CBT</b>).
           </p>
         </div>
         <div className="space-y-2 rounded-lg border p-3">

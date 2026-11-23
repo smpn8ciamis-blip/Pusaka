@@ -19,7 +19,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { supabase } from '@/integrations/supabase/client';
 import { scheduleOf, useExamSettings } from '@/hooks/useExamSettings';
-import { buildRooms, DEFAULT_START_NUMBERS } from '@/lib/examSeating';
+import { buildRooms, DEFAULT_START_NUMBERS, roomAssignments, type RoomAssignmentRow } from '@/lib/examSeating';
 import {
   buildInvSessions, cellKey, findProblems, fromRows, generateInvigilation, isOwnSubject, numberedTeachers, parseCellKey,
   sessionsOverlap, teacherLoads, toRows,
@@ -36,14 +36,14 @@ const isMissingTable = (e: any) => {
   return /PGRST20[25]|42P01|42883|does not exist|schema cache|Could not find/i.test(m);
 };
 
-/** Jumlah ruang menurut denah Administrasi Ujian (aturan sama: siswa aktif, bukan mutasi, tingkat terpilih). */
+/** Susunan ruang menurut denah Administrasi Ujian (aturan sama: siswa aktif, bukan mutasi, tingkat terpilih). */
 function useSuggestedRooms(settings: any) {
   return useQuery({
     queryKey: ['pengawas-saran-ruang', settings?.id ?? null, JSON.stringify(settings?.exam_card_settings ?? {})],
     enabled: !!settings,
     staleTime: 60_000,
     retry: false,
-    queryFn: async (): Promise<number> => {
+    queryFn: async (): Promise<{ count: number; rows: RoomAssignmentRow[] }> => {
       const { data, error } = await db
         .from('students')
         .select('id, full_name, classes ( name, grade )')
@@ -63,7 +63,8 @@ function useSuggestedRooms(settings: any) {
       const rows = Number(c.rowsCount) >= 1 ? Math.floor(Number(c.rowsCount)) : 8;
       const cols = Number(c.columnsCount) >= 1 ? Math.floor(Number(c.columnsCount)) : 4;
       const mode = ['auto', 'alternating', 'by_class'].includes(c.seatingMode) ? c.seatingMode : 'auto';
-      return buildRooms(students, { grades, rows, cols, mode, startNumbers }).rooms.length;
+      const rooms = buildRooms(students, { grades, rows, cols, mode, startNumbers }).rooms;
+      return { count: rooms.length, rows: roomAssignments(rooms) };
     },
   });
 }
@@ -73,7 +74,8 @@ const DEFAULT_CFG: InvConfig = { rooms: 1, perRoom: 1, pool: [], method: 'putar'
 export default function PanitiaUjianPengawas() {
   const qc = useQueryClient();
   const { data: settings, isLoading: settingsLoading, error: settingsError } = useExamSettings();
-  const suggested = useSuggestedRooms(settings);
+  const seating = useSuggestedRooms(settings);
+  const suggested = { data: seating.data?.count };
 
   const { sessions, skipped } = useMemo(() => buildInvSessions(scheduleOf(settings)), [settings]);
 
@@ -183,8 +185,34 @@ export default function PanitiaUjianPengawas() {
       setSnapshot(JSON.stringify([cfg, kept]));
       qc.invalidateQueries({ queryKey: ['pengawas-tersimpan'] });
       toast.success('Jadwal pengawas disimpan');
+      if (seating.data && seating.data.rows.length > 0) saveRoomsMut.mutate(); // perbarui denah ruang agar notifikasi pelanggaran memakai ruang terbaru
     },
     onError: (e: any) => toast.error(e?.message ? `Gagal menyimpan: ${e.message}` : 'Gagal menyimpan jadwal pengawas'),
+  });
+
+  // ---------- denah ruang siswa (dipakai bot WA untuk memberi tahu pengawas saat siswa melanggar saat ujian CBT) ----------
+  const roomsStatusQ = useQuery({
+    queryKey: ['pengawas-denah-status'],
+    retry: false,
+    queryFn: async () => {
+      const { data, error } = await db.rpc('exam_student_rooms_status');
+      if (error) throw error;
+      return data as { students: number; rooms: number; updated_at: string | null };
+    },
+  });
+  const saveRoomsMut = useMutation({
+    mutationFn: async () => {
+      const rows = seating.data?.rows;
+      if (!rows || rows.length === 0) throw new Error('Denah ruang siswa belum bisa disusun (cek data siswa dan pengaturan di Administrasi Ujian).');
+      const { data, error } = await db.rpc('exam_student_rooms_save', { p_rows: rows });
+      if (error) throw error;
+      return data as { students: number; rooms: number };
+    },
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['pengawas-denah-status'] });
+      toast.success(`Denah ruang tersimpan: ${r.students} siswa di ${r.rooms} ruang`);
+    },
+    onError: (e: any) => toast.error(e?.message ? `Gagal menyimpan denah ruang: ${e.message}` : 'Gagal menyimpan denah ruang'),
   });
 
   // ---------- generate ----------
@@ -484,6 +512,37 @@ export default function PanitiaUjianPengawas() {
                 <Badge variant="outline">{cfg.pool.length} guru terpilih</Badge>
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>3. Notifikasi pelanggaran ujian ke pengawas</CardTitle>
+            <CardDescription>
+              Saat siswa melanggar aturan CBT (pindah tab, keluar layar penuh, dll.), bot WhatsApp langsung memberi tahu pengawas ruang siswa itu
+              menurut jadwal di atas. Untuk itu bot perlu tahu ruang tiap siswa: simpan denah ruang setelah jadwal pengawas final.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              {roomsStatusQ.data && roomsStatusQ.data.students > 0 ? (
+                <Badge variant="outline">
+                  Denah tersimpan: {roomsStatusQ.data.students} siswa, {roomsStatusQ.data.rooms} ruang
+                  {roomsStatusQ.data.updated_at ? ` (${new Date(roomsStatusQ.data.updated_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })})` : ''}
+                </Badge>
+              ) : (
+                <Badge variant="secondary">{roomsStatusQ.isLoading ? 'Memeriksa…' : 'Denah ruang belum disimpan — notifikasi belum bisa dikirim'}</Badge>
+              )}
+              <Button type="button" variant="outline" size="sm" disabled={saveRoomsMut.isPending || !seating.data || seating.data.rows.length === 0 || missing}
+                onClick={() => saveRoomsMut.mutate()}>
+                <Save className="mr-2 h-4 w-4" /> {saveRoomsMut.isPending ? 'Menyimpan…' : 'Simpan denah ruang siswa'}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Denah mengikuti pengaturan Administrasi Ujian (tingkat, baris × kolom, mode duduk) yang sama dengan kartu ujian, jadi ruangnya sama dengan yang tercetak.
+              Simpan ulang bila ada siswa baru/mutasi atau pengaturan denah berubah. Nomor WA pengawas diambil dari profil guru.
+              Saklar fitur ada di menu WhatsApp Bot.
+            </p>
           </CardContent>
         </Card>
 

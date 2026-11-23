@@ -38,7 +38,7 @@ export interface LocalProgress {
   timeLeft?: number;
   timeAt?: number;
   /** Pelanggaran yang belum terkirim ke server */
-  pendingViolations: { type: string; detail: string | null; at: number }[];
+  pendingViolations: { type: string; detail: string | null; at: number; id?: string }[];
   violations: number;
   updatedAt: number;
 }
