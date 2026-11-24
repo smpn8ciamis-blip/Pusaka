@@ -30,6 +30,9 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
+  GraduationCap,
+  CalendarDays,
+  SlidersHorizontal,
 } from 'lucide-react';
 import React, { useState, useMemo, useEffect } from 'react';
 import {
@@ -60,7 +63,6 @@ import { notifyBotIfAttendanceComplete } from '@/lib/waBot';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { fetchAttendanceChunked } from '@/lib/fetchAttendanceRange';
@@ -68,7 +70,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ImportAttendance } from '@/components/ImportAttendance';
 import { useAttendanceDaySettings, isAttendanceAllowedForDate, getActiveDayNames } from '@/hooks/useAttendanceDaySettings';
-import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, format as formatDate } from 'date-fns';
+import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, format as formatDate, parseISO } from 'date-fns';
+import { id as idLocale } from 'date-fns/locale';
 
 const COLORS = {
   hadir: '#10b981',
@@ -137,6 +140,141 @@ function SortHead<K extends string>({
   );
 }
 
+// ---------- Elemen tampilan ----------
+type StatusKey = 'hadir' | 'sakit' | 'izin' | 'alpa';
+const STATUS_KEYS: StatusKey[] = ['hadir', 'sakit', 'izin', 'alpa'];
+const STATUS_META: Record<
+  StatusKey,
+  { label: string; icon: typeof CheckCircle2; text: string; bg: string; solid: string; activeBtn: string }
+> = {
+  hadir: {
+    label: 'Hadir', icon: CheckCircle2,
+    text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10', solid: 'bg-emerald-500',
+    activeBtn: 'bg-emerald-500 text-white border-emerald-500 shadow-sm',
+  },
+  sakit: {
+    label: 'Sakit', icon: Stethoscope,
+    text: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500/10', solid: 'bg-amber-500',
+    activeBtn: 'bg-amber-500 text-white border-amber-500 shadow-sm',
+  },
+  izin: {
+    label: 'Izin', icon: Clock,
+    text: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-500/10', solid: 'bg-blue-500',
+    activeBtn: 'bg-blue-500 text-white border-blue-500 shadow-sm',
+  },
+  alpa: {
+    label: 'Alpa', icon: XCircle,
+    text: 'text-red-600 dark:text-red-400', bg: 'bg-red-500/10', solid: 'bg-red-500',
+    activeBtn: 'bg-red-500 text-white border-red-500 shadow-sm',
+  },
+};
+
+const initialsOf = (name: string) =>
+  (name || '?')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .join('') || '?';
+
+const pctTone = (pct: number) =>
+  pct >= 90 ? 'text-emerald-600 dark:text-emerald-400' : pct >= 75 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400';
+const pctBar = (pct: number) => (pct >= 90 ? 'bg-emerald-500' : pct >= 75 ? 'bg-amber-500' : 'bg-red-500');
+
+const fmtDay = (iso: string) => {
+  try {
+    return formatDate(parseISO(iso), 'd MMM yyyy', { locale: idLocale });
+  } catch {
+    return iso;
+  }
+};
+
+function StatusBadge({ status }: { status: string }) {
+  const m = STATUS_META[status as StatusKey];
+  if (!m) return <span className="capitalize">{status}</span>;
+  const Icon = m.icon;
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${m.bg} ${m.text}`}>
+      <Icon className="h-3.5 w-3.5" />
+      {m.label}
+    </span>
+  );
+}
+
+function Avatar({ name }: { name: string }) {
+  return (
+    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+      {initialsOf(name)}
+    </span>
+  );
+}
+
+function StatCard({ kind, value, total }: { kind: StatusKey; value: number; total: number }) {
+  const m = STATUS_META[kind];
+  const Icon = m.icon;
+  const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+  return (
+    <div className="relative overflow-hidden rounded-xl border bg-card p-3 shadow-sm transition-shadow hover:shadow-md md:p-4">
+      <div className={`absolute inset-x-0 top-0 h-1 ${m.solid}`} />
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-muted-foreground md:text-sm">{m.label}</span>
+        <span className={`grid h-8 w-8 place-items-center rounded-lg ${m.bg} ${m.text}`}>
+          <Icon className="h-4 w-4" />
+        </span>
+      </div>
+      <div className="mt-2 flex items-baseline gap-2">
+        <span className="text-2xl font-bold tabular-nums md:text-3xl">{value}</span>
+        <span className={`text-xs font-medium ${m.text}`}>{pct}%</span>
+      </div>
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div className={`h-full rounded-full transition-all ${m.solid}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function AttendanceRing({ pct, size = 88 }: { pct: number | null; size?: number }) {
+  const stroke = 9;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const v = pct == null ? 0 : Math.max(0, Math.min(100, pct));
+  const color = pct == null ? 'stroke-muted-foreground/30' : v >= 90 ? 'stroke-emerald-500' : v >= 75 ? 'stroke-amber-500' : 'stroke-red-500';
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }} role="img" aria-label={pct == null ? 'Belum ada data kehadiran' : `Tingkat kehadiran ${v.toFixed(1)} persen`}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke} className="stroke-muted" />
+        <circle
+          cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke} strokeLinecap="round"
+          className={`${color} transition-all duration-700`} strokeDasharray={c} strokeDashoffset={c * (1 - v / 100)}
+        />
+      </svg>
+      <div className="absolute inset-0 grid place-items-center text-center leading-tight">
+        <div>
+          <div className="text-lg font-bold tabular-nums">{pct == null ? '-' : `${v.toFixed(0)}%`}</div>
+          <div className="text-[10px] text-muted-foreground">hadir</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SectionCard({
+  title, description, action, children,
+}: { title: string; description?: string; action?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <Card className="overflow-hidden rounded-xl border shadow-sm">
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 space-y-0 p-4 pb-2 md:p-6 md:pb-3">
+        <div>
+          <CardTitle className="text-base md:text-lg">{title}</CardTitle>
+          {description && <p className="mt-0.5 text-xs text-muted-foreground md:text-sm">{description}</p>}
+        </div>
+        {action}
+      </CardHeader>
+      <CardContent className="p-3 pt-1 md:p-6 md:pt-2">{children}</CardContent>
+    </Card>
+  );
+}
+
 const PDF_PREFS_KEY = 'pusaka.homeroomRecap.pdfPrefs';
 const loadPdfPrefs = (): { place: string; paper: PdfPaper } => {
   const d = { place: 'Ciamis', paper: 'a4' as PdfPaper };
@@ -177,21 +315,6 @@ const EditableAttendanceRow = ({ record, onUpdate }: { record: any; onUpdate: ()
       toast.error(`Gagal memperbarui absensi: ${error.message}`);
     },
   });
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'hadir':
-        return <CheckCircle2 className="w-4 h-4 text-green-500" />;
-      case 'sakit':
-        return <Stethoscope className="w-4 h-4 text-orange-500" />;
-      case 'izin':
-        return <Clock className="w-4 h-4 text-blue-500" />;
-      case 'alpa':
-        return <XCircle className="w-4 h-4 text-red-500" />;
-      default:
-        return null;
-    }
-  };
 
   if (isEditing) {
     return (
@@ -243,19 +366,16 @@ const EditableAttendanceRow = ({ record, onUpdate }: { record: any; onUpdate: ()
   }
 
   return (
-    <TableRow>
-      <TableCell>{record.date}</TableCell>
-      <TableCell>{record.students?.nis}</TableCell>
-      <TableCell>{toTitleCase(record.students?.full_name || '')}</TableCell>
+    <TableRow className="hover:bg-muted/40">
+      <TableCell className="whitespace-nowrap text-xs md:text-sm">{fmtDay(record.date)}</TableCell>
+      <TableCell className="text-xs text-muted-foreground md:text-sm">{record.students?.nis}</TableCell>
+      <TableCell className="text-xs font-medium md:text-sm">{toTitleCase(record.students?.full_name || '')}</TableCell>
       <TableCell>
-        <div className="flex items-center gap-2">
-          {getStatusIcon(record.status)}
-          <span className="capitalize">{record.status}</span>
-        </div>
+        <StatusBadge status={record.status} />
       </TableCell>
-      <TableCell>{record.notes || '-'}</TableCell>
+      <TableCell className="max-w-[220px] truncate text-xs text-muted-foreground md:text-sm" title={record.notes || ''}>{record.notes || '-'}</TableCell>
       <TableCell>
-        <Button size="sm" variant="ghost" onClick={() => setIsEditing(true)}>
+        <Button size="sm" variant="ghost" aria-label="Ubah absensi" onClick={() => setIsEditing(true)}>
           <Edit2 className="w-4 h-4" />
         </Button>
       </TableCell>
@@ -843,6 +963,20 @@ const HomeroomAttendance = () => {
     toast.success(`Semua siswa ditandai ${status}`);
   };
 
+  // Nilai turunan untuk tampilan
+  const totalRecords = stats.hadir + stats.sakit + stats.izin + stats.alpa;
+  const ratePct = totalRecords > 0 ? (stats.hadir / totalRecords) * 100 : null;
+  const periodText =
+    filterStartDate === filterEndDate ? fmtDay(filterStartDate) : `${fmtDay(filterStartDate)} – ${fmtDay(filterEndDate)}`;
+  const dialogCounts = STATUS_KEYS.reduce(
+    (acc, k) => ({ ...acc, [k]: 0 }),
+    {} as Record<StatusKey, number>
+  );
+  (students || []).forEach((st) => {
+    const cur = (attendanceData[st.id]?.status || 'hadir') as StatusKey;
+    if (cur in dialogCounts) dialogCounts[cur] += 1;
+  });
+
   if (!homeroomClass) {
     return (
       <DashboardLayout>
@@ -861,138 +995,168 @@ const HomeroomAttendance = () => {
     <DashboardLayout>
       <div className="space-y-4 md:space-y-6 animate-fade-in">
         {/* HEADER */}
-        <div className="flex flex-col gap-4 md:flex-row md:justify-between md:items-start">
-          <div>
-            <h1 className="text-xl md:text-3xl font-bold gradient-text">Rekap Absensi Wali Kelas</h1>
-            <p className="text-sm md:text-base text-muted-foreground mt-1 md:mt-2">
-              Rekap kehadiran siswa kelas {homeroomClass.name}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <ImportAttendance />
-            <Dialog
-              open={isDialogOpen}
-              onOpenChange={(open) => {
-                if (open && !isDayAllowed) {
-                  toast.error(
-                    `Absensi tidak dapat diisi pada hari ini. Hari yang diizinkan: ${activeDayNames.join(', ')}`
-                  );
-                  return;
-                }
-                setIsDialogOpen(open);
-              }}
-            >
-              <DialogTrigger asChild>
-                <Button className="shadow-3d-hover color-shift" size="sm">
-                  <ClipboardCheck className="w-4 h-4 mr-2" />
-                  <span className="hidden sm:inline">Absensi Hari Ini</span>
-                  <span className="sm:hidden">Absensi</span>
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto glass-effect">
-                <DialogHeader>
-                  <DialogTitle className="gradient-text">Input Absensi Kelas {homeroomClass.name}</DialogTitle>
-                </DialogHeader>
-
-                <div className="space-y-4">
-                  <Alert className="bg-purple-50 border-purple-200">
-                    <Info className="h-4 w-4 text-purple-600" />
-                    <AlertDescription className="text-sm text-purple-800">
-                      <strong>Sistem Hybrid:</strong> Anda yang pertama mengabsen hari ini akan menjadi data default
-                      untuk guru mata pelajaran. Mereka dapat mengubah status jika diperlukan.
-                    </AlertDescription>
-                  </Alert>
-
-                  <div>
-                    <Label>Tanggal</Label>
-                    <Input
-                      type="date"
-                      value={selectedDate}
-                      onChange={(e) => setSelectedDate(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="flex gap-2 flex-wrap">
-                    <Button onClick={() => quickMarkAll('hadir')} variant="outline" size="sm">
-                      Semua Hadir
-                    </Button>
-                    <Button onClick={() => quickMarkAll('sakit')} variant="outline" size="sm">
-                      Semua Sakit
-                    </Button>
-                    <Button onClick={() => quickMarkAll('izin')} variant="outline" size="sm">
-                      Semua Izin
-                    </Button>
-                    <Button onClick={() => quickMarkAll('alpa')} variant="outline" size="sm">
-                      Semua Alpa
-                    </Button>
-                  </div>
-
-                  <div className="border rounded-lg p-4 space-y-3 max-h-[50vh] overflow-y-auto">
-                    {students?.map((student) => (
-                      <Card key={student.id} className="shadow-md hover:shadow-lg transition-all">
-                        <CardContent className="p-3 md:p-4">
-                          <div className="flex flex-col gap-3">
-                            <div>
-                              <p className="font-semibold text-sm md:text-base">
-                                {toTitleCase(student.full_name)}
-                              </p>
-                              <p className="text-xs md:text-sm text-muted-foreground">NIS: {student.nis}</p>
-                            </div>
-
-                            <RadioGroup
-                              value={attendanceData[student.id]?.status || 'hadir'}
-                              onValueChange={(value) => updateAttendanceStatus(student.id, value)}
-                              className="flex flex-wrap gap-3 md:gap-4"
-                            >
-                              <div className="flex items-center space-x-1 md:space-x-2">
-                                <RadioGroupItem value="hadir" id={`${student.id}-hadir`} />
-                                <Label htmlFor={`${student.id}-hadir`} className="text-green-600 text-xs md:text-sm">
-                                  Hadir
-                                </Label>
-                              </div>
-                              <div className="flex items-center space-x-1 md:space-x-2">
-                                <RadioGroupItem value="sakit" id={`${student.id}-sakit`} />
-                                <Label htmlFor={`${student.id}-sakit`} className="text-orange-600 text-xs md:text-sm">
-                                  Sakit
-                                </Label>
-                              </div>
-                              <div className="flex items-center space-x-1 md:space-x-2">
-                                <RadioGroupItem value="izin" id={`${student.id}-izin`} />
-                                <Label htmlFor={`${student.id}-izin`} className="text-blue-600 text-xs md:text-sm">
-                                  Izin
-                                </Label>
-                              </div>
-                              <div className="flex items-center space-x-1 md:space-x-2">
-                                <RadioGroupItem value="alpa" id={`${student.id}-alpa`} />
-                                <Label htmlFor={`${student.id}-alpa`} className="text-red-600 text-xs md:text-sm">
-                                  Alpa
-                                </Label>
-                              </div>
-                            </RadioGroup>
-
-                            <Textarea
-                              placeholder="Catatan (opsional)"
-                              value={attendanceData[student.id]?.notes || ''}
-                              onChange={(e) => updateAttendanceNotes(student.id, e.target.value)}
-                              className="text-sm"
-                              rows={2}
-                            />
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-
-                  <Button
-                    onClick={handleSubmitAttendance}
-                    className="w-full shadow-3d-hover"
-                    disabled={createAttendanceMutation.isPending}
-                  >
-                    {createAttendanceMutation.isPending ? 'Menyimpan...' : 'Simpan Absensi'}
-                  </Button>
+        <div className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-primary/10 via-background to-primary/5 p-4 md:p-6">
+          <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-primary/10 blur-3xl" />
+          <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-4">
+              <span className="hidden h-12 w-12 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-sm sm:grid">
+                <GraduationCap className="h-6 w-6" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-xs font-medium uppercase tracking-wide text-primary">Wali Kelas</p>
+                <h1 className="text-xl font-bold md:text-3xl">Absensi Kelas {homeroomClass.name}</h1>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs md:text-sm">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border bg-background/70 px-2.5 py-1">
+                    <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                    {students?.length ?? 0} siswa
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 rounded-full border bg-background/70 px-2.5 py-1">
+                    <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
+                    {periodText}
+                  </span>
                 </div>
-              </DialogContent>
-            </Dialog>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-4 sm:gap-6">
+              <div className="flex items-center gap-3">
+                <AttendanceRing pct={ratePct} />
+                <div className="text-xs text-muted-foreground">
+                  <p className="font-medium text-foreground">Tingkat kehadiran</p>
+                  <p>{totalRecords} catatan pada periode ini</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <ImportAttendance />
+                <Dialog
+                  open={isDialogOpen}
+                  onOpenChange={(open) => {
+                    if (open && !isDayAllowed) {
+                      toast.error(
+                        `Absensi tidak dapat diisi pada hari ini. Hari yang diizinkan: ${activeDayNames.join(', ')}`
+                      );
+                      return;
+                    }
+                    setIsDialogOpen(open);
+                  }}
+                >
+                  <DialogTrigger asChild>
+                    <Button className="shadow-sm" size="sm">
+                      <ClipboardCheck className="mr-2 h-4 w-4" />
+                      <span className="hidden sm:inline">Absensi Hari Ini</span>
+                      <span className="sm:hidden">Absensi</span>
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="flex max-h-[92vh] max-w-3xl flex-col gap-0 overflow-hidden p-0">
+                    <DialogHeader className="border-b p-4 text-left md:p-6">
+                      <DialogTitle className="flex items-center gap-2">
+                        <ClipboardCheck className="h-5 w-5 text-primary" />
+                        Input Absensi Kelas {homeroomClass.name}
+                      </DialogTitle>
+                    </DialogHeader>
+
+                    <div className="flex-1 space-y-4 overflow-y-auto p-4 md:p-6">
+                      <Alert className="border-primary/20 bg-primary/5">
+                        <Info className="h-4 w-4 text-primary" />
+                        <AlertDescription className="text-sm">
+                          <strong>Sistem Hybrid:</strong> Anda yang pertama mengabsen hari ini akan menjadi data default
+                          untuk guru mata pelajaran. Mereka dapat mengubah status jika diperlukan.
+                        </AlertDescription>
+                      </Alert>
+
+                      <div className="grid gap-3 sm:grid-cols-[200px_1fr] sm:items-end">
+                        <div>
+                          <Label className="text-xs">Tanggal</Label>
+                          <Input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {STATUS_KEYS.map((k) => (
+                            <Button
+                              key={k}
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => quickMarkAll(k)}
+                              className={STATUS_META[k].text}
+                            >
+                              Semua {STATUS_META[k].label}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-4 gap-2" aria-live="polite">
+                        {STATUS_KEYS.map((k) => (
+                          <div key={k} className={`rounded-lg px-2 py-2 text-center ${STATUS_META[k].bg}`}>
+                            <div className={`text-lg font-bold tabular-nums ${STATUS_META[k].text}`}>{dialogCounts[k]}</div>
+                            <div className="text-[11px] text-muted-foreground">{STATUS_META[k].label}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="divide-y rounded-xl border">
+                        {students?.map((student, idx) => {
+                          const cur = (attendanceData[student.id]?.status || 'hadir') as StatusKey;
+                          return (
+                            <div key={student.id} className="space-y-2 p-3 md:p-4">
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="flex min-w-0 items-center gap-3">
+                                  <span className="w-5 shrink-0 text-right text-xs text-muted-foreground tabular-nums">{idx + 1}</span>
+                                  <Avatar name={student.full_name} />
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-semibold">{toTitleCase(student.full_name)}</p>
+                                    <p className="text-xs text-muted-foreground">NIS: {student.nis}</p>
+                                  </div>
+                                </div>
+                                <div
+                                  role="radiogroup"
+                                  aria-label={`Status ${student.full_name}`}
+                                  className="grid grid-cols-4 gap-1.5 sm:w-72"
+                                >
+                                  {STATUS_KEYS.map((k) => {
+                                    const sel = cur === k;
+                                    return (
+                                      <button
+                                        key={k}
+                                        type="button"
+                                        role="radio"
+                                        aria-checked={sel}
+                                        onClick={() => updateAttendanceStatus(student.id, k)}
+                                        className={`rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                                          sel ? STATUS_META[k].activeBtn : 'bg-background text-muted-foreground hover:bg-muted'
+                                        }`}
+                                      >
+                                        {STATUS_META[k].label}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                              <Input
+                                placeholder="Catatan (opsional)"
+                                value={attendanceData[student.id]?.notes || ''}
+                                onChange={(e) => updateAttendanceNotes(student.id, e.target.value)}
+                                className="h-8 text-sm"
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="border-t bg-background p-3 md:p-4">
+                      <Button
+                        onClick={handleSubmitAttendance}
+                        className="w-full"
+                        disabled={createAttendanceMutation.isPending}
+                      >
+                        {createAttendanceMutation.isPending ? 'Menyimpan...' : 'Simpan Absensi'}
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1003,30 +1167,24 @@ const HomeroomAttendance = () => {
         <Tabs defaultValue="attendance" className="space-y-4">
           {/* ============ TAB ABSENSI ============ */}
           <TabsContent value="attendance" className="space-y-4 md:space-y-6">
-            {/* Filter Section */}
-            <Card>
-              <CardHeader className="pb-2 md:pb-6">
-                <CardTitle className="flex items-center gap-2 text-sm md:text-base">
-                  <Calendar className="w-4 h-4 md:w-5 md:h-5" />
-                  Filter Periode
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-3 md:p-6">
-                <div className="space-y-4">
-                  <div>
-                    <Label className="mb-2 block text-xs md:text-sm">Filter Cepat</Label>
-                    <div className="flex flex-wrap gap-2">
-                      <Button onClick={handleThisWeek} variant="outline" size="sm">
-                        Minggu Ini
-                      </Button>
-                      <Button onClick={handleThisMonth} variant="outline" size="sm">
-                        Bulan Ini
-                      </Button>
-                    </div>
-                  </div>
+            {/* Filter Periode */}
+            <SectionCard title="Periode Rekap" description="Pilih rentang tanggal untuk statistik, tabel, dan PDF rekap.">
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <SlidersHorizontal className="h-3.5 w-3.5" /> Cepat:
+                  </span>
+                  <Button onClick={handleThisWeek} variant="secondary" size="sm" className="h-8 rounded-full">
+                    Minggu Ini
+                  </Button>
+                  <Button onClick={handleThisMonth} variant="secondary" size="sm" className="h-8 rounded-full">
+                    Bulan Ini
+                  </Button>
+                </div>
 
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-end">
                   <div>
-                    <Label className="text-xs md:text-sm">Pilih Bulan</Label>
+                    <Label className="text-xs">Bulan</Label>
                     <Select value={selectedMonth} onValueChange={handleMonthSelect}>
                       <SelectTrigger>
                         <SelectValue placeholder="Pilih bulan..." />
@@ -1047,312 +1205,370 @@ const HomeroomAttendance = () => {
                       </SelectContent>
                     </Select>
                   </div>
-
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4">
-                    <div>
-                      <Label className="text-xs md:text-sm">Tanggal Mulai</Label>
-                      <Input
-                        type="date"
-                        value={filterStartDate}
-                        onChange={(e) => {
-                          setFilterStartDate(e.target.value);
-                          setSelectedMonth('');
-                        }}
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs md:text-sm">Tanggal Akhir</Label>
-                      <Input
-                        type="date"
-                        value={filterEndDate}
-                        onChange={(e) => {
-                          setFilterEndDate(e.target.value);
-                          setSelectedMonth('');
-                        }}
-                      />
-                    </div>
-                    <div className="flex items-end">
-                      <Button onClick={openPdfPreview} className="w-full" size="sm">
-                        <Eye className="w-4 h-4 mr-2" />
-                        Pratinjau PDF
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Statistics Cards */}
-            <div className="grid grid-cols-2 gap-3 md:gap-4 md:grid-cols-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6 md:pb-2">
-                  <CardTitle className="text-xs md:text-sm font-medium">Hadir</CardTitle>
-                  <CheckCircle2 className="h-4 w-4 text-green-500" />
-                </CardHeader>
-                <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
-                  <div className="text-xl md:text-2xl font-bold">{stats.hadir}</div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6 md:pb-2">
-                  <CardTitle className="text-xs md:text-sm font-medium">Sakit</CardTitle>
-                  <Stethoscope className="h-4 w-4 text-orange-500" />
-                </CardHeader>
-                <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
-                  <div className="text-xl md:text-2xl font-bold">{stats.sakit}</div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6 md:pb-2">
-                  <CardTitle className="text-xs md:text-sm font-medium">Izin</CardTitle>
-                  <Clock className="h-4 w-4 text-blue-500" />
-                </CardHeader>
-                <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
-                  <div className="text-xl md:text-2xl font-bold">{stats.izin}</div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6 md:pb-2">
-                  <CardTitle className="text-xs md:text-sm font-medium">Alpa</CardTitle>
-                  <XCircle className="h-4 w-4 text-red-500" />
-                </CardHeader>
-                <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
-                  <div className="text-xl md:text-2xl font-bold">{stats.alpa}</div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Charts */}
-            <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
-              <Card>
-                <CardHeader className="pb-2 md:pb-6">
-                  <CardTitle className="text-sm md:text-base">Distribusi Kehadiran</CardTitle>
-                </CardHeader>
-                <CardContent className="p-2 md:p-6">
-                  <ResponsiveContainer width="100%" height={200} className="md:!h-[300px]">
-                    <PieChart>
-                      <Pie
-                        data={chartData}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                        outerRadius={60}
-                        fill="#8884d8"
-                        dataKey="value"
-                      >
-                        {chartData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2 md:pb-6">
-                  <CardTitle className="text-sm md:text-base">Grafik Kehadiran</CardTitle>
-                </CardHeader>
-                <CardContent className="p-2 md:p-6">
-                  <ResponsiveContainer width="100%" height={200} className="md:!h-[300px]">
-                    <BarChart data={barChartData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="status" tick={{ fontSize: 12 }} />
-                      <YAxis tick={{ fontSize: 12 }} />
-                      <Tooltip />
-                      <Bar dataKey="jumlah" fill="hsl(var(--primary))" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Student Statistics Table */}
-            <Card>
-              <CardHeader className="pb-2 md:pb-6">
-                <CardTitle className="text-sm md:text-base">Rekap Per Siswa</CardTitle>
-              </CardHeader>
-              <CardContent className="p-2 md:p-6">
-                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <Label className="text-xs">Tanggal Mulai</Label>
                     <Input
-                      className="pl-8"
-                      placeholder="Cari nama / NIS / NISN…"
-                      value={studentSearch}
-                      onChange={(e) => setStudentSearch(e.target.value)}
+                      type="date"
+                      value={filterStartDate}
+                      onChange={(e) => {
+                        setFilterStartDate(e.target.value);
+                        setSelectedMonth('');
+                      }}
                     />
                   </div>
-                  <Select value={studentFilter} onValueChange={(v) => setStudentFilter(v as StudentFilter)}>
-                    <SelectTrigger className="sm:w-48">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(Object.keys(STUDENT_FILTER_LABEL) as StudentFilter[]).map((k) => (
-                        <SelectItem key={k} value={k}>
-                          {STUDENT_FILTER_LABEL[k]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {studentFilterActive && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setStudentSearch('');
-                        setStudentFilter('all');
+                  <div>
+                    <Label className="text-xs">Tanggal Akhir</Label>
+                    <Input
+                      type="date"
+                      value={filterEndDate}
+                      onChange={(e) => {
+                        setFilterEndDate(e.target.value);
+                        setSelectedMonth('');
                       }}
-                    >
-                      <XIcon className="mr-1 h-4 w-4" />
-                      Reset
-                    </Button>
-                  )}
+                    />
+                  </div>
+                  <Button onClick={openPdfPreview} variant="outline" className="sm:col-span-2 lg:col-span-1">
+                    <Eye className="mr-2 h-4 w-4" />
+                    Pratinjau PDF
+                  </Button>
                 </div>
-                <div className="overflow-x-auto">
-                  <Table className="min-w-[600px]">
-                    <TableHeader>
+              </div>
+            </SectionCard>
+
+            {/* Statistik */}
+            <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
+              {STATUS_KEYS.map((k) => (
+                <StatCard key={k} kind={k} value={stats[k]} total={totalRecords} />
+              ))}
+            </div>
+
+            {/* Grafik */}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <SectionCard title="Distribusi Kehadiran">
+                {totalRecords === 0 ? (
+                  <p className="py-12 text-center text-sm text-muted-foreground">Belum ada data pada periode ini.</p>
+                ) : (
+                  <div className="flex flex-col items-center gap-4 sm:flex-row">
+                    <div className="relative h-48 w-48 shrink-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={chartData.filter((d) => d.value > 0)}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={56}
+                            outerRadius={84}
+                            paddingAngle={3}
+                            cornerRadius={4}
+                            dataKey="value"
+                            stroke="none"
+                          >
+                            {chartData
+                              .filter((d) => d.value > 0)
+                              .map((entry) => (
+                                <Cell key={entry.name} fill={entry.color} />
+                              ))}
+                          </Pie>
+                          <Tooltip />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
+                        <div>
+                          <div className="text-2xl font-bold tabular-nums">{totalRecords}</div>
+                          <div className="text-[11px] text-muted-foreground">catatan</div>
+                        </div>
+                      </div>
+                    </div>
+                    <ul className="w-full space-y-2 text-sm">
+                      {STATUS_KEYS.map((k) => (
+                        <li key={k} className="flex items-center justify-between gap-3">
+                          <span className="inline-flex items-center gap-2">
+                            <span className={`h-2.5 w-2.5 rounded-full ${STATUS_META[k].solid}`} />
+                            {STATUS_META[k].label}
+                          </span>
+                          <span className="tabular-nums text-muted-foreground">
+                            <b className="text-foreground">{stats[k]}</b> · {Math.round((stats[k] / totalRecords) * 100)}%
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </SectionCard>
+
+              <SectionCard title="Grafik Kehadiran">
+                {totalRecords === 0 ? (
+                  <p className="py-12 text-center text-sm text-muted-foreground">Belum ada data pada periode ini.</p>
+                ) : (
+                  <div className="h-52 md:h-56">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={barChartData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-muted" />
+                        <XAxis dataKey="status" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                        <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.5)' }} />
+                        <Bar dataKey="jumlah" radius={[8, 8, 0, 0]} maxBarSize={48}>
+                          {barChartData.map((d) => (
+                            <Cell key={d.status} fill={COLORS[d.status.toLowerCase() as StatusKey]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </SectionCard>
+            </div>
+
+            {/* Rekap per siswa */}
+            <SectionCard title="Rekap Per Siswa" description={`${studentPager.totalItems} siswa ditampilkan`}>
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    placeholder="Cari nama / NIS / NISN…"
+                    value={studentSearch}
+                    onChange={(e) => setStudentSearch(e.target.value)}
+                  />
+                </div>
+                <Select value={studentFilter} onValueChange={(v) => setStudentFilter(v as StudentFilter)}>
+                  <SelectTrigger className="sm:w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(STUDENT_FILTER_LABEL) as StudentFilter[]).map((k) => (
+                      <SelectItem key={k} value={k}>
+                        {STUDENT_FILTER_LABEL[k]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={studentSort.key}
+                  onValueChange={(v) =>
+                    setStudentSort({ key: v as StudentSortKey, dir: NUMERIC_SORT_KEYS.includes(v) ? 'desc' : 'asc' })
+                  }
+                >
+                  <SelectTrigger className="md:hidden">
+                    <SelectValue placeholder="Urutkan" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="no">Urut: Nomor</SelectItem>
+                    <SelectItem value="name">Urut: Nama</SelectItem>
+                    <SelectItem value="alpa">Urut: Alpa terbanyak</SelectItem>
+                    <SelectItem value="sakit">Urut: Sakit terbanyak</SelectItem>
+                    <SelectItem value="izin">Urut: Izin terbanyak</SelectItem>
+                    <SelectItem value="pct">Urut: Persentase hadir</SelectItem>
+                  </SelectContent>
+                </Select>
+                {studentFilterActive && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setStudentSearch('');
+                      setStudentFilter('all');
+                    }}
+                  >
+                    <XIcon className="mr-1 h-4 w-4" />
+                    Reset
+                  </Button>
+                )}
+              </div>
+
+              {/* Ponsel: kartu */}
+              <div className="space-y-2 md:hidden">
+                {studentPager.paginatedItems.length === 0 && (
+                  <p className="py-6 text-center text-sm text-muted-foreground">
+                    {studentFilterActive ? 'Tidak ada siswa yang cocok dengan filter.' : 'Belum ada siswa.'}
+                  </p>
+                )}
+                {studentPager.paginatedItems.map((student, index) => {
+                  const pct = student.total > 0 ? (student.hadir / student.total) * 100 : null;
+                  return (
+                    <div key={student.id} className="rounded-xl border p-3">
+                      <div className="flex items-center gap-3">
+                        <Avatar name={student.full_name} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold">
+                            {(studentPager.currentPage - 1) * studentPager.pageSize + index + 1}. {toTitleCase(student.full_name)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">NIS {student.nis}</p>
+                        </div>
+                        <div className={`text-right text-sm font-semibold tabular-nums ${pct == null ? 'text-muted-foreground' : pctTone(pct)}`}>
+                          {pct == null ? '-' : `${pct.toFixed(1)}%`}
+                        </div>
+                      </div>
+                      <div className="mt-2 grid grid-cols-4 gap-1.5 text-center">
+                        {STATUS_KEYS.map((k) => (
+                          <div key={k} className={`rounded-md py-1 ${STATUS_META[k].bg}`}>
+                            <div className={`text-sm font-semibold tabular-nums ${STATUS_META[k].text}`}>{student[k]}</div>
+                            <div className="text-[10px] text-muted-foreground">{STATUS_META[k].label}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Layar lebar: tabel */}
+              <div className="hidden overflow-x-auto rounded-xl border md:block">
+                <Table className="min-w-[640px]">
+                  <TableHeader className="bg-muted/40">
+                    <TableRow>
+                      <SortHead label="No" k="no" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="w-12 text-xs md:text-sm" />
+                      <SortHead label="Siswa" k="name" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
+                      <SortHead label="NIS" k="nis" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
+                      <SortHead label="Hadir" k="hadir" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-center text-xs md:text-sm" />
+                      <SortHead label="Sakit" k="sakit" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-center text-xs md:text-sm" />
+                      <SortHead label="Izin" k="izin" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-center text-xs md:text-sm" />
+                      <SortHead label="Alpa" k="alpa" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-center text-xs md:text-sm" />
+                      <SortHead label="Total" k="total" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-center text-xs md:text-sm" />
+                      <SortHead label="% Hadir" k="pct" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="w-40 text-xs md:text-sm" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {studentPager.paginatedItems.length === 0 && (
                       <TableRow>
-                        <SortHead label="No" k="no" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
-                        <SortHead label="NIS" k="nis" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
-                        <SortHead label="Nama" k="name" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
-                        <SortHead label="Hadir" k="hadir" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-center text-xs md:text-sm" />
-                        <SortHead label="Sakit" k="sakit" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-center text-xs md:text-sm" />
-                        <SortHead label="Izin" k="izin" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-center text-xs md:text-sm" />
-                        <SortHead label="Alpa" k="alpa" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-center text-xs md:text-sm" />
-                        <SortHead label="Total" k="total" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-center text-xs md:text-sm" />
-                        <SortHead label="%" k="pct" sort={studentSort} onSort={(k) => setStudentSort((p) => nextSort(p, k))} className="text-center text-xs md:text-sm" />
+                        <TableCell colSpan={9} className="py-8 text-center text-sm text-muted-foreground">
+                          {studentFilterActive ? 'Tidak ada siswa yang cocok dengan filter.' : 'Belum ada siswa.'}
+                        </TableCell>
                       </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {studentPager.paginatedItems.length === 0 && (
-                        <TableRow>
-                          <TableCell colSpan={9} className="py-6 text-center text-sm text-muted-foreground">
-                            {studentFilterActive ? 'Tidak ada siswa yang cocok dengan filter.' : 'Belum ada siswa.'}
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      {studentPager.paginatedItems.map((student, index) => (
-                        <TableRow key={student.id}>
-                          <TableCell className="text-xs md:text-sm">
+                    )}
+                    {studentPager.paginatedItems.map((student, index) => {
+                      const pct = student.total > 0 ? (student.hadir / student.total) * 100 : null;
+                      return (
+                        <TableRow key={student.id} className="hover:bg-muted/40">
+                          <TableCell className="text-xs text-muted-foreground md:text-sm">
                             {(studentPager.currentPage - 1) * studentPager.pageSize + index + 1}
                           </TableCell>
-                          <TableCell className="text-xs md:text-sm">{student.nis}</TableCell>
-                          <TableCell className="text-xs md:text-sm">
-                            {toTitleCase(student.full_name)}
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              <Avatar name={student.full_name} />
+                              <span className="text-sm font-medium">{toTitleCase(student.full_name)}</span>
+                            </div>
                           </TableCell>
-                          <TableCell className="text-center text-xs md:text-sm">{student.hadir}</TableCell>
-                          <TableCell className="text-center text-xs md:text-sm">{student.sakit}</TableCell>
-                          <TableCell className="text-center text-xs md:text-sm">{student.izin}</TableCell>
-                          <TableCell className="text-center text-xs md:text-sm">{student.alpa}</TableCell>
-                          <TableCell className="text-center text-xs md:text-sm">{student.total}</TableCell>
-                          <TableCell className="text-center text-xs md:text-sm">
-                            {student.total > 0
-                              ? `${((student.hadir / student.total) * 100).toFixed(1)}%`
-                              : '-'}
+                          <TableCell className="text-xs text-muted-foreground md:text-sm">{student.nis}</TableCell>
+                          {STATUS_KEYS.map((k) => (
+                            <TableCell key={k} className="text-center">
+                              <span
+                                className={`inline-block min-w-[1.75rem] rounded-md px-1.5 py-0.5 text-xs font-semibold tabular-nums md:text-sm ${
+                                  student[k] > 0 ? `${STATUS_META[k].bg} ${STATUS_META[k].text}` : 'text-muted-foreground/60'
+                                }`}
+                              >
+                                {student[k]}
+                              </span>
+                            </TableCell>
+                          ))}
+                          <TableCell className="text-center text-xs tabular-nums md:text-sm">{student.total}</TableCell>
+                          <TableCell>
+                            {pct == null ? (
+                              <span className="text-muted-foreground">-</span>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+                                  <div className={`h-full rounded-full ${pctBar(pct)}`} style={{ width: `${pct}%` }} />
+                                </div>
+                                <span className={`text-xs font-semibold tabular-nums md:text-sm ${pctTone(pct)}`}>{pct.toFixed(1)}%</span>
+                              </div>
+                            )}
                           </TableCell>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-                <DataPagination
-                  currentPage={studentPager.currentPage}
-                  totalPages={studentPager.totalPages}
-                  totalItems={studentPager.totalItems}
-                  pageSize={studentPager.pageSize}
-                  onPageChange={studentPager.setCurrentPage}
-                  onPageSizeChange={studentPager.setPageSize}
-                  pageSizeOptions={[10, 25, 50, 100]}
-                />
-              </CardContent>
-            </Card>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+              <DataPagination
+                currentPage={studentPager.currentPage}
+                totalPages={studentPager.totalPages}
+                totalItems={studentPager.totalItems}
+                pageSize={studentPager.pageSize}
+                onPageChange={studentPager.setCurrentPage}
+                onPageSizeChange={studentPager.setPageSize}
+                pageSizeOptions={[10, 25, 50, 100]}
+              />
+            </SectionCard>
 
-            {/* Recent Attendance Records */}
-            <Card>
-              <CardHeader className="pb-2 md:pb-6">
-                <CardTitle className="text-sm md:text-base">Riwayat Absensi</CardTitle>
-              </CardHeader>
-              <CardContent className="p-2 md:p-6">
-                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      className="pl-8"
-                      placeholder="Cari nama / NIS…"
-                      value={historySearch}
-                      onChange={(e) => setHistorySearch(e.target.value)}
-                    />
-                  </div>
-                  <Select value={historyStatus} onValueChange={(v) => setHistoryStatus(v as typeof historyStatus)}>
-                    <SelectTrigger className="sm:w-40">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Semua status</SelectItem>
-                      <SelectItem value="hadir">Hadir</SelectItem>
-                      <SelectItem value="sakit">Sakit</SelectItem>
-                      <SelectItem value="izin">Izin</SelectItem>
-                      <SelectItem value="alpa">Alpa</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {historyFilterActive && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setHistorySearch('');
-                        setHistoryStatus('all');
-                      }}
-                    >
-                      <XIcon className="mr-1 h-4 w-4" />
-                      Reset
-                    </Button>
-                  )}
+            {/* Riwayat absensi */}
+            <SectionCard title="Riwayat Absensi" description={`${historyPager.totalItems} catatan`}>
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    placeholder="Cari nama / NIS…"
+                    value={historySearch}
+                    onChange={(e) => setHistorySearch(e.target.value)}
+                  />
                 </div>
-                <div className="overflow-x-auto">
-                  <Table className="min-w-[500px]">
-                    <TableHeader>
+                <Select value={historyStatus} onValueChange={(v) => setHistoryStatus(v as typeof historyStatus)}>
+                  <SelectTrigger className="sm:w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Semua status</SelectItem>
+                    <SelectItem value="hadir">Hadir</SelectItem>
+                    <SelectItem value="sakit">Sakit</SelectItem>
+                    <SelectItem value="izin">Izin</SelectItem>
+                    <SelectItem value="alpa">Alpa</SelectItem>
+                  </SelectContent>
+                </Select>
+                {historyFilterActive && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setHistorySearch('');
+                      setHistoryStatus('all');
+                    }}
+                  >
+                    <XIcon className="mr-1 h-4 w-4" />
+                    Reset
+                  </Button>
+                )}
+              </div>
+              <div className="overflow-x-auto rounded-xl border">
+                <Table className="min-w-[560px]">
+                  <TableHeader className="bg-muted/40">
+                    <TableRow>
+                      <SortHead label="Tanggal" k="date" sort={historySort} onSort={(k) => setHistorySort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
+                      <SortHead label="NIS" k="nis" sort={historySort} onSort={(k) => setHistorySort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
+                      <SortHead label="Nama" k="name" sort={historySort} onSort={(k) => setHistorySort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
+                      <SortHead label="Status" k="status" sort={historySort} onSort={(k) => setHistorySort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
+                      <TableHead className="text-xs md:text-sm">Catatan</TableHead>
+                      <TableHead className="w-14 text-xs md:text-sm">Aksi</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {historyPager.paginatedItems.length === 0 && (
                       <TableRow>
-                        <SortHead label="Tanggal" k="date" sort={historySort} onSort={(k) => setHistorySort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
-                        <SortHead label="NIS" k="nis" sort={historySort} onSort={(k) => setHistorySort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
-                        <SortHead label="Nama" k="name" sort={historySort} onSort={(k) => setHistorySort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
-                        <SortHead label="Status" k="status" sort={historySort} onSort={(k) => setHistorySort((p) => nextSort(p, k))} className="text-xs md:text-sm" />
-                        <TableHead className="text-xs md:text-sm">Catatan</TableHead>
-                        <TableHead className="text-xs md:text-sm">Aksi</TableHead>
+                        <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
+                          {historyFilterActive ? 'Tidak ada data yang cocok dengan filter.' : 'Belum ada data absensi pada periode ini.'}
+                        </TableCell>
                       </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {historyPager.paginatedItems.length === 0 && (
-                        <TableRow>
-                          <TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">
-                            {historyFilterActive ? 'Tidak ada data yang cocok dengan filter.' : 'Belum ada data absensi pada periode ini.'}
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      {historyPager.paginatedItems.map((record) => (
-                        <EditableAttendanceRow
-                          key={`${record.id}`}
-                          record={record}
-                          onUpdate={() => queryClient.invalidateQueries({ queryKey: ['homeroom-attendance'] })}
-                        />
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-                <DataPagination
-                  currentPage={historyPager.currentPage}
-                  totalPages={historyPager.totalPages}
-                  totalItems={historyPager.totalItems}
-                  pageSize={historyPager.pageSize}
-                  onPageChange={historyPager.setCurrentPage}
-                  onPageSizeChange={historyPager.setPageSize}
-                  pageSizeOptions={[10, 25, 50, 100]}
-                />
-              </CardContent>
-            </Card>
+                    )}
+                    {historyPager.paginatedItems.map((record) => (
+                      <EditableAttendanceRow
+                        key={`${record.id}`}
+                        record={record}
+                        onUpdate={() => queryClient.invalidateQueries({ queryKey: ['homeroom-attendance'] })}
+                      />
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <DataPagination
+                currentPage={historyPager.currentPage}
+                totalPages={historyPager.totalPages}
+                totalItems={historyPager.totalItems}
+                pageSize={historyPager.pageSize}
+                onPageChange={historyPager.setCurrentPage}
+                onPageSizeChange={historyPager.setPageSize}
+                pageSizeOptions={[10, 25, 50, 100]}
+              />
+            </SectionCard>
           </TabsContent>
         </Tabs>
       </div>
