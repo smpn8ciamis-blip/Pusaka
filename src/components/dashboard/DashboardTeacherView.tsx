@@ -1,6 +1,7 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { ClipboardList, FileText, AlertCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { PengawasAbsensiReminder } from '@/components/exam/PengawasAbsensiReminder';
 
 interface DashboardTeacherViewProps {
   teacherTasks: any;
@@ -8,6 +9,8 @@ interface DashboardTeacherViewProps {
 
 export const DashboardTeacherView = ({ teacherTasks }: DashboardTeacherViewProps) => {
   return (
+    <div className="space-y-4">
+    <PengawasAbsensiReminder />
     <div className="grid gap-4 md:grid-cols-2">
       <Link to="/attendance">
         <Card className="card-hover border-none shadow-md cursor-pointer transition-all hover:shadow-lg">
@@ -62,6 +65,7 @@ export const DashboardTeacherView = ({ teacherTasks }: DashboardTeacherViewProps
           </CardContent>
         </Card>
       </Link>
+    </div>
     </div>
   );
 };

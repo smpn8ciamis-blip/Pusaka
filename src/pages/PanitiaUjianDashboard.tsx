@@ -119,6 +119,13 @@ export default function PanitiaUjianDashboard() {
             </CardHeader>
             <CardContent><Button asChild variant="outline"><Link to="/panitia-ujian/pengawas">Kelola jadwal pengawas</Link></Button></CardContent>
           </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><ClipboardList className="h-5 w-5" /> Kehadiran Siswa per Ruang</CardTitle>
+              <CardDescription>Pantau daftar hadir tiap ruang yang diisi pengawas. Pengawas sesi pertama wajib mengabsen.</CardDescription>
+            </CardHeader>
+            <CardContent><Button asChild variant="outline"><Link to="/panitia-ujian/kehadiran">Pantau kehadiran</Link></Button></CardContent>
+          </Card>
         </div>
 
         <Card>
