@@ -315,6 +315,7 @@ DEFAULT_TEMPLATES.assignment_followup = `⏰ *PENGINGAT BUKTI KUNJUNGAN*\n\nYth.
 DEFAULT_TEMPLATES.parent_points = `⚠️ *POIN PELANGGARAN*\n\nSiswa: *{{nama_siswa}}* ({{kelas}})\nTotal poin: *{{total_poin}}* ({{jumlah_catatan}} catatan)\n\n{{rincian}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.parent_violation_new = `⚠️ *PELANGGARAN BARU*\n\nYth. Bapak/Ibu Orang Tua/Wali,\nAnanda *{{nama_siswa}}* ({{kelas}}) mendapat catatan pelanggaran:\n• Tanggal: {{tanggal}}\n• Pelanggaran: *{{pelanggaran}}* ({{kategori}})\n• Poin: *+{{poin}}*\n• Keterangan: {{keterangan}}\n\nTotal poin ananda saat ini: *{{total_poin}}* ({{jumlah_catatan}} catatan).\nMohon bimbingan Bapak/Ibu di rumah. Ketik *cek poin* untuk melihat rinciannya.\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.parent_attendance = `📅 *REKAP KEHADIRAN*\n\nSiswa: *{{nama_siswa}}* ({{kelas}})\nPeriode: {{periode}} (30 hari terakhir)\n\n✅ Hadir: *{{hadir}}* hari ({{persen}}%)\n⏰ Terlambat: {{terlambat}} hari (sudah termasuk hadir)\n🤒 Sakit: {{sakit}} hari\n📝 Izin: {{izin}} hari\n❌ Alfa: {{alpa}} hari\nTotal hari tercatat: {{total_hari}}\n\n{{rincian}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.sender_autoreply = `Halo 👋\n\nNomor ini khusus mengirim *notifikasi otomatis* Pusaka (mis. presensi siswa) dan tidak membalas pesan.\n\nUntuk perintah seperti *cek poin*, *absen*, *akun pusaka*, atau *lapor izin*, silakan chat nomor utama:\nhttps://wa.me/{{nomor_utama}}\n\nTerima kasih.\n_SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.invigilator_exam_violation = `🚨 *PELANGGARAN UJIAN (CBT)*\n\nYth. {{nama_pengawas}},\nSiswa di ruang yang Bapak/Ibu awasi melanggar aturan ujian:\n\n• Siswa: *{{nama_siswa}}* ({{kelas}})\n• Ruang: *{{ruang}}*{{meja}}\n• Pelanggaran: *{{pelanggaran}}* ({{jumlah}})\n• Ujian: {{ujian}}\n• Waktu: {{jam}} WIB\n\nMohon dicek ke tempat duduk siswa tersebut.\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.student_account = `🔐 *AKUN PUSAKA*\n\nNama: *{{nama_siswa}}* ({{kelas}})\n\n• Username: *{{username}}*\n• Password awal: *{{password}}*\n• Alamat: {{alamat}}\n\n⚠️ *Setelah berhasil login, segera ganti password* agar akunmu aman:\nBuka menu *Pengaturan* → *Keamanan*, isi *Password Lama* (password awal di atas) dan *Password Baru*, lalu ketuk *Simpan Password*.\n\nSudah pernah mengganti password lalu lupa? Hubungi wali kelas untuk diatur ulang. Jangan bagikan username dan password kepada siapa pun.\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.piket_punch = `🕒 *ABSENSI PIKET TERCATAT*\n\nYth. Bapak/Ibu *{{nama}}*,\nAbsen *{{jenis}}* {{shift}} Anda tercatat pada {{tanggal}} pukul *{{jam}} WIB* melalui mesin absensi.\n\nTerima kasih atas pengabdiannya.\n_Pusaka - SMP Negeri 8 Ciamis_`;
@@ -353,7 +354,11 @@ const DEFAULT_BOT_SETTINGS = {
     violation_wa_enabled: true,       // WA ke orang tua (nomor tertaut) saat siswa mendapat catatan pelanggaran baru
     ekskul_journal_wa_enabled: true,  // pembina ekskul (nomor HP profil cocok) bisa isi jurnal & kirim foto kegiatan lewat chat bot
     student_account_wa_enabled: true,  // siswa/ortu mengetik "akun pusaka" -> bot membalas username + password awal (setelah nomor/NISN+tgl lahir diverifikasi)
-    exam_violation_wa_enabled: true   // siswa melanggar aturan CBT (anti curang) -> WA langsung ke pengawas ruang siswa itu (sesuai jadwal pengawas)
+    exam_violation_wa_enabled: true,  // siswa melanggar aturan CBT (anti curang) -> WA langsung ke pengawas ruang siswa itu (sesuai jadwal pengawas)
+    multi_sender_use_primary: true,    // nomor utama ikut menerima bagian notifikasi presensi (false = nomor utama dikhususkan untuk balasan perintah)
+    multi_sender_daily_cap: 500,       // batas kiriman notifikasi per hari untuk tiap nomor tambahan (0 = tanpa batas); nomor baru sebaiknya dipanaskan bertahap
+    multi_sender_autoreply: true,      // nomor tambahan membalas chat masuk satu kali per 12 jam dengan arahan ke nomor utama
+    fingerprint_parent_wa_enabled: false // punch mesin fingerprint siswa -> WA presensi ke orang tua (templat parent_presence); bawaan mati agar tidak mengirim massal tanpa disetujui
 };
 const CONFIG_TTL_MS = 30 * 1000;
 let templateCache = { at: 0, rows: new Map() };
@@ -442,9 +447,10 @@ function recordSend(entry) {
 // Tombol "quick reply" format native-flow (yang dipakai WhatsApp sekarang; format `buttons` lama sudah tidak tampil di sebagian besar HP).
 // Eksperimental: WhatsApp tidak resmi mendukungnya untuk nomor non-bisnis, hasilnya bisa berbeda antar versi WhatsApp.
 // Balasan tombol diterima kembali sebagai interactiveResponseMessage (id "pusaka:<kunci>") dan diubah jadi perintah oleh buttonCommand().
-async function sendNativeButtons(jid, c) {
+async function sendNativeButtons(jid, c, theSock) {
+    const s = theSock || sock;
     const proto = baileys.proto, gen = baileys.generateWAMessageFromContent;
-    if (!proto || !gen || typeof sock.relayMessage !== 'function') throw new Error('Versi Baileys tidak mendukung tombol native-flow');
+    if (!proto || !gen || typeof s.relayMessage !== 'function') throw new Error('Versi Baileys tidak mendukung tombol native-flow');
     const full = gen(jid, {
         viewOnceMessage: { message: {
             messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
@@ -457,35 +463,45 @@ async function sendNativeButtons(jid, c) {
             })
         } }
     }, {});
-    await sock.relayMessage(jid, full.message, {
+    await s.relayMessage(jid, full.message, {
         messageId: full.key.id,
         additionalNodes: [{ tag: 'biz', attrs: {}, content: [{ tag: 'interactive', attrs: { type: 'native_flow', v: '1' },
             content: [{ tag: 'native_flow', attrs: { v: '9', name: 'mixed' } }] }] }]
     });
     return full;
 }
-async function sendSafeMessage(jid, content, options) {
+// Nomor utama (sambungan baileys_auth) dibungkus sebagai "ctx" agar kode kirim yang sama bisa dipakai nomor pengirim tambahan.
+const primaryCtx = {
+    id: 'utama', label: 'Nomor utama',
+    get sock() { return sock; }, get ready() { return isReady; }, get current() { return currentTask; }
+};
+async function sendSafeMessage(jid, content, options) { return sendVia(primaryCtx, jid, content, options); }
+async function sendVia(ctx, jid, content, options) {
     options = options || {};
-    const meta = currentTask ? currentTask.meta : {};
+    const task = ctx.current;
+    const meta = task ? task.meta : {};
     const kind = meta.kind || 'langsung';
     const entry = {
-        at: new Date().toISOString(), queued_at: currentTask ? new Date(currentTask.at).toISOString() : null,
-        to: jid, kind: kind, status: 'terkirim', error: null, preview: previewOfContent(content, kind), wa_id: null
+        at: new Date().toISOString(), queued_at: task ? new Date(task.at).toISOString() : null,
+        to: jid, kind: kind, status: 'terkirim', error: null, preview: previewOfContent(content, kind), wa_id: null, sender: ctx.id
     };
-    if (!sock || !isReady) { entry.status = 'gagal'; entry.error = 'Bot belum terhubung ke WhatsApp'; recordSend(entry); return; }
+    const s = ctx.sock;
+    if (!s || !ctx.ready) { entry.status = 'gagal'; entry.error = 'Bot belum terhubung ke WhatsApp'; recordSend(entry); noteSendResult(ctx, false); return; }
     try {
-        await sock.sendPresenceUpdate('composing', jid);
+        await s.sendPresenceUpdate('composing', jid);
         await new Promise(r => setTimeout(r, 1500));
-        const sent = (content && content.nativeButtons) ? await sendNativeButtons(jid, content) : await sock.sendMessage(jid, content, options);
-        await sock.sendPresenceUpdate('paused', jid);
+        const sent = (content && content.nativeButtons) ? await sendNativeButtons(jid, content, s) : await s.sendMessage(jid, content, options);
+        await s.sendPresenceUpdate('paused', jid);
         entry.at = new Date().toISOString();
         entry.wa_id = sent && sent.key && sent.key.id ? sent.key.id : null;
         recordSend(entry);
+        noteSendResult(ctx, true);
         return sent;
     } catch (e) {
-        console.error('[SEND ERROR to ' + jid + ']:', e.message);
+        console.error('[SEND ERROR to ' + jid + ' via ' + ctx.id + ']:', e.message);
         entry.status = 'gagal'; entry.error = String(e.message || e).slice(0, 200); entry.at = new Date().toISOString();
         recordSend(entry);
+        noteSendResult(ctx, false);
     }
 }
 
@@ -735,9 +751,9 @@ app.post('/notify-parent', rateLimit('notifyparent', 120, 60000), async (req, re
         const typeText = type === 'check_out' ? 'Pulang' : 'Masuk';
         const statusText = status === 'terlambat' ? 'Terlambat' : 'Hadir';
         const targetJid = formatToInternational(student.parent_phone) + '@s.whatsapp.net';
-        enqueueTask(async () => {
+        await enqueueNotification(async (ctx) => {
             const messageText = await renderMessage('parent_presence', { nama_siswa: student.full_name, tanggal: date || 'Hari ini', waktu: time || '-', jenis: typeText, status: statusText });
-            if (messageText) await sendSafeMessage(targetJid, { text: messageText });
+            if (messageText) await sendVia(ctx, targetJid, { text: messageText });
         }, { to: targetJid, kind: 'parent_presence' });
         return res.json({ status: 'success', message: 'Notifikasi masuk antrian untuk ' + student.full_name + '.' });
     } catch (e) { return res.status(500).json({ status: 'error', message: e.message }); }
@@ -2758,6 +2774,267 @@ app.post('/travel-created', requireUser, async (req, res) => {
     catch (e) { console.error('[SPPD WA]', e.message); return res.status(500).json({ status: 'error', message: e.message }); }
 });
 
+// ===================== NOMOR PENGIRIM TAMBAHAN (BEBAN NOTIFIKASI DIBAGI) =====================
+// Nomor utama (baileys_auth) tetap menangani semua balasan perintah. Nomor tambahan (maks. 5) hanya MENGIRIM notifikasi
+// presensi ke orang tua; tiap nomor punya antrean sendiri (jeda 3-6 detik/pesan seperti nomor utama), jadi kapasitas
+// naik kira-kira sebanyak nomor yang aktif. Nomor dipilih yang antreannya paling pendek (bergiliran bila sama),
+// nomor yang terputus/sering gagal dilewati, dan pesan yang sudah antre dipindah ke nomor lain bila nomornya mati.
+const SENDERS_FILE = process.env.WA_SENDERS_FILE || '/srv/wa-bot/wa_senders.json';
+const MAX_EXTRA_SENDERS = 5;
+const extraBots = new Map(); // id -> ctx
+let notifyRotate = 0;
+const extraReplied = new Map(); // jid -> waktu balasan otomatis terakhir
+const authDirOf = function(id) { return 'baileys_auth_' + id; };
+
+function makeExtraCtx(rec) {
+    return {
+        id: rec.id, label: rec.label || ('Nomor ' + rec.id), phone: rec.phone || '', enabled: rec.enabled !== false,
+        sock: null, ready: false, starting: false, stopped: false, linked: false, user: null,
+        queue: [], processing: false, current: null,
+        sentDate: '', sentCount: 0, failStreak: 0, pausedUntil: 0,
+        pairing: null, lastDisconnect: null, retry: 0, timer: null
+    };
+}
+function saveSenders() {
+    try {
+        fs.writeFileSync(SENDERS_FILE, JSON.stringify(Array.from(extraBots.values()).map(function(c) { return { id: c.id, label: c.label, phone: c.phone, enabled: c.enabled }; }), null, 1));
+    } catch (e) { console.error('[NOMOR TAMBAHAN] gagal menyimpan daftar:', e.message); }
+}
+function hasLinkedAuth(id) {
+    try {
+        const c = JSON.parse(fs.readFileSync(authDirOf(id) + '/creds.json', 'utf-8'));
+        return !!(c && c.registered);
+    } catch (e) { return false; }
+}
+function loadSenders() {
+    try {
+        if (!fs.existsSync(SENDERS_FILE)) return;
+        const list = JSON.parse(fs.readFileSync(SENDERS_FILE, 'utf-8'));
+        (Array.isArray(list) ? list : []).slice(0, MAX_EXTRA_SENDERS).forEach(function(rec) {
+            if (!rec || !/^[a-f0-9]{6}$/.test(String(rec.id))) return;
+            extraBots.set(rec.id, makeExtraCtx(rec));
+        });
+    } catch (e) { console.error('[NOMOR TAMBAHAN] gagal membaca daftar:', e.message); }
+    let delay = 0;
+    extraBots.forEach(function(c) {
+        c.linked = hasLinkedAuth(c.id);
+        if (c.enabled && c.linked) { setTimeout(function() { startExtra(c).catch(function(e) { console.error('[NOMOR TAMBAHAN]', e.message); }); }, 4000 + delay); delay += 3000; }
+    });
+}
+
+function noteSendResult(ctx, ok) {
+    const day = wibNow().date;
+    if (ctx.sentDate !== day) { ctx.sentDate = day; ctx.sentCount = 0; }
+    if (ok) { ctx.sentCount++; ctx.failStreak = 0; return; }
+    if (ctx === primaryCtx) return;
+    ctx.failStreak = (ctx.failStreak || 0) + 1;
+    if (ctx.failStreak >= 5) { // 5 gagal beruntun (mis. nomor dibatasi WhatsApp): istirahat 10 menit, pesan dialihkan ke nomor lain
+        ctx.pausedUntil = Date.now() + 10 * 60 * 1000; ctx.failStreak = 0;
+        console.error('[NOMOR TAMBAHAN] ' + ctx.label + ': 5 kiriman gagal beruntun, dijeda 10 menit.');
+    }
+}
+const ctxLoad = function(c) { return c === primaryCtx ? taskQueue.length + (currentTask ? 1 : 0) : c.queue.length + (c.current ? 1 : 0); };
+const ctxUsable = function(c) { return !!c.ready && !!c.sock && Date.now() >= (c.pausedUntil || 0); };
+const sentTodayOf = function(c) { return c.sentDate === wibNow().date ? c.sentCount : 0; };
+
+// Pilih nomor pengirim: yang siap & antreannya paling pendek; nomor tambahan yang sudah mencapai batas harian dihindari
+// selama masih ada yang lain. exclude = nomor yang tidak boleh dipilih (pengalihan). null = tidak ada yang siap.
+function pickNotifier(cfg, exclude) {
+    const all = [];
+    if (!cfg || cfg.multi_sender_use_primary !== false) all.push(primaryCtx);
+    extraBots.forEach(function(c) { if (c.enabled) all.push(c); });
+    let cands = all.filter(function(c) { return c !== exclude && ctxUsable(c); });
+    if (!cands.length && cfg && cfg.multi_sender_use_primary === false && primaryCtx !== exclude && ctxUsable(primaryCtx)) cands = [primaryCtx]; // jangan kehilangan notifikasi
+    if (!cands.length) return null;
+    const cap = parseInt(cfg && cfg.multi_sender_daily_cap, 10) || 0;
+    if (cap > 0) {
+        const under = cands.filter(function(c) { return c === primaryCtx || sentTodayOf(c) < cap; });
+        if (under.length) cands = under;
+    }
+    let best = Infinity, ties = [];
+    cands.forEach(function(c) { const l = ctxLoad(c); if (l < best) { best = l; ties = [c]; } else if (l === best) ties.push(c); });
+    return ties[(notifyRotate++) % ties.length];
+}
+function dispatchTo(ctx, fn, meta) {
+    if (ctx === primaryCtx) enqueueTask(function() { return fn(primaryCtx); }, meta);
+    else enqueueOn(ctx, fn, meta);
+}
+// Antrekan notifikasi massal: fn(ctx) dijalankan oleh nomor yang terpilih dan HARUS mengirim lewat sendVia(ctx, ...).
+async function enqueueNotification(fn, meta) {
+    const cfg = await getBotSettings();
+    const ctx = pickNotifier(cfg, null) || primaryCtx;
+    dispatchTo(ctx, fn, meta);
+    return ctx.id;
+}
+function enqueueOn(ctx, fn, meta) { ctx.queue.push({ fn: fn, meta: meta || {}, at: Date.now() }); processExtra(ctx).catch(function(e) { console.error('[NOMOR TAMBAHAN]', e.message); }); }
+async function processExtra(ctx) {
+    if (ctx.processing) return;
+    ctx.processing = true;
+    try {
+        while (ctx.queue.length > 0) {
+            const item = ctx.queue.shift();
+            if (!ctxUsable(ctx)) { // nomor ini mati/dijeda setelah pesan antre: alihkan ke nomor lain
+                const alt = pickNotifier(await getBotSettings(), ctx);
+                if (alt) { dispatchTo(alt, item.fn, item.meta); continue; }
+            }
+            ctx.current = { meta: item.meta, at: item.at, startedAt: Date.now() };
+            try { await item.fn(ctx); } catch (err) { console.error('[QUEUE ERROR ' + ctx.id + ']:', err.message); }
+            ctx.current = null;
+            await sleepMs(Math.floor(Math.random() * 3000) + 3000);
+        }
+    } finally { ctx.processing = false; ctx.current = null; }
+}
+
+async function startExtra(ctx) {
+    if (ctx.starting || ctx.stopped || !ctx.enabled) return;
+    ctx.starting = true;
+    setTimeout(function() { ctx.starting = false; }, 3000);
+    try {
+        const st = await useMultiFileAuthState(authDirOf(ctx.id));
+        const ver = await fetchLatestBaileysVersion();
+        const s = makeWASocket({
+            version: ver.version, auth: st.state, logger: pino({ level: 'error' }),
+            browser: ["Ubuntu", "Chrome", "22.0.04"], keepAliveIntervalMs: 25000, connectTimeoutMs: 60000,
+            defaultQueryTimeoutMs: 60000, emitOwnEvents: false
+        });
+        ctx.sock = s;
+        s.ev.on('creds.update', st.saveCreds);
+        s.ev.on('connection.update', function(u) {
+            if (ctx.sock !== s) return; // soket lama
+            if (u.connection === 'close') {
+                ctx.ready = false;
+                const code = (u.lastDisconnect && u.lastDisconnect.error && u.lastDisconnect.error.output && u.lastDisconnect.error.output.statusCode) || 0;
+                ctx.lastDisconnect = { statusCode: code, at: new Date().toISOString() };
+                console.log('[NOMOR TAMBAHAN ' + ctx.id + '] terputus, kode ' + code);
+                if (ctx.stopped || !ctx.enabled) return;
+                if (code === DisconnectReason.loggedOut || code === 401) { // ditautkan keluar dari HP: perlu pairing ulang
+                    ctx.linked = false; ctx.sock = null; ctx.user = null;
+                    try { fs.rmSync(authDirOf(ctx.id), { recursive: true, force: true }); } catch (e) {}
+                    return;
+                }
+                const registered = !!(s.authState && s.authState.creds && s.authState.creds.registered);
+                ctx.retry = Math.min((ctx.retry || 0) + 1, 6);
+                if (!registered && ctx.retry > 3) { ctx.sock = null; return; } // belum pernah tertaut & kode tidak dipakai: berhenti, tunggu pairing baru
+                ctx.timer = setTimeout(function() { ctx.sock = null; startExtra(ctx).catch(function(e) { console.error('[NOMOR TAMBAHAN]', e.message); }); }, Math.min(60000, 5000 * Math.pow(2, ctx.retry - 1)));
+            } else if (u.connection === 'open') {
+                ctx.ready = true; ctx.linked = true; ctx.retry = 0; ctx.pairing = null; ctx.user = s.user || null;
+                console.log('[NOMOR TAMBAHAN ' + ctx.id + '] terhubung.');
+            }
+        });
+        s.ev.on('messages.upsert', function(m) { handleExtraIncoming(ctx, m).catch(function(e) { console.error('[NOMOR TAMBAHAN]', e.message); }); });
+    } catch (e) {
+        console.error('[NOMOR TAMBAHAN ' + ctx.id + '] gagal mulai:', e.message);
+        ctx.sock = null;
+    }
+}
+// Chat masuk ke nomor tambahan tidak diproses sebagai perintah; cukup diarahkan ke nomor utama (sekali per 12 jam per pengirim).
+async function handleExtraIncoming(ctx, m) {
+    if (m.type !== 'notify') return;
+    const cfg = await getBotSettings();
+    if (cfg.multi_sender_autoreply === false) return;
+    const main = botPhone();
+    if (!main) return;
+    for (const msg of m.messages) {
+        if (!msg.message || !msg.key || msg.key.fromMe || msg.messageStubType) continue;
+        const from = msg.key.remoteJid;
+        if (!from || !(from.endsWith('@s.whatsapp.net') || from.endsWith('@lid'))) continue;
+        if (Date.now() - (extraReplied.get(from) || 0) < 12 * 3600 * 1000) continue;
+        extraReplied.set(from, Date.now());
+        if (extraReplied.size > 3000) extraReplied.clear();
+        enqueueOn(ctx, async function(c) {
+            const text = await renderMessage('sender_autoreply', { nomor_utama: main });
+            if (text) await sendVia(c, from, { text: text });
+        }, { to: from, kind: 'balasan' });
+    }
+}
+function senderView(c) {
+    const pairingValid = c.pairing && Date.now() - c.pairing.at < 2 * 60 * 1000;
+    const uid = c.user && c.user.id ? String(c.user.id).split(':')[0].split('@')[0] : null;
+    return {
+        id: c.id, label: c.label, phone: c.phone, enabled: c.enabled, linked: !!c.linked, connected: !!c.ready,
+        actual_phone: c.ready ? uid : null, name: c.ready && c.user ? c.user.name || null : null,
+        queue_length: c.queue.length + (c.current ? 1 : 0), sent_today: sentTodayOf(c),
+        paused: Date.now() < (c.pausedUntil || 0),
+        pairing_code: pairingValid ? c.pairing.code : null, pairing_phone: pairingValid ? c.pairing.phone : null,
+        last_disconnect: c.lastDisconnect
+    };
+}
+async function stopExtra(ctx, logout) {
+    ctx.stopped = true; ctx.ready = false;
+    if (ctx.timer) { clearTimeout(ctx.timer); ctx.timer = null; }
+    const s = ctx.sock; ctx.sock = null;
+    if (s) { try { if (logout) await s.logout(); else s.end(undefined); } catch (e) {} }
+    if (logout) { ctx.linked = false; ctx.user = null; try { fs.rmSync(authDirOf(ctx.id), { recursive: true, force: true }); } catch (e) {} }
+    processExtra(ctx).catch(function() {}); // pesan yang masih antre dialihkan ke nomor lain
+}
+
+app.get('/admin/senders', requireAdmin, (req, res) => {
+    res.json({
+        status: 'success', max: MAX_EXTRA_SENDERS,
+        primary: { connected: isReady, phone: isReady ? botPhone() : null, queue_length: taskQueue.length + (currentTask ? 1 : 0), sent_today: sentTodayOf(primaryCtx) },
+        senders: Array.from(extraBots.values()).map(senderView)
+    });
+});
+app.post('/admin/senders', requireAdmin, (req, res) => {
+    if (extraBots.size >= MAX_EXTRA_SENDERS) return res.status(400).json({ status: 'error', message: 'Maksimal ' + MAX_EXTRA_SENDERS + ' nomor tambahan.' });
+    const phone = formatToInternational((req.body && req.body.phone) || '');
+    if (phone.length < 10 || phone.length > 15) return res.status(400).json({ status: 'error', message: 'Nomor WhatsApp tidak valid.' });
+    if (phone === botPhone() || Array.from(extraBots.values()).some(function(c) { return c.phone === phone; })) return res.status(400).json({ status: 'error', message: 'Nomor itu sudah dipakai sebagai nomor bot.' });
+    const label = String((req.body && req.body.label) || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 30) || ('Nomor ' + (extraBots.size + 2));
+    const id = require('crypto').randomBytes(3).toString('hex');
+    extraBots.set(id, makeExtraCtx({ id: id, label: label, phone: phone, enabled: true }));
+    saveSenders();
+    res.json({ status: 'success', sender: senderView(extraBots.get(id)) });
+});
+function senderParam(req, res) {
+    const c = extraBots.get(String(req.params.id));
+    if (!c) { res.status(404).json({ status: 'error', message: 'Nomor tidak ditemukan.' }); return null; }
+    return c;
+}
+app.post('/admin/senders/:id/pair', requireAdmin, async (req, res) => {
+    const c = senderParam(req, res); if (!c) return;
+    try {
+        if (c.ready) return res.status(400).json({ status: 'error', message: 'Nomor ini sudah terhubung. Putuskan dulu bila ingin mengganti.' });
+        const phone = formatToInternational((req.body && req.body.phone) || c.phone);
+        if (phone.length < 10) return res.status(400).json({ status: 'error', message: 'Nomor WhatsApp tidak valid.' });
+        c.enabled = true; c.stopped = false; c.retry = 0;
+        if (!c.sock) await startExtra(c);
+        await sleepMs(2500);
+        if (!c.sock) return res.status(500).json({ status: 'error', message: 'Sambungan belum siap. Coba lagi.' });
+        if (c.sock.authState && c.sock.authState.creds && c.sock.authState.creds.registered) return res.status(400).json({ status: 'error', message: 'Sesi sudah terdaftar. Putuskan tautan lalu coba lagi.' });
+        const code = await c.sock.requestPairingCode(phone);
+        c.phone = phone; c.pairing = { code: code, phone: phone, at: Date.now() }; saveSenders();
+        res.json({ status: 'success', code: code, phone: phone });
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
+});
+app.post('/admin/senders/:id/toggle', requireAdmin, async (req, res) => {
+    const c = senderParam(req, res); if (!c) return;
+    const on = !!(req.body && req.body.enabled);
+    c.enabled = on; saveSenders();
+    if (on) { c.stopped = false; c.retry = 0; if (c.linked && !c.sock) startExtra(c).catch(function() {}); }
+    else await stopExtra(c, false);
+    res.json({ status: 'success', sender: senderView(c) });
+});
+app.post('/admin/senders/:id/logout', requireAdmin, async (req, res) => {
+    const c = senderParam(req, res); if (!c) return;
+    await stopExtra(c, true); c.pairing = null; c.stopped = false;
+    res.json({ status: 'success', sender: senderView(c) });
+});
+app.post('/admin/senders/:id/delete', requireAdmin, async (req, res) => {
+    const c = senderParam(req, res); if (!c) return;
+    await stopExtra(c, true); extraBots.delete(c.id); saveSenders();
+    res.json({ status: 'success' });
+});
+app.post('/admin/senders/:id/test', requireAdmin, (req, res) => {
+    const c = senderParam(req, res); if (!c) return;
+    if (!c.ready) return res.status(400).json({ status: 'error', message: 'Nomor ini belum terhubung.' });
+    const phone = formatToInternational((req.body && req.body.phone) || '');
+    if (phone.length < 10) return res.status(400).json({ status: 'error', message: 'Nomor tujuan tidak valid.' });
+    const jid = phone + '@s.whatsapp.net';
+    enqueueOn(c, async function(x) { await sendVia(x, jid, { text: '✅ Tes nomor pengirim "' + c.label + '" berhasil.\n_SMP Negeri 8 Ciamis_' }); }, { to: jid, kind: 'tes' });
+    res.json({ status: 'success', message: 'Pesan uji masuk antrean nomor ' + c.label + '.' });
+});
+
 app.get('/admin/status', requireAdmin, (req, res) => {
     const pairingValid = botState.pairingCode && Date.now() - botState.pairingAt < 2 * 60 * 1000;
     res.json({
@@ -3463,6 +3740,36 @@ app.post('/iclock/devicecmd', rawText, async (req, res) => {
 });
 app.get('/iclock/ping', (req, res) => res.type('text/plain').send('OK'));
 // Terima log absen: tiap baris "PIN \t YYYY-MM-DD HH:MM:SS \t Status \t Verify \t ..."
+// WA presensi ke orang tua saat siswa absen lewat mesin fingerprint (templat sama dengan kios RFID, dibagi ke semua nomor pengirim).
+// Bawaan MATI (fingerprint_parent_wa_enabled); jeda 60 detik per siswa+jenis dipakai bersama kios RFID agar orang tua tidak menerima ganda.
+async function notifyPunchParentWa(sn, pin, at, result) {
+    if (result !== 'check_in' && result !== 'late' && result !== 'check_out') return;
+    if (Date.now() - at.getTime() > 15 * 60 * 1000) return; // log lama (mesin mengirim ulang antrean) tidak dinotifikasikan
+    const cfg = await getBotSettings();
+    if (!cfg.fingerprint_parent_wa_enabled) return;
+    const lg = await supabase.from('fingerprint_logs').select('person_type, person_id').eq('device_sn', sn).eq('pin', pin).eq('punched_at', at.toISOString()).maybeSingle();
+    if (lg.error) throw lg.error;
+    if (!lg.data || lg.data.person_type !== 'student' || !lg.data.person_id) return;
+    const type = result === 'check_out' ? 'check_out' : 'check_in';
+    const key = lg.data.person_id + type;
+    if (Date.now() - (notifyParentLast.get(key) || 0) < 60000) return;
+    notifyParentLast.set(key, Date.now());
+    if (notifyParentLast.size > 5000) notifyParentLast.clear();
+    const st = await supabase.from('students').select('full_name, parent_phone').eq('id', lg.data.person_id).maybeSingle();
+    if (st.error) throw st.error;
+    if (!st.data || !st.data.parent_phone) return;
+    const wib = new Date(at.getTime() + 7 * 3600 * 1000);
+    const vars = {
+        nama_siswa: st.data.full_name, tanggal: dateIdn(wib.toISOString().slice(0, 10)),
+        waktu: wib.toISOString().slice(11, 16), jenis: type === 'check_out' ? 'Pulang' : 'Masuk', status: result === 'late' ? 'Terlambat' : 'Hadir'
+    };
+    const targetJid = formatToInternational(st.data.parent_phone) + '@s.whatsapp.net';
+    await enqueueNotification(async (ctx) => {
+        const text = await renderMessage('parent_presence', vars);
+        if (text) await sendVia(ctx, targetJid, { text: text });
+    }, { to: targetJid, kind: 'parent_presence' });
+}
+
 app.post('/iclock/cdata', rawText, async (req, res) => {
     try {
         const sn = fpSn(req);
@@ -3488,6 +3795,7 @@ app.post('/iclock/cdata', rawText, async (req, res) => {
             if (r.error) throw r.error; // kegagalan -> mesin mengirim ulang (aman, proses idempoten)
             n++;
             if (r.data && r.data.result) notifyPunch(sn, pin, at, r.data.result).catch((e) => console.error('[PUSH]', e && e.message));
+            if (r.data && r.data.result) notifyPunchParentWa(sn, pin, at, r.data.result).catch((e) => console.error('[FINGER ORTU WA]', e && e.message));
             notifyPiketWa(sn, pin, at).catch((e) => console.error('[PIKET WA]', e && e.message));
         }
         if (n) console.log('[FINGERPRINT] ' + sn + ': ' + n + ' log diproses');
@@ -4343,6 +4651,7 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 app.listen(PORT, () => {
     console.log('Server API berjalan di port ' + PORT);
     startBot();
+    loadSenders();
     setInterval(runTeacherReminders, 60 * 1000);
     setInterval(runSaturdayGreeting, 60 * 1000);
     setInterval(runHomeroomAttendanceReminder, 60 * 1000);

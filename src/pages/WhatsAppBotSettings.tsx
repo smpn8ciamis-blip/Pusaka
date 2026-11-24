@@ -203,6 +203,186 @@ function QueueLogCard() {
   );
 }
 
+type SenderInfo = {
+  id: string; label: string; phone: string; enabled: boolean; linked: boolean; connected: boolean;
+  actual_phone: string | null; name: string | null; queue_length: number; sent_today: number; paused: boolean;
+  pairing_code: string | null; pairing_phone: string | null;
+  last_disconnect: { statusCode: number; at: string } | null;
+};
+type SendersResponse = {
+  max: number;
+  primary: { connected: boolean; phone: string | null; queue_length: number; sent_today: number };
+  senders: SenderInfo[];
+};
+
+function SendersCard() {
+  const qc = useQueryClient();
+  const [label, setLabel] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [testTo, setTestTo] = useState('');
+  const [codes, setCodes] = useState<Record<string, string>>({});
+  const [removeId, setRemoveId] = useState<string | null>(null);
+
+  const { data, error, isLoading, refetch, isFetching } = useQuery({
+    queryKey: ['wa-bot-senders'],
+    queryFn: () => waAdminFetch<SendersResponse>('/admin/senders'),
+    refetchInterval: 5000,
+    retry: false,
+  });
+  const done = () => qc.invalidateQueries({ queryKey: ['wa-bot-senders'] });
+  const fail = (e: unknown) => toast.error((e as Error).message);
+
+  const add = useMutation({
+    mutationFn: () => waAdminFetch('/admin/senders', { method: 'POST', body: { label, phone: newPhone } }),
+    onSuccess: () => { toast.success('Nomor ditambahkan. Klik "Tautkan" untuk memasangkan ke WhatsApp.'); setLabel(''); setNewPhone(''); done(); },
+    onError: fail,
+  });
+  const pair = useMutation({
+    mutationFn: (s: SenderInfo) => waAdminFetch<{ code: string }>(`/admin/senders/${s.id}/pair`, { method: 'POST', body: { phone: s.phone } }),
+    onSuccess: (r, s) => { setCodes((c) => ({ ...c, [s.id]: r.code })); done(); },
+    onError: fail,
+  });
+  const toggle = useMutation({
+    mutationFn: (v: { id: string; enabled: boolean }) => waAdminFetch(`/admin/senders/${v.id}/toggle`, { method: 'POST', body: { enabled: v.enabled } }),
+    onSuccess: done, onError: fail,
+  });
+  const logout = useMutation({
+    mutationFn: (id: string) => waAdminFetch(`/admin/senders/${id}/logout`, { method: 'POST' }),
+    onSuccess: () => { toast.success('Tautan nomor diputus.'); done(); }, onError: fail,
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => waAdminFetch(`/admin/senders/${id}/delete`, { method: 'POST' }),
+    onSuccess: () => { toast.success('Nomor dihapus.'); setRemoveId(null); done(); }, onError: fail,
+  });
+  const test = useMutation({
+    mutationFn: (id: string) => waAdminFetch<{ message: string }>(`/admin/senders/${id}/test`, { method: 'POST', body: { phone: testTo } }),
+    onSuccess: (r) => toast.success(r.message), onError: fail,
+  });
+
+  const stateBadge = (s: SenderInfo) => {
+    if (!s.enabled) return <Badge variant="outline">Nonaktif</Badge>;
+    if (s.connected) return s.paused ? <Badge variant="secondary">Dijeda (gagal berulang)</Badge> : <Badge>Terhubung</Badge>;
+    if (!s.linked) return <Badge variant="secondary">Belum ditautkan</Badge>;
+    return <Badge variant="destructive">Terputus</Badge>;
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <CardTitle>Nomor Pengirim Tambahan</CardTitle>
+            <CardDescription>
+              Tambahkan nomor WhatsApp lain (maks. {data?.max ?? 5}) agar notifikasi presensi ke orang tua dibagi rata ke beberapa nomor. Nomor tambahan hanya mengirim notifikasi; perintah (cek poin, absen, dll.) tetap lewat nomor utama.
+            </CardDescription>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+            <RefreshCw className={`h-4 w-4 mr-1 ${isFetching ? 'animate-spin' : ''}`} /> Muat ulang
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading && <p className="text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Memuat…</p>}
+        {error && <p className="text-sm text-destructive">{(error as Error).message}. Bila menyebut halaman tidak ditemukan, salin server.js terbaru ke bot lalu restart.</p>}
+        {data && (
+          <>
+            <div className="rounded-md border p-3 text-sm flex flex-wrap items-center gap-x-4 gap-y-1">
+              <span className="font-medium">Nomor utama</span>
+              {data.primary.connected ? <Badge>Terhubung</Badge> : <Badge variant="destructive">Terputus</Badge>}
+              <span className="text-muted-foreground">{data.primary.phone ? `+${data.primary.phone}` : '-'}</span>
+              <span className="text-muted-foreground">Antrean {data.primary.queue_length} · terkirim hari ini {data.primary.sent_today}</span>
+            </div>
+
+            {data.senders.map((s) => {
+              const code = codes[s.id] || s.pairing_code;
+              return (
+                <div key={s.id} className="rounded-md border p-3 space-y-2">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="font-medium">{s.label}</span>
+                    {stateBadge(s)}
+                    <span className="text-sm text-muted-foreground">+{s.actual_phone || s.phone}</span>
+                    <span className="text-xs text-muted-foreground">Antrean {s.queue_length} · terkirim hari ini {s.sent_today}</span>
+                    <div className="ml-auto flex items-center gap-2">
+                      <Label htmlFor={`en-${s.id}`} className="text-xs">Aktif</Label>
+                      <Switch id={`en-${s.id}`} checked={s.enabled} onCheckedChange={(v) => toggle.mutate({ id: s.id, enabled: v })} />
+                    </div>
+                  </div>
+                  {code && !s.connected && (
+                    <div className="rounded bg-muted p-2 text-sm">
+                      Kode tautan: <span className="font-mono text-lg tracking-widest font-semibold">{code}</span>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Di HP nomor <b>+{s.pairing_phone || s.phone}</b>: WhatsApp → Perangkat tertaut → Tautkan perangkat → <i>Tautkan dengan nomor telepon</i>, lalu masukkan kode ini (berlaku ±2 menit).
+                      </p>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {!s.connected && (
+                      <Button size="sm" onClick={() => pair.mutate(s)} disabled={pair.isPending}>
+                        {pair.isPending && pair.variables?.id === s.id ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Link2 className="h-4 w-4 mr-1" />}
+                        {s.linked ? 'Tautkan ulang' : 'Tautkan'}
+                      </Button>
+                    )}
+                    {s.connected && (
+                      <Button size="sm" variant="outline" onClick={() => logout.mutate(s.id)} disabled={logout.isPending}>
+                        <Unlink className="h-4 w-4 mr-1" /> Putuskan tautan
+                      </Button>
+                    )}
+                    <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setRemoveId(s.id)}>Hapus</Button>
+                  </div>
+                </div>
+              );
+            })}
+
+            {data.senders.length === 0 && <p className="text-sm text-muted-foreground">Belum ada nomor tambahan.</p>}
+
+            {data.senders.length < data.max && (
+              <div className="rounded-md border border-dashed p-3 space-y-2">
+                <p className="text-sm font-medium">Tambah nomor</p>
+                <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                  <Input placeholder="Nama (mis. Nomor 2)" value={label} maxLength={30} onChange={(e) => setLabel(e.target.value)} />
+                  <Input placeholder="Nomor WhatsApp (08… atau 62…)" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} />
+                  <Button onClick={() => add.mutate()} disabled={add.isPending || newPhone.trim().length < 9}>
+                    {add.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />} Tambah
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Pakai nomor yang aktif dan sudah dipakai WhatsApp biasa beberapa waktu. Nomor yang baru dibeli lebih rawan dibatasi WhatsApp bila langsung dipakai mengirim banyak pesan.
+                </p>
+              </div>
+            )}
+
+            {data.senders.some((s) => s.connected) && (
+              <div className="flex flex-wrap items-center gap-2">
+                <Input className="max-w-xs" placeholder="Nomor tujuan tes (08…)" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
+                {data.senders.filter((s) => s.connected).map((s) => (
+                  <Button key={s.id} size="sm" variant="outline" disabled={test.isPending || testTo.trim().length < 9} onClick={() => test.mutate(s.id)}>
+                    <Send className="h-4 w-4 mr-1" /> Tes {s.label}
+                  </Button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+
+      <AlertDialog open={!!removeId} onOpenChange={(o) => !o && setRemoveId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Hapus nomor pengirim ini?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tautan WhatsApp nomor ini diputus dan sesinya dihapus dari server. Pesan yang masih antre dialihkan ke nomor lain. Untuk memakainya lagi, nomor harus ditambahkan dan ditautkan ulang.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={() => removeId && remove.mutate(removeId)}>Hapus</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Card>
+  );
+}
+
 /* ------------------------------ Koneksi ------------------------------ */
 function ConnectionTab() {
   const [phone, setPhone] = useState('');
@@ -294,6 +474,8 @@ function ConnectionTab() {
       </Card>
 
       <QueueLogCard />
+
+      <SendersCard />
 
       {status && !status.connected && (
         <Card>
@@ -550,6 +732,10 @@ function ReminderTab() {
   const [waCard, setWaCard] = useState(true);
   const [violationWa, setViolationWa] = useState(true);
   const [examViolationWa, setExamViolationWa] = useState(true);
+  const [msUsePrimary, setMsUsePrimary] = useState(true);
+  const [msDailyCap, setMsDailyCap] = useState('500');
+  const [msAutoreply, setMsAutoreply] = useState(true);
+  const [fpParentWa, setFpParentWa] = useState(false);
   const [ekskulWa, setEkskulWa] = useState(true);
   const [assignFuTime, setAssignFuTime] = useState('09:00');
   const [wkOn, setWkOn] = useState(false);
@@ -595,6 +781,10 @@ function ReminderTab() {
       setWaCard(data.wa_contact_card_enabled !== false);
       setViolationWa(data.violation_wa_enabled !== false);
       setExamViolationWa(data.exam_violation_wa_enabled !== false);
+      setMsUsePrimary(data.multi_sender_use_primary !== false);
+      setMsDailyCap(String(data.multi_sender_daily_cap ?? 500));
+      setMsAutoreply(data.multi_sender_autoreply !== false);
+      setFpParentWa(data.fingerprint_parent_wa_enabled === true);
       setEkskulWa(data.ekskul_journal_wa_enabled !== false);
       setAssignFuTime(String(data.assignment_followup_time || '09:00').slice(0, 5));
       setWkOn(!!data.weekly_absence_enabled);
@@ -634,6 +824,10 @@ function ReminderTab() {
         wa_contact_card_enabled: waCard,
         violation_wa_enabled: violationWa,
         exam_violation_wa_enabled: examViolationWa,
+        multi_sender_use_primary: msUsePrimary,
+        multi_sender_daily_cap: Math.min(5000, Math.max(0, parseInt(msDailyCap, 10) || 0)),
+        multi_sender_autoreply: msAutoreply,
+        fingerprint_parent_wa_enabled: fpParentWa,
         ekskul_journal_wa_enabled: ekskulWa,
         assignment_followup_time: /^\d{2}:\d{2}$/.test(assignFuTime) ? assignFuTime : '09:00',
         weekly_absence_enabled: wkOn,
@@ -864,6 +1058,33 @@ function ReminderTab() {
           <p className="text-xs text-muted-foreground">
             Saat mode anti curang mendeteksi pelanggaran (pindah tab, keluar layar penuh, dll.), bot langsung mengirim WA ke pengawas ruang siswa itu: nama siswa, ruang, meja, jenis pelanggaran, dan urutannya. Pengawas ditentukan dari Jadwal Pengawas pada hari dan jam ujian; ruang siswa dari denah yang disimpan di halaman Jadwal Pengawas. Isi pesan dapat diubah di tab Template (<b>Pengawas: Pelanggaran Ujian CBT</b>).
           </p>
+        </div>
+        <div className="space-y-3 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="fpw-en">WA ke orang tua saat siswa absen lewat mesin fingerprint</Label>
+            <Switch id="fpw-en" checked={fpParentWa} onCheckedChange={setFpParentWa} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Bawaan <b>mati</b>. Bila dinyalakan, setiap siswa yang berhasil absen masuk/pulang di mesin fingerprint (dan nomor orang tuanya tertaut) dikirimi WA presensi seperti pada kios RFID, dibagi ke semua nomor pengirim (lihat kartu <b>Nomor Pengirim Tambahan</b> di tab Koneksi). Siswa yang sudah dikirimi lewat RFID dalam 1 menit terakhir tidak dikirimi dua kali. Isi pesan memakai templat <b>Presensi Siswa</b> di tab Template.
+          </p>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="msp-en">Nomor utama ikut menerima bagian notifikasi presensi</Label>
+            <Switch id="msp-en" checked={msUsePrimary} onCheckedChange={setMsUsePrimary} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Matikan bila ingin nomor utama dikhususkan untuk membalas perintah (cek poin, absen, dll.) dan notifikasi massal hanya lewat nomor tambahan. Bila semua nomor tambahan sedang terputus, notifikasi tetap dikirim lewat nomor utama.
+          </p>
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor="msc-en">Batas kiriman per nomor tambahan per hari (0 = tanpa batas)</Label>
+            <Input id="msc-en" type="number" min={0} max={5000} className="w-28" value={msDailyCap} onChange={(e) => setMsDailyCap(e.target.value)} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Nomor yang sudah mencapai batas dilewati selama masih ada nomor lain. Nomor baru sebaiknya dipanaskan bertahap (mulai 50–100 pesan/hari) agar tidak dibatasi WhatsApp.
+          </p>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="msa-en">Nomor tambahan membalas chat masuk dengan arahan ke nomor utama</Label>
+            <Switch id="msa-en" checked={msAutoreply} onCheckedChange={setMsAutoreply} />
+          </div>
         </div>
         <div className="space-y-2 rounded-lg border p-3">
           <div className="flex items-center justify-between">

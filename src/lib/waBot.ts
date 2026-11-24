@@ -305,6 +305,15 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     defaultBody: `🚨 *PELANGGARAN UJIAN (CBT)*\n\nYth. {{nama_pengawas}},\nSiswa di ruang yang Bapak/Ibu awasi melanggar aturan ujian:\n\n• Siswa: *{{nama_siswa}}* ({{kelas}})\n• Ruang: *{{ruang}}*{{meja}}\n• Pelanggaran: *{{pelanggaran}}* ({{jumlah}})\n• Ujian: {{ujian}}\n• Waktu: {{jam}} WIB\n\nMohon dicek ke tempat duduk siswa tersebut.\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
   },
   {
+    key: 'sender_autoreply',
+    title: 'Nomor Pengirim Tambahan: Balasan Otomatis',
+    description: 'Dikirim sekali per 12 jam bila seseorang membalas/chat ke nomor pengirim tambahan. Nomor tambahan hanya mengirim notifikasi, jadi pesannya mengarahkan ke nomor utama.',
+    variables: [
+      { name: 'nomor_utama', sample: '6281234567890', hint: 'Nomor WhatsApp utama bot (format 62…, tanpa +)' },
+    ],
+    defaultBody: `Halo 👋\n\nNomor ini khusus mengirim *notifikasi otomatis* Pusaka (mis. presensi siswa) dan tidak membalas pesan.\n\nUntuk perintah seperti *cek poin*, *absen*, *akun pusaka*, atau *lapor izin*, silakan chat nomor utama:\nhttps://wa.me/{{nomor_utama}}\n\nTerima kasih.\n_SMP Negeri 8 Ciamis_`,
+  },
+  {
     key: 'parent_attendance',
     title: 'Orang Tua: Cek Rekap Kehadiran',
     description: 'Balasan bot saat orang tua (nomor sudah tertaut ke NISN) mengetik "absen": rekap kehadiran anaknya 30 hari terakhir.',
