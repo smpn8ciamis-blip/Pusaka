@@ -63,6 +63,7 @@ const PanitiaUjianDashboard = lazy(() => import("./pages/PanitiaUjianDashboard")
 const PanitiaUjianJadwal = lazy(() => import("./pages/PanitiaUjianJadwal"));
 const PanitiaUjianPengawas = lazy(() => import("./pages/PanitiaUjianPengawas"));
 const PanitiaUjianKehadiran = lazy(() => import("./pages/PanitiaUjianKehadiran"));
+const PanitiaUjianTidakHadir = lazy(() => import("./pages/PanitiaUjianTidakHadir"));
 const AbsensiPengawas = lazy(() => import("./pages/AbsensiPengawas"));
 const KorlasDashboard = lazy(() => import("./pages/KorlasDashboard"));
 const BendaharaDashboard = lazy(() => import("./pages/BendaharaDashboard"));
@@ -350,6 +351,7 @@ const App = () => (
               <Route path="/panitia-ujian/jadwal" element={<ProtectedRoute allowedRoles={['panitia_ujian', 'admin', 'super_admin']}><PanitiaUjianJadwal /></ProtectedRoute>} />
               <Route path="/panitia-ujian/pengawas" element={<ProtectedRoute allowedRoles={['panitia_ujian', 'admin', 'super_admin']}><PanitiaUjianPengawas /></ProtectedRoute>} />
               <Route path="/panitia-ujian/kehadiran" element={<ProtectedRoute allowedRoles={['panitia_ujian', 'admin', 'super_admin']}><PanitiaUjianKehadiran /></ProtectedRoute>} />
+              <Route path="/panitia-ujian/tidak-hadir" element={<ProtectedRoute allowedRoles={['panitia_ujian', 'admin', 'super_admin']}><PanitiaUjianTidakHadir /></ProtectedRoute>} />
               <Route path="/korlas-dashboard" element={<ProtectedRoute allowedRoles={['korlas']}><KorlasDashboard /></ProtectedRoute>} />
               <Route path="/bendahara-dashboard" element={<ProtectedRoute><BendaharaDashboard /></ProtectedRoute>} />
               <Route path="/staff-registration" element={<ProtectedRoute requireRole="admin"><StaffRegistration /></ProtectedRoute>} />

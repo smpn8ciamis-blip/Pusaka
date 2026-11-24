@@ -126,6 +126,13 @@ export default function PanitiaUjianDashboard() {
             </CardHeader>
             <CardContent><Button asChild variant="outline"><Link to="/panitia-ujian/kehadiran">Pantau kehadiran</Link></Button></CardContent>
           </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><FileText className="h-5 w-5" /> Cetak Siswa Tidak Hadir</CardTitle>
+              <CardDescription>Daftar siswa sakit, izin, dan alpa per hari ujian: PDF berkop dengan tanda tangan ketua panitia.</CardDescription>
+            </CardHeader>
+            <CardContent><Button asChild variant="outline"><Link to="/panitia-ujian/tidak-hadir">Cetak daftar</Link></Button></CardContent>
+          </Card>
         </div>
 
         <Card>

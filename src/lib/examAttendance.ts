@@ -44,3 +44,30 @@ export const fmtDateId = (iso: string) => {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 };
+
+// ---------- Daftar siswa tidak hadir (dasar cetak PDF panitia) ----------
+export interface OvStudent { student_id: string; full_name: string; class_name: string; table_no: number | null; status: AttStatus | null; notes: string | null }
+export interface OvRoom { room_no: number; sessions: unknown[]; students: OvStudent[] }
+export interface AbsentRow { student_id: string; full_name: string; class_name: string; room_no: number; table_no: number | null; status: Exclude<AttStatus, 'hadir'>; notes: string }
+export type AbsentOrder = 'ruang' | 'kelas';
+
+/** Ambil siswa yang sakit/izin/alpa dari ringkasan per ruang; "belum diabsen" dihitung terpisah (bukan tidak hadir). */
+export function collectAbsent(rooms: OvRoom[], order: AbsentOrder = 'ruang') {
+  const rows: AbsentRow[] = [];
+  let total = 0, notRecorded = 0;
+  for (const r of rooms) {
+    for (const s of r.students) {
+      total++;
+      if (s.status === null) { notRecorded++; continue; }
+      if (s.status === 'hadir') continue;
+      rows.push({ student_id: s.student_id, full_name: s.full_name, class_name: s.class_name, room_no: r.room_no, table_no: s.table_no, status: s.status, notes: (s.notes ?? '').trim() });
+    }
+  }
+  const nat = (a: string, b: string) => a.localeCompare(b, 'id', { numeric: true, sensitivity: 'base' });
+  rows.sort(order === 'kelas'
+    ? (a, b) => nat(a.class_name, b.class_name) || nat(a.full_name, b.full_name)
+    : (a, b) => a.room_no - b.room_no || (a.table_no ?? 1e9) - (b.table_no ?? 1e9) || nat(a.full_name, b.full_name));
+  const counts = { sakit: 0, izin: 0, alpa: 0 };
+  rows.forEach((x) => { counts[x.status]++; });
+  return { rows, total, notRecorded, counts };
+}
