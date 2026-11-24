@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, CheckCircle2, ClipboardCheck, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ClipboardCheck, Printer, RefreshCw } from 'lucide-react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,10 +10,9 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { supabase } from '@/integrations/supabase/client';
-import { ATT_LABEL, ATT_STATUSES, countStatuses, fmtDateId, hhmmToMin, wibNow, type AttStatus } from '@/lib/examAttendance';
+import { ATT_LABEL, ATT_STATUSES, countStatuses, fmtDateId, hhmmToMin, wibNow, type AttStatus, type OvStudent } from '@/lib/examAttendance';
 
 interface OvSession { start_time: string; end_time: string; subject: string; is_first: boolean; pengawas: { teacher_id: string; name: string }[]; filled_count: number; recorded_at: string | null; recorded_by: string | null }
-interface OvStudent { student_id: string; full_name: string; class_name: string; table_no: number | null; status: AttStatus | null; notes: string | null }
 interface OvRoom { room_no: number; sessions: OvSession[]; students: OvStudent[] }
 interface Overview { date: string; first_start: string | null; rooms: OvRoom[] }
 
@@ -64,6 +63,7 @@ export default function PanitiaUjianKehadiran() {
               <Label htmlFor="tgl" className="text-xs text-muted-foreground">Tanggal ujian</Label>
               <Input id="tgl" type="date" value={date} onChange={(e) => setDate(e.target.value || wibNow().date)} />
             </div>
+            <Button variant="outline" asChild><Link to={`/panitia-ujian/tidak-hadir?tanggal=${date}`}><Printer className="mr-2 h-4 w-4" /> Cetak tidak hadir</Link></Button>
             <Button variant="outline" size="icon" onClick={() => q.refetch()} aria-label="Muat ulang"><RefreshCw className={`h-4 w-4 ${q.isFetching ? 'animate-spin' : ''}`} /></Button>
           </div>
         </div>
