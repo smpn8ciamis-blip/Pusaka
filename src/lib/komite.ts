@@ -24,7 +24,21 @@ export interface KomiteRincianPublik {
   sumber: 'rekening' | 'tunai';
   kategori: 'siswa' | 'donatur_lain';
   grade: number | null;
+  /** Nama rombel (mis. "9E_2026/2027"); kosong untuk donatur lain atau catatan lama. */
+  kelas?: string | null;
   nama: string;
+}
+
+/** Ringkasan satu rombel di halaman publik (angka saja). */
+export interface KomitePerRombelPublik {
+  kelas: string;
+  grade: number;
+  siswa_total: number;
+  siswa_penyumbang: number;
+  jumlah: number;
+  total: number;
+  rekening: number;
+  tunai: number;
 }
 
 export interface KomitePublik {
@@ -43,6 +57,7 @@ export interface KomitePublik {
   donatur_lain?: { total: number; jumlah: number; rekening: number; tunai: number };
   rekening?: KomiteRekening[];
   rincian?: KomiteRincianPublik[];
+  per_rombel?: KomitePerRombelPublik[];
   diperbarui?: string | null;
 }
 
@@ -87,3 +102,11 @@ export const parseRupiahInput = (v: string) => {
   const digits = String(v ?? '').replace(/[^\d]/g, '');
   return digits ? Number(digits) : 0;
 };
+
+/** "9E_2026/2027" -> "9E": akhiran tahun ajaran dibuang untuk tampilan. */
+export const namaRombel = (kelas: string | null | undefined) =>
+  String(kelas ?? '').replace(/[\s_-]*\d{4}\s*\/\s*\d{4}\s*$/, '').trim();
+
+/** Pembanding teks alami bahasa Indonesia ("7A" < "7B" < "10A"). */
+export const bandingAlami = (a: string, b: string) =>
+  String(a).localeCompare(String(b), 'id', { numeric: true, sensitivity: 'base' });
