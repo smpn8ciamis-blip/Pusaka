@@ -13,8 +13,8 @@ export const KOMITE_KEY = 'komite';
 export function useKomitePublik() {
   return useQuery({
     queryKey: [KOMITE_KEY, 'publik'],
-    staleTime: 30_000,
-    refetchInterval: 60_000,
+    staleTime: 60_000,
+    refetchInterval: 180_000, // rincian kini memuat semua catatan, jadi tidak perlu diambil ulang tiap menit
     queryFn: async (): Promise<KomitePublik> => {
       const { data, error } = await db.rpc('komite_publik');
       if (error) throw error;

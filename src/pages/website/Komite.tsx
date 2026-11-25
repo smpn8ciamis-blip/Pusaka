@@ -1,94 +1,14 @@
-import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { CalendarClock, ChevronLeft, ChevronRight, Banknote, Landmark, ShieldCheck } from "lucide-react";
+import { CalendarClock, Banknote, Landmark, ShieldCheck } from "lucide-react";
 import { PageHero } from "./Profil";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
 import { KomiteBar, KomiteMainProgress } from "@/components/komite/KomiteBars";
 import { KomiteSummary } from "@/components/komite/KomiteSummary";
+import { KomitePerRombel } from "@/components/komite/KomitePerRombel";
+import { KomiteRincianTable } from "@/components/komite/KomiteRincianTable";
 import { KomiteRekeningList } from "@/components/komite/KomiteRekeningList";
 import { useKomitePublik } from "@/hooks/useKomite";
-import { KATEGORI_LABEL, SUMBER_LABEL, formatRupiah, formatTanggal, sisaHari, type KomiteRincianPublik } from "@/lib/komite";
-
-const PAGE_SIZE = 20;
-
-function Rincian({ rows, namaMode }: { rows: KomiteRincianPublik[]; namaMode?: string }) {
-  const [filter, setFilter] = useState<string>("all");
-  const [page, setPage] = useState(1);
-
-  const filtered = useMemo(() => {
-    if (filter === "all") return rows;
-    if (filter === "lain") return rows.filter((r) => r.kategori === "donatur_lain");
-    return rows.filter((r) => r.kategori === "siswa" && String(r.grade) === filter);
-  }, [rows, filter]);
-
-  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const cur = Math.min(page, pages);
-  const view = filtered.slice((cur - 1) * PAGE_SIZE, cur * PAGE_SIZE);
-
-  return (
-    <div>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-slate-500">
-          {namaMode === "lengkap" ? "Menampilkan 300 catatan terbaru." : "Nama disamarkan untuk menjaga privasi. Menampilkan 300 catatan terbaru."}
-        </p>
-        <Select value={filter} onValueChange={(v) => { setFilter(v); setPage(1); }}>
-          <SelectTrigger className="w-[190px]" aria-label="Filter rincian"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Semua</SelectItem>
-            <SelectItem value="7">Siswa kelas 7</SelectItem>
-            <SelectItem value="8">Siswa kelas 8</SelectItem>
-            <SelectItem value="9">Siswa kelas 9</SelectItem>
-            <SelectItem value="lain">Donatur lainnya</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[560px] text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500">
-            <tr>
-              <th className="px-4 py-3 font-semibold">Tanggal</th>
-              <th className="px-4 py-3 font-semibold">Penyumbang</th>
-              <th className="px-4 py-3 font-semibold">Asal</th>
-              <th className="px-4 py-3 font-semibold">Sumber</th>
-              <th className="px-4 py-3 text-right font-semibold">Jumlah</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {view.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-10 text-center text-slate-500">Belum ada catatan.</td></tr>
-            )}
-            {view.map((r, i) => (
-              <tr key={`${r.tanggal}-${i}-${cur}`} className="hover:bg-slate-50/60">
-                <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">{formatTanggal(r.tanggal)}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{r.nama}</td>
-                <td className="px-4 py-2.5 text-slate-600">{r.kategori === "siswa" ? `Siswa kelas ${r.grade}` : KATEGORI_LABEL.donatur_lain}</td>
-                <td className="px-4 py-2.5">
-                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${r.sumber === "rekening" ? "bg-blue-50 text-blue-700" : "bg-emerald-50 text-emerald-700"}`}>
-                    {SUMBER_LABEL[r.sumber]}
-                  </span>
-                </td>
-                <td className="whitespace-nowrap px-4 py-2.5 text-right font-semibold tabular-nums text-slate-900">{formatRupiah(r.jumlah)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {pages > 1 && (
-        <div className="mt-3 flex items-center justify-between text-sm text-slate-600">
-          <span>Halaman {cur} dari {pages} · {filtered.length} catatan</span>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={cur <= 1} onClick={() => setPage(cur - 1)} aria-label="Halaman sebelumnya"><ChevronLeft className="h-4 w-4" /></Button>
-            <Button variant="outline" size="sm" disabled={cur >= pages} onClick={() => setPage(cur + 1)} aria-label="Halaman berikutnya"><ChevronRight className="h-4 w-4" /></Button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+import { formatTanggal, sisaHari } from "@/lib/komite";
 
 export default function Komite() {
   const { data, isLoading, isError, refetch } = useKomitePublik();
@@ -166,10 +86,11 @@ export default function Komite() {
                 </TabsList>
                 <TabsContent value="ringkasan">
                   <KomiteSummary data={data} />
+                  <KomitePerRombel rows={data.per_rombel ?? []} />
                 </TabsContent>
                 {data.tampilkan_rincian && (
                   <TabsContent value="rincian">
-                    <Rincian rows={data.rincian ?? []} namaMode={data.nama_publik} />
+                    <KomiteRincianTable rows={data.rincian ?? []} namaMode={data.nama_publik} />
                   </TabsContent>
                 )}
               </Tabs>
