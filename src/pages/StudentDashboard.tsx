@@ -40,6 +40,9 @@ import AttendanceLogList from "@/components/dashboard/AttendanceLogList";
 import { DesktopShell } from "@/components/student-dashboard/DesktopShell";
 import { StudentPhotoUploader } from "@/components/student-dashboard/StudentPhotoUploader";
 import { DesktopOverview, type DesktopStat } from "@/components/student-dashboard/DesktopOverview";
+import {
+  TONE, lazyRow, TabHeader, Chip, Panel, ListRow, StatBox, HeroRing, InfoGroup, type Tone,
+} from "@/components/student-dashboard/TabUi";
 import { useStudentDashboardView } from "@/hooks/useStudentDashboardView";
 import {
   safeFormatDate, calcPercent, DAY_NAMES, toMinutes, greetingFor, resolveLesson, humanMinutes,
@@ -92,12 +95,12 @@ const FONT_STACK = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 // ═══════════════════════════════════════════════════════════════════════════
 
 const EmptyState = memo(({ icon: Icon, title, subtitle }: { icon: any; title: string; subtitle?: string }) => (
-  <div className="text-center py-12">
-    <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-2xl flex items-center justify-center mx-auto mb-3">
-      <Icon className="h-8 w-8 text-gray-400" />
+  <div className="rounded-3xl border border-dashed border-slate-200 bg-white/60 px-4 py-10 text-center dark:border-slate-800 dark:bg-slate-900/40">
+    <div className="mx-auto mb-3 grid h-16 w-16 place-items-center rounded-2xl bg-[#E1F0FF] text-[#1E6FE0] dark:bg-slate-800">
+      <Icon className="h-8 w-8" aria-hidden="true" />
     </div>
-    <p className="text-base font-medium text-gray-800 dark:text-gray-100">{title}</p>
-    {subtitle && <p className="text-sm text-gray-400 mt-1">{subtitle}</p>}
+    <p className="text-base font-semibold text-balance text-slate-800 dark:text-slate-100">{title}</p>
+    {subtitle && <p className="mx-auto mt-1 max-w-xs text-sm text-balance text-slate-500 dark:text-slate-400">{subtitle}</p>}
   </div>
 ));
 EmptyState.displayName = 'EmptyState';
@@ -168,9 +171,9 @@ const CurrentLessonCard = memo(({ state, onOpenSchedule, actions }: {
 CurrentLessonCard.displayName = 'CurrentLessonCard';
 
 const LoadingState = memo(({ label = 'Memuat...' }: { label?: string }) => (
-  <div className="flex flex-col items-center justify-center py-12 gap-3">
-    <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
-    <p className="text-sm text-gray-400">{label}</p>
+  <div className="flex flex-col items-center justify-center gap-3 py-12" role="status" aria-live="polite">
+    <Loader2 className="h-6 w-6 animate-spin text-[#1E6FE0] motion-reduce:animate-none" aria-hidden="true" />
+    <p className="text-sm text-slate-500 dark:text-slate-400">{label}</p>
   </div>
 ));
 LoadingState.displayName = 'LoadingState';
@@ -185,13 +188,17 @@ const AttendanceBar = memo(({ summary }: { summary: AttendanceSummary | null }) 
   };
   return (
     <>
-      <div className="flex h-3 rounded-full overflow-hidden bg-gray-100 dark:bg-gray-800">
-        <div className="bg-emerald-500 h-full transition-all" style={{ width: `${p.hadir}%` }} />
-        <div className="bg-blue-500 h-full transition-all" style={{ width: `${p.izin}%` }} />
-        <div className="bg-amber-500 h-full transition-all" style={{ width: `${p.sakit}%` }} />
-        <div className="bg-red-500 h-full transition-all" style={{ width: `${p.alpa}%` }} />
+      <div
+        className="flex h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"
+        role="img"
+        aria-label={`Hadir ${p.hadir}%, izin ${p.izin}%, sakit ${p.sakit}%, alpa ${p.alpa}%`}
+      >
+        <div className="h-full bg-emerald-500 transition-[width] motion-reduce:transition-none" style={{ width: `${p.hadir}%` }} />
+        <div className="h-full bg-blue-500 transition-[width] motion-reduce:transition-none" style={{ width: `${p.izin}%` }} />
+        <div className="h-full bg-amber-500 transition-[width] motion-reduce:transition-none" style={{ width: `${p.sakit}%` }} />
+        <div className="h-full bg-red-500 transition-[width] motion-reduce:transition-none" style={{ width: `${p.alpa}%` }} />
       </div>
-      <div className="grid grid-cols-5 gap-2 text-center mt-3">
+      <div className="mt-3 grid grid-cols-5 gap-2 text-center">
         {[
           { label: 'Hadir', value: s.hadir, color: 'bg-emerald-500' },
           { label: 'Izin', value: s.izin, color: 'bg-blue-500' },
@@ -199,10 +206,10 @@ const AttendanceBar = memo(({ summary }: { summary: AttendanceSummary | null }) 
           { label: 'Alpa', value: s.alpa, color: 'bg-red-500' },
           { label: 'Telat', value: s.terlambat, color: 'bg-orange-500' },
         ].map((item) => (
-          <div key={item.label}>
-            <div className={`w-2.5 h-2.5 rounded-full ${item.color} inline-block`} />
-            <p className="text-xs text-gray-500 mt-1">{item.label}</p>
-            <p className="font-bold text-gray-800 dark:text-gray-100">{item.value}</p>
+          <div key={item.label} className="rounded-xl bg-slate-50 py-2 dark:bg-slate-800">
+            <span className={`inline-block h-2.5 w-2.5 rounded-full ${item.color}`} aria-hidden="true" />
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{item.label}</p>
+            <p className="text-base font-bold tabular-nums text-slate-900 dark:text-slate-100">{item.value}</p>
           </div>
         ))}
       </div>
@@ -366,6 +373,7 @@ const StudentDashboardPage = () => {
     currentPassword: '', newPassword: '', confirmPassword: '',
   });
   const [passwordLoading, setPasswordLoading] = useState(false);
+  const [showPw, setShowPw] = useState(false);
 
   const { selectedYear, selectedSemester } = useAcademicYear();
 
@@ -1077,47 +1085,52 @@ const StudentDashboardPage = () => {
   };
 
   const renderProfileTab = () => {
-    const items = [
-      { icon: Hash, label: 'NIS', value: student?.nis || '-', color: 'bg-blue-100 text-blue-600' },
-      { icon: Hash, label: 'NISN', value: student?.nisn || '-', color: 'bg-purple-100 text-purple-600' },
-      { icon: GraduationCap, label: 'Kelas', value: classInfo?.name || '-', color: 'bg-green-100 text-green-600' },
-      { icon: Users, label: 'Wali Kelas', value: classInfo?.teachers?.profiles?.full_name || '-', color: 'bg-yellow-100 text-yellow-600' },
-      { icon: User, label: 'Jenis Kelamin', value: student?.gender ? (student.gender === 'L' ? 'Laki-laki' : 'Perempuan') : '-', color: 'bg-blue-100 text-blue-600' },
-      { icon: CalendarDays, label: 'Tanggal Lahir', value: student?.birth_date ? safeFormatDate(student.birth_date, 'dd MMMM yyyy') : '-', color: 'bg-purple-100 text-purple-600' },
-      { icon: MapPin, label: 'Tempat Lahir', value: student?.birth_place || '-', color: 'bg-green-100 text-green-600' },
-      { icon: MapPin, label: 'Alamat', value: student?.address || '-', color: 'bg-yellow-100 text-yellow-600', multiline: true },
-      { icon: UserCircle, label: 'Orang Tua', value: student?.parent_name || '-', color: 'bg-blue-100 text-blue-600' },
-      { icon: Phone, label: 'No. HP', value: student?.parent_phone ? `+${student.parent_phone}` : '-', color: 'bg-green-100 text-green-600' },
-      { icon: IdCard, label: 'Status', value: student?.status === 'active' ? 'Aktif' : (student?.status || 'Aktif'), color: 'bg-purple-100 text-purple-600' },
-      { icon: CreditCard, label: 'RFID UID', value: student?.rfid_uid || 'Belum terdaftar', color: 'bg-yellow-100 text-yellow-600' },
-    ];
-
+    const genderLabel = student?.gender ? (student.gender === 'L' ? 'Laki-laki' : 'Perempuan') : '-';
     return (
       <div className="space-y-4 p-4">
-        <div className="bg-[#1E6FE0] rounded-2xl p-5 text-white shadow-sm">
-          <div className="flex items-center gap-4">
+        <div className={`${INK} relative overflow-hidden rounded-3xl p-5 text-white shadow-[0_10px_30px_-12px_rgba(30,111,224,0.55)]`}>
+          <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10" aria-hidden="true" />
+          <div className="relative flex items-center gap-4">
             <StudentPhotoUploader userId={user?.id || ''} name={student?.full_name} photoUrl={student?.photo_url} />
-            <div className="flex-1 min-w-0">
-              <h2 className="text-lg font-bold truncate">{student?.full_name || 'Siswa'}</h2>
-              <p className="text-blue-100 text-sm">{classInfo?.name || 'Kelas belum diatur'}</p>
-              <div className="flex gap-2 mt-2">
-                <Badge className="bg-white/20 text-xs">Aktif</Badge>
-                {student?.is_alumni && <Badge className="bg-white/20 text-xs">Alumni</Badge>}
+            <div className="min-w-0 flex-1">
+              <h2 className="truncate text-lg font-bold">{student?.full_name || 'Siswa'}</h2>
+              <p className="truncate text-sm text-white/85">{classInfo?.name || 'Kelas belum diatur'}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <span className="rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-medium backdrop-blur">
+                  {student?.status === 'active' || !student?.status ? 'Aktif' : student.status}
+                </span>
+                {student?.is_alumni && <span className="rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-medium backdrop-blur">Alumni</span>}
               </div>
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          {items.map((item: any) => (
-            <div key={item.label} className={`bg-white dark:bg-gray-900 rounded-xl p-3 shadow-sm border border-gray-100 dark:border-gray-800 ${item.multiline ? 'col-span-2' : ''}`}>
-              <div className={`w-8 h-8 rounded-full ${item.color} flex items-center justify-center mb-2`}>
-                <item.icon className="h-4 w-4" />
-              </div>
-              <p className="text-xs text-gray-400">{item.label}</p>
-              <p className="text-sm font-semibold text-gray-800 dark:text-gray-100 line-clamp-2">{item.value}</p>
-            </div>
-          ))}
-        </div>
+
+        <InfoGroup
+          title="Data Akademik"
+          items={[
+            { icon: Hash, label: 'NIS', value: student?.nis || '-', tone: 'blue' },
+            { icon: Hash, label: 'NISN', value: student?.nisn || '-', tone: 'violet' },
+            { icon: GraduationCap, label: 'Kelas', value: classInfo?.name || '-', tone: 'emerald' },
+            { icon: Users, label: 'Wali Kelas', value: classInfo?.teachers?.profiles?.full_name || '-', tone: 'amber' },
+          ]}
+        />
+        <InfoGroup
+          title="Data Pribadi"
+          items={[
+            { icon: User, label: 'Jenis Kelamin', value: genderLabel, tone: 'blue' },
+            { icon: CalendarDays, label: 'Tanggal Lahir', value: student?.birth_date ? safeFormatDate(student.birth_date, 'dd MMMM yyyy') : '-', tone: 'violet' },
+            { icon: MapPin, label: 'Tempat Lahir', value: student?.birth_place || '-', tone: 'emerald' },
+            { icon: MapPin, label: 'Alamat', value: student?.address || '-', tone: 'amber' },
+          ]}
+        />
+        <InfoGroup
+          title="Orang Tua & Kartu"
+          items={[
+            { icon: UserCircle, label: 'Orang Tua', value: student?.parent_name || '-', tone: 'blue' },
+            { icon: Phone, label: 'No. HP Orang Tua', value: student?.parent_phone ? `+${student.parent_phone}` : '-', tone: 'emerald' },
+            { icon: CreditCard, label: 'RFID UID', value: student?.rfid_uid || 'Belum terdaftar', tone: 'amber' },
+          ]}
+        />
       </div>
     );
   };
@@ -1230,116 +1243,118 @@ const StudentDashboardPage = () => {
     );
   };
 
-  const renderGradesTab = () => (
-    <div className="p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">Nilai Akademik</h2>
-        <Badge className="bg-blue-100 text-blue-700 text-xs">{grades?.length || 0} Mapel</Badge>
-      </div>
-      <AcademicYearSelector />
-      <p className="text-[11px] text-gray-400">Nilai mapel yang disembunyikan oleh guru tidak ditampilkan.</p>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="bg-[#1E6FE0] rounded-2xl p-4 text-white shadow-sm">
-          <p className="text-blue-100 text-xs">Rata-rata</p>
-          <p className="text-3xl font-extrabold">{averageGrade ?? '-'}</p>
+  const renderGradesTab = () => {
+    const avg = averageGrade != null ? parseFloat(averageGrade) : null;
+    return (
+      <div className="space-y-4 p-4">
+        <TabHeader title="Nilai Akademik" subtitle="Nilai mapel yang disembunyikan guru tidak ditampilkan." />
+        <AcademicYearSelector />
+
+        <div className={`${INK} relative flex items-center gap-4 overflow-hidden rounded-3xl p-5 text-white shadow-[0_10px_30px_-12px_rgba(30,111,224,0.55)]`}>
+          <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10" aria-hidden="true" />
+          <HeroRing value={avg} caption="rata-rata" />
+          <div className="relative min-w-0">
+            <p className="text-xs text-white/80">Rata-rata nilai akhir</p>
+            <p className="text-4xl font-extrabold tabular-nums leading-tight">{averageGrade ?? '-'}</p>
+            <p className="text-sm text-white/85">{grades?.length || 0} mata pelajaran</p>
+          </div>
         </div>
-        <div className="bg-white dark:bg-gray-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-800">
-          <p className="text-xs text-gray-400">Jumlah Nilai</p>
-          <p className="text-3xl font-extrabold text-gray-800 dark:text-gray-100">{grades?.length || 0}</p>
-        </div>
+
+        {gradesLoading ? (
+          <LoadingState label="Memuat nilai..." />
+        ) : grades && grades.length > 0 ? (
+          <ul className="space-y-3">
+            {grades.map((grade: any) => {
+              const score = typeof grade.final_grade === 'number' ? grade.final_grade : null;
+              const tone: Tone = score == null ? 'slate' : score >= 80 ? 'emerald' : score >= 70 ? 'blue' : 'red';
+              return (
+                <li key={grade.id} style={lazyRow(150)} className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                      {grade.schedules?.subject || grade.sched_subject}
+                    </p>
+                    <span className={`text-xl font-bold tabular-nums ${TONE[tone].text}`}>{score != null ? score.toFixed(1) : '-'}</span>
+                  </div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800" aria-hidden="true">
+                    <div className={`h-full rounded-full ${TONE[tone].bar}`} style={{ width: `${Math.max(0, Math.min(100, score ?? 0))}%` }} />
+                  </div>
+                  <div className="mt-3 grid grid-cols-5 gap-1.5 text-center">
+                    {[
+                      { label: 'Tugas', value: grade.tugas }, { label: 'Kuis', value: grade.kuis },
+                      { label: 'UTS', value: grade.uts }, { label: 'UAS', value: grade.uas },
+                      { label: 'Praktik', value: grade.praktik },
+                    ].map((item) => (
+                      <div key={item.label} className="rounded-xl bg-slate-50 py-1.5 dark:bg-slate-800">
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400">{item.label}</p>
+                        <p className="text-sm font-semibold tabular-nums text-slate-900 dark:text-slate-100">{item.value ?? '-'}</p>
+                      </div>
+                    ))}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <EmptyState icon={BookOpen} title="Belum ada nilai" />
+        )}
       </div>
-      <div className="space-y-2">
-        {gradesLoading ? <LoadingState label="Memuat nilai..." /> :
-          grades && grades.length > 0 ? grades.map((grade: any) => {
-            const score = grade.final_grade ?? 0;
-            const color = score >= 80 ? 'text-emerald-600' : score >= 70 ? 'text-blue-600' : 'text-red-600';
-            return (
-              <div key={grade.id} className="bg-white dark:bg-gray-900 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-800">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="font-semibold text-sm text-gray-800 dark:text-gray-100 truncate flex-1">{grade.schedules?.subject || grade.sched_subject}</p>
-                  <span className={`text-lg font-bold ${color}`}>{typeof grade.final_grade === 'number' ? grade.final_grade.toFixed(1) : '-'}</span>
-                </div>
-                <div className="grid grid-cols-5 gap-1 text-center">
-                  {[
-                    { label: 'Tugas', value: grade.tugas }, { label: 'Kuis', value: grade.kuis },
-                    { label: 'UTS', value: grade.uts }, { label: 'UAS', value: grade.uas },
-                    { label: 'Praktik', value: grade.praktik },
-                  ].map((item) => (
-                    <div key={item.label} className="bg-gray-50 dark:bg-gray-800 rounded-lg py-1">
-                      <p className="text-[10px] text-gray-400">{item.label}</p>
-                      <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">{item.value ?? '-'}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          }) : <EmptyState icon={BookOpen} title="Belum ada nilai" />
-        }
-      </div>
-    </div>
-  );
+    );
+  };
 
   const renderAttendanceTab = () => (
-    <div className="p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">Detail Kehadiran</h2>
-        <Badge variant="outline" className="text-[10px] gap-1">
-          <Wifi className="w-3 h-3" /> RFID + Manual
-        </Badge>
-      </div>
+    <div className="space-y-4 p-4">
+      <TabHeader
+        title="Detail Kehadiran"
+        right={<Chip tone="blue"><Wifi className="mr-1 h-3 w-3" aria-hidden="true" />RFID + Manual</Chip>}
+      />
 
-      <div className="bg-gradient-to-br from-emerald-400 to-teal-600 rounded-2xl p-5 text-white shadow-sm">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-emerald-100 text-xs">Persentase Kehadiran</p>
-            <h2 className="text-4xl font-extrabold mt-1">{attendancePercentage}%</h2>
-            <p className="text-emerald-100 text-sm mt-1">
-              {attendanceSummary?.hadir || 0} dari {attendanceSummary?.total || 0} hari
-            </p>
-          </div>
-          <div className="w-14 h-14 bg-white/20 rounded-full flex items-center justify-center">
-            <CheckCircle className="h-7 w-7" />
-          </div>
+      <div className="relative flex items-center gap-4 overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-500 to-teal-600 p-5 text-white shadow-[0_10px_30px_-12px_rgba(5,150,105,0.55)]">
+        <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10" aria-hidden="true" />
+        <HeroRing value={Number(attendancePercentage) || 0} caption="hadir" />
+        <div className="relative min-w-0">
+          <p className="text-xs text-white/85">Persentase kehadiran</p>
+          <p className="text-4xl font-extrabold tabular-nums leading-tight">{attendancePercentage}%</p>
+          <p className="text-sm text-white/90 tabular-nums">
+            {attendanceSummary?.hadir || 0} dari {attendanceSummary?.total || 0} hari
+          </p>
         </div>
       </div>
 
-      <div className="bg-white dark:bg-gray-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-800">
+      <Panel>
         <AttendanceBar summary={attendanceSummary || null} />
-      </div>
+      </Panel>
 
       <AttendanceTrendChart logs={attendanceLogs} loading={logsLoading} />
 
-      <div className="bg-white dark:bg-gray-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-800">
-        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100 mb-2">Log Absensi</h3>
+      <Panel>
+        <h3 className="mb-2 text-sm font-bold text-slate-900 dark:text-slate-100">Log Absensi</h3>
         <AttendanceLogList logs={attendanceLogs} loading={logsLoading} />
-      </div>
+      </Panel>
     </div>
   );
 
   const renderViolationsTab = () => (
-    <div className="p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">Pelanggaran</h2>
-        <Badge className={`text-xs ${totalViolationPoints === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-          {totalViolationPoints} Poin
-        </Badge>
-      </div>
+    <div className="space-y-4 p-4">
+      <TabHeader
+        title="Pelanggaran"
+        subtitle={totalViolationPoints === 0 ? 'Tidak ada poin pelanggaran.' : 'Total poin pelanggaran saat ini.'}
+        right={<Chip tone={totalViolationPoints === 0 ? 'emerald' : 'red'}>{totalViolationPoints} Poin</Chip>}
+      />
       {violations ? violations.length > 0 ? (
-        <div className="space-y-2">
+        <ul className="space-y-2.5">
           {violations.map((v: any) => (
-            <div key={v.id} className="bg-white dark:bg-gray-900 rounded-xl p-4 shadow-sm border border-red-100 dark:border-red-900/30 flex items-start gap-3">
-              <div className="w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center shrink-0">
-                <XCircle className="h-5 w-5 text-red-500" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-sm text-gray-800 dark:text-gray-100">{v.violation_types?.name}</p>
-                <p className="text-xs text-gray-500 mt-1">{safeFormatDate(v.violation_date, 'dd MMMM yyyy')}</p>
-                {v.notes && <p className="text-xs text-gray-400 mt-1 italic">"{v.notes}"</p>}
-              </div>
-              <Badge variant="destructive" className="text-xs shrink-0">{v.points} Poin</Badge>
-            </div>
+            <ListRow
+              key={v.id}
+              icon={XCircle}
+              tone="red"
+              title={v.violation_types?.name}
+              meta={safeFormatDate(v.violation_date, 'dd MMMM yyyy')}
+              trailing={<Chip tone="red">{v.points} Poin</Chip>}
+            >
+              {v.notes && <p className="mt-1 text-xs italic text-slate-500 dark:text-slate-400">"{v.notes}"</p>}
+            </ListRow>
           ))}
-        </div>
+        </ul>
       ) : (
         <EmptyState icon={Sparkles} title="Bersih!" subtitle="Tidak ada pelanggaran" />
       ) : <LoadingState />}
@@ -1347,27 +1362,23 @@ const StudentDashboardPage = () => {
   );
 
   const renderAchievementsTab = () => (
-    <div className="p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">Prestasi</h2>
-        <Badge className="bg-amber-100 text-amber-700 text-xs">{achievements?.length || 0} Penghargaan</Badge>
-      </div>
+    <div className="space-y-4 p-4">
+      <TabHeader title="Prestasi" right={<Chip tone="amber">{achievements?.length || 0} Penghargaan</Chip>} />
       {achievements ? achievements.length > 0 ? (
-        <div className="space-y-2">
+        <ul className="space-y-2.5">
           {achievements.map((a: any) => (
-            <div key={a.id} className="bg-white dark:bg-gray-900 rounded-xl p-4 shadow-sm border border-amber-100 dark:border-amber-900/30 flex items-start gap-3">
-              <div className="w-10 h-10 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center shrink-0">
-                <Medal className="h-5 w-5 text-amber-500" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-sm text-gray-800 dark:text-gray-100">{a.title}</p>
-                <p className="text-xs text-gray-500 mt-1">{safeFormatDate(a.achievement_date, 'dd MMMM yyyy')}</p>
-                {a.description && <p className="text-xs text-gray-400 mt-1 line-clamp-2">{a.description}</p>}
-              </div>
-              <span className="text-xs px-2 py-1 rounded-full font-medium bg-gray-100 text-gray-700 shrink-0">{a.level || 'Sekolah'}</span>
-            </div>
+            <ListRow
+              key={a.id}
+              icon={Medal}
+              tone="amber"
+              title={a.title}
+              meta={safeFormatDate(a.achievement_date, 'dd MMMM yyyy')}
+              trailing={<Chip tone="slate">{a.level || 'Sekolah'}</Chip>}
+            >
+              {a.description && <p className="mt-1 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{a.description}</p>}
+            </ListRow>
           ))}
-        </div>
+        </ul>
       ) : (
         <EmptyState icon={Star} title="Belum ada prestasi" subtitle="Terus semangat!" />
       ) : <LoadingState />}
@@ -1375,43 +1386,33 @@ const StudentDashboardPage = () => {
   );
 
   const renderEkskulTab = () => (
-    <div className="p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">Ekstrakurikuler</h2>
-        <Badge className="bg-orange-100 text-orange-700 text-xs">
-          {myEkskul?.filter((e) => e.status === 'aktif').length || 0} Aktif
-        </Badge>
-      </div>
+    <div className="space-y-4 p-4">
+      <TabHeader title="Ekstrakurikuler" right={<Chip tone="orange">{myEkskul?.filter((e) => e.status === 'aktif').length || 0} Aktif</Chip>} />
       {ekskulLoading ? <LoadingState /> : ekskulError ? (
         <EmptyState icon={AlertCircle} title="Gagal memuat ekstrakurikuler" subtitle="Coba muat ulang halaman" />
       ) : myEkskul && myEkskul.length > 0 ? (
-        <div className="space-y-2">
+        <ul className="space-y-2.5">
           {myEkskul.map((e) => (
-            <div key={e.member_id} className="bg-white dark:bg-gray-900 rounded-xl p-4 shadow-sm border border-orange-100 dark:border-orange-900/30 flex items-start gap-3">
-              <div className="w-10 h-10 bg-orange-100 dark:bg-orange-900/30 rounded-full flex items-center justify-center shrink-0">
-                <Users className="h-5 w-5 text-orange-500" />
+            <ListRow
+              key={e.member_id}
+              icon={Users}
+              tone="orange"
+              title={e.name}
+              trailing={<Chip tone={e.status === 'aktif' ? 'emerald' : 'slate'}>{e.status === 'aktif' ? 'Aktif' : 'Nonaktif'}</Chip>}
+            >
+              {e.description && <p className="mt-1 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{e.description}</p>}
+              <div className="mt-2 space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
+                {e.coaches && <p>Pembina: <span className="text-slate-700 dark:text-slate-200">{e.coaches}</span></p>}
+                {e.joined_at && <p>Bergabung: {safeFormatDate(e.joined_at, 'dd MMMM yyyy')}</p>}
+                <p>
+                  {e.meeting_count} pertemuan tercatat
+                  {e.last_meeting ? ` · terakhir ${safeFormatDate(e.last_meeting, 'dd MMM yyyy')}` : ''}
+                </p>
+                {e.notes && <p className="italic">{e.notes}</p>}
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="font-semibold text-sm text-gray-800 dark:text-gray-100">{e.name}</p>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${e.status === 'aktif' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>
-                    {e.status === 'aktif' ? 'Aktif' : 'Nonaktif'}
-                  </span>
-                </div>
-                {e.description && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{e.description}</p>}
-                <div className="mt-2 space-y-0.5 text-xs text-gray-500">
-                  {e.coaches && <p>Pembina: <span className="text-gray-700 dark:text-gray-300">{e.coaches}</span></p>}
-                  {e.joined_at && <p>Bergabung: {safeFormatDate(e.joined_at, 'dd MMMM yyyy')}</p>}
-                  <p>
-                    {e.meeting_count} pertemuan tercatat
-                    {e.last_meeting ? ` · terakhir ${safeFormatDate(e.last_meeting, 'dd MMM yyyy')}` : ''}
-                  </p>
-                  {e.notes && <p className="italic">{e.notes}</p>}
-                </div>
-              </div>
-            </div>
+            </ListRow>
           ))}
-        </div>
+        </ul>
       ) : (
         <EmptyState icon={Users} title="Belum mengikuti ekstrakurikuler" subtitle="Hubungi pembina atau kesiswaan untuk mendaftar" />
       )}
@@ -1419,25 +1420,16 @@ const StudentDashboardPage = () => {
   );
 
   const renderAnnouncementsTab = () => (
-    <div className="p-4 space-y-4">
-      <h2 className="text-lg font-bold">Pengumuman</h2>
+    <div className="space-y-4 p-4">
+      <TabHeader title="Pengumuman" />
       {announcements ? announcements.length > 0 ? (
-        <div className="space-y-2">
+        <ul className="space-y-2.5">
           {announcements.map((a: any) => (
-            <div key={a.id} className="bg-white dark:bg-gray-900 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-800">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 bg-blue-50 dark:bg-blue-900/30 rounded-full flex items-center justify-center shrink-0">
-                  <Bell className="h-5 w-5 text-blue-500" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm text-gray-800 dark:text-gray-100">{a.title}</p>
-                  <p className="text-xs text-gray-500 mt-1 line-clamp-3">{a.content}</p>
-                  <p className="text-xs text-gray-400 mt-2">{safeFormatDate(a.created_at, 'dd MMMM yyyy')}</p>
-                </div>
-              </div>
-            </div>
+            <ListRow key={a.id} icon={Bell} tone="blue" title={a.title} meta={safeFormatDate(a.created_at, 'dd MMMM yyyy')}>
+              <p className="mt-1.5 line-clamp-3 text-sm text-slate-600 dark:text-slate-300">{a.content}</p>
+            </ListRow>
           ))}
-        </div>
+        </ul>
       ) : <EmptyState icon={Bell} title="Tidak ada pengumuman" /> : <LoadingState />}
     </div>
   );
@@ -1455,49 +1447,36 @@ const StudentDashboardPage = () => {
     });
     const jam = (ts: string) => new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Jakarta' }).format(new Date(ts)).replace('.', ':');
     return (
-      <div className="p-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold">Absensi Salat</h2>
-          <Badge className="bg-emerald-100 text-emerald-700 text-xs">{thisMonth.length} bulan ini</Badge>
-        </div>
+      <div className="space-y-4 p-4">
+        <TabHeader title="Absensi Salat" right={<Chip tone="emerald">{thisMonth.length} bulan ini</Chip>} />
         {prayerLogs ? (
           <>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="rounded-xl bg-white dark:bg-gray-900 p-3 text-center shadow-sm border border-gray-100 dark:border-gray-800">
-                <p className="text-xl font-bold text-emerald-600">{thisMonth.length}</p><p className="text-[11px] text-gray-500">Salat bulan ini</p>
-              </div>
-              <div className="rounded-xl bg-white dark:bg-gray-900 p-3 text-center shadow-sm border border-gray-100 dark:border-gray-800">
-                <p className="text-xl font-bold text-amber-600">{late}</p><p className="text-[11px] text-gray-500">Terlambat</p>
-              </div>
-              <div className="rounded-xl bg-white dark:bg-gray-900 p-3 text-center shadow-sm border border-gray-100 dark:border-gray-800">
-                <p className="text-xl font-bold text-sky-600">{logs.filter((l: any) => l.date === format(new Date(), 'yyyy-MM-dd')).length}</p><p className="text-[11px] text-gray-500">Hari ini</p>
-              </div>
+            <div className="grid grid-cols-3 gap-2.5">
+              <StatBox label="Salat bulan ini" value={thisMonth.length} tone="emerald" />
+              <StatBox label="Terlambat" value={late} tone="amber" />
+              <StatBox label="Hari ini" value={logs.filter((l: any) => l.date === format(new Date(), 'yyyy-MM-dd')).length} tone="blue" />
             </div>
             {groups.length > 0 ? (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {groups.map((g) => (
                   <div key={g.date}>
-                    <p className="mb-1 text-xs font-semibold text-gray-500">{safeFormatDate(g.date, 'EEEE, dd MMMM yyyy')}</p>
-                    <div className="space-y-2">
+                    <p className="mb-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">{safeFormatDate(g.date, 'EEEE, dd MMMM yyyy')}</p>
+                    <ul className="space-y-2">
                       {g.items.map((l: any) => (
-                        <div key={l.id} className="bg-white dark:bg-gray-900 rounded-xl p-3 shadow-sm border border-gray-100 dark:border-gray-800 flex items-center gap-3">
-                          <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center shrink-0">
-                            <Star className="h-5 w-5 text-emerald-600" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-sm text-gray-800 dark:text-gray-100">{l.prayer_types?.name ?? 'Salat'}</p>
-                            <p className="text-xs text-gray-500">{jam(l.punched_at)} WIB · {l.source === 'fingerprint' ? 'Mesin fingerprint' : l.source === 'rfid' ? 'Kartu RFID' : 'Dicatat manual'}</p>
-                          </div>
-                          <Badge className={`text-xs shrink-0 ${l.status === 'terlambat' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                            {l.status === 'terlambat' ? 'Terlambat' : 'Tepat waktu'}
-                          </Badge>
-                        </div>
+                        <ListRow
+                          key={l.id}
+                          icon={Star}
+                          tone="emerald"
+                          title={l.prayer_types?.name ?? 'Salat'}
+                          meta={`${jam(l.punched_at)} WIB · ${l.source === 'fingerprint' ? 'Mesin fingerprint' : l.source === 'rfid' ? 'Kartu RFID' : 'Dicatat manual'}`}
+                          trailing={<Chip tone={l.status === 'terlambat' ? 'amber' : 'emerald'}>{l.status === 'terlambat' ? 'Terlambat' : 'Tepat waktu'}</Chip>}
+                        />
                       ))}
-                    </div>
+                    </ul>
                   </div>
                 ))}
                 {logs.length > prayerShown && (
-                  <Button variant="outline" className="w-full" onClick={() => setPrayerShown((n) => n + 30)}>Tampilkan lebih banyak</Button>
+                  <Button variant="outline" className="w-full rounded-full" onClick={() => setPrayerShown((n) => n + 30)}>Tampilkan lebih banyak</Button>
                 )}
               </div>
             ) : (
@@ -1512,65 +1491,85 @@ const StudentDashboardPage = () => {
   };
 
   const renderDispensasiTab = () => (
-    <div className="p-4 space-y-4">
-      <h2 className="text-lg font-bold">Riwayat Dispensasi</h2>
+    <div className="space-y-4 p-4">
+      <TabHeader title="Riwayat Dispensasi" />
       {dispensations ? dispensations.length > 0 ? (
-        <div className="space-y-2">
+        <ul className="space-y-2.5">
           {dispensations.map((d: any) => (
-            <div key={d.id} className="bg-white dark:bg-gray-900 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-800 flex items-start gap-3">
-              <div className="w-10 h-10 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center shrink-0">
-                <Clock className="h-5 w-5 text-amber-500" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-sm text-gray-800 dark:text-gray-100">
-                  {safeFormatDate(d.dispensation_date, 'dd MMMM yyyy')}
-                </p>
-                <p className="text-xs text-gray-500 mt-1 line-clamp-2">{d.reason}</p>
-                <Badge className="bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 text-xs mt-2 capitalize">
-                  {d.reason_category}
-                </Badge>
-              </div>
-            </div>
+            <ListRow
+              key={d.id}
+              icon={Clock}
+              tone="amber"
+              title={safeFormatDate(d.dispensation_date, 'dd MMMM yyyy')}
+              trailing={<Chip tone="slate"><span className="capitalize">{d.reason_category}</span></Chip>}
+            >
+              <p className="mt-1 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{d.reason}</p>
+            </ListRow>
           ))}
-        </div>
+        </ul>
       ) : <EmptyState icon={CheckCircle} title="Tidak ada dispensasi" /> : <LoadingState />}
     </div>
   );
 
-  const renderSettingsTab = () => (
-    <div className="p-4 space-y-4">
-      <h2 className="text-lg font-bold">Pengaturan</h2>
-      <div className="bg-white dark:bg-gray-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-800">
-        <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
-          <Phone className="h-4 w-4 text-blue-500" /> Informasi Kontak
-        </h3>
-        <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-xl">
-          <div className="flex items-center gap-2 min-w-0">
-            <Mail className="h-4 w-4 text-blue-500 shrink-0" />
-            <span className="text-sm text-gray-500">Email</span>
+  const renderSettingsTab = () => {
+    const field = 'h-11 rounded-xl';
+    return (
+      <div className="space-y-4 p-4">
+        <TabHeader title="Pengaturan" />
+        <Panel>
+          <h3 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100">
+            <Phone className="h-4 w-4 text-[#1E6FE0]" aria-hidden="true" /> Informasi Kontak
+          </h3>
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-3 dark:bg-slate-800">
+            <span className="flex shrink-0 items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+              <Mail className="h-4 w-4 text-[#1E6FE0]" aria-hidden="true" /> Email
+            </span>
+            <span className="min-w-0 truncate text-sm font-medium text-slate-900 dark:text-slate-100">{user?.email}</span>
           </div>
-          <span className="text-sm font-medium truncate max-w-[140px]">{user?.email}</span>
-        </div>
+        </Panel>
+        <Panel>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100">
+              <Lock className="h-4 w-4 text-[#1E6FE0]" aria-hidden="true" /> Keamanan
+            </h3>
+            <button
+              type="button"
+              onClick={() => setShowPw((v) => !v)}
+              className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1E6FE0] dark:text-slate-300 dark:hover:bg-slate-800"
+              aria-pressed={showPw}
+            >
+              {showPw ? <EyeOff className="h-3.5 w-3.5" aria-hidden="true" /> : <Eye className="h-3.5 w-3.5" aria-hidden="true" />}
+              {showPw ? 'Sembunyikan' : 'Tampilkan'}
+            </button>
+          </div>
+          <form
+            className="space-y-3"
+            onSubmit={(e) => { e.preventDefault(); handleChangePassword(); }}
+          >
+            <div className="space-y-1">
+              <label htmlFor="pw-old" className="text-xs font-medium text-slate-600 dark:text-slate-300">Password lama</label>
+              <Input id="pw-old" className={field} type={showPw ? 'text' : 'password'} autoComplete="current-password" value={passwordForm.currentPassword}
+                onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="pw-new" className="text-xs font-medium text-slate-600 dark:text-slate-300">Password baru (min 6 karakter)</label>
+              <Input id="pw-new" className={field} type={showPw ? 'text' : 'password'} autoComplete="new-password" value={passwordForm.newPassword}
+                onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="pw-confirm" className="text-xs font-medium text-slate-600 dark:text-slate-300">Konfirmasi password baru</label>
+              <Input id="pw-confirm" className={field} type={showPw ? 'text' : 'password'} autoComplete="new-password" value={passwordForm.confirmPassword}
+                onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })} />
+            </div>
+            <Button type="submit" disabled={passwordLoading} className="h-11 w-full rounded-full bg-[#1E6FE0] text-sm font-semibold hover:bg-[#1A60C4]">
+              {passwordLoading ? <Loader2 className="mr-1 h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Save className="mr-1 h-4 w-4" />}
+              Simpan Password
+            </Button>
+          </form>
+        </Panel>
       </div>
-      <div className="bg-white dark:bg-gray-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-800">
-        <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
-          <Lock className="h-4 w-4 text-primary" /> Keamanan
-        </h3>
-        <div className="space-y-3">
-          <Input type="password" placeholder="Password Lama" value={passwordForm.currentPassword}
-            onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })} />
-          <Input type="password" placeholder="Password Baru (min 6 karakter)" value={passwordForm.newPassword}
-            onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })} />
-          <Input type="password" placeholder="Konfirmasi Password Baru" value={passwordForm.confirmPassword}
-            onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })} />
-          <Button onClick={handleChangePassword} disabled={passwordLoading} className="w-full text-sm">
-            {passwordLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Save className="w-4 h-4 mr-1" />}
-            Simpan Password
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
+    );
+  };
 
   const renderContent = () => {
     switch (activeTab) {
@@ -1712,7 +1711,7 @@ const StudentDashboardPage = () => {
   );
 
   const mobileView = (
-    <div className={`min-h-screen bg-[#F1F6FD] dark:bg-slate-950 pb-28 ${canChoose ? 'mx-auto max-w-md shadow-2xl' : ''}`} style={{ fontFamily: FONT_STACK }}>
+    <div className={`min-h-dvh bg-[#F1F6FD] dark:bg-slate-950 pb-28 ${canChoose ? 'mx-auto max-w-md shadow-2xl' : ''}`} style={{ fontFamily: FONT_STACK }}>
       {/* HEADER */}
       {(() => {
         const isHome = activeTab === 'overview' || !['schedule', 'idcard', 'grades', 'elearning', 'profile', 'attendance', 'violations', 'achievements', 'ekskul', 'announcements', 'dispensasi', 'salat', 'uploads', 'settings'].includes(activeTab);
@@ -1903,7 +1902,7 @@ const StudentDashboardPage = () => {
       <main>{renderContent()}</main>
 
       {/* BOTTOM NAV */}
-      <nav aria-label="Navigasi utama" className="fixed bottom-3 left-3 right-3 z-50 mx-auto max-w-md">
+      <nav aria-label="Navigasi utama" className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 z-50 mx-auto max-w-md">
         <div className="grid grid-cols-5 gap-1 rounded-2xl bg-white/95 dark:bg-slate-900/95 backdrop-blur border border-slate-200 dark:border-slate-800 p-1.5 shadow-[0_8px_24px_-8px_rgba(30,111,224,0.4)]">
           {[
             { tab: 'overview', label: 'Beranda', icon: Home },
