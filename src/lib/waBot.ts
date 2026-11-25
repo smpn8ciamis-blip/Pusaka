@@ -305,6 +305,31 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     defaultBody: `🚨 *PELANGGARAN UJIAN (CBT)*\n\nYth. {{nama_pengawas}},\nSiswa di ruang yang Bapak/Ibu awasi melanggar aturan ujian:\n\n• Siswa: *{{nama_siswa}}* ({{kelas}})\n• Ruang: *{{ruang}}*{{meja}}\n• Pelanggaran: *{{pelanggaran}}* ({{jumlah}})\n• Ujian: {{ujian}}\n• Waktu: {{jam}} WIB\n\nMohon dicek ke tempat duduk siswa tersebut.\n\n_Pusaka - SMP Negeri 8 Ciamis_`,
   },
   {
+    key: 'monthly_recap_class',
+    title: 'Rekap Bulanan: Keterangan PDF Grup Kelas',
+    description: 'Teks yang menyertai file PDF rekap kehadiran bulanan di grup tiap kelas (dikirim otomatis pada hari terakhir bulan).',
+    variables: [
+      { name: 'kelas', sample: '9E_2026/2027', hint: 'Nama kelas' },
+      { name: 'periode', sample: '1 November 2026 s/d 30 November 2026', hint: 'Periode rekap' },
+      { name: 'rata_hadir', sample: '93%', hint: 'Rata-rata kehadiran kelas' },
+      { name: 'jumlah_siswa', sample: '31', hint: 'Jumlah siswa aktif' },
+      { name: 'hari_efektif', sample: '18', hint: 'Jumlah hari yang punya data absensi' },
+    ],
+    defaultBody: `📊 *REKAP KEHADIRAN SISWA KELAS {{kelas}}*\nPeriode: {{periode}}\n\nRata-rata kehadiran: *{{rata_hadir}}*\nSiswa: {{jumlah_siswa}} · Hari belajar tercatat: {{hari_efektif}}\n\nRincian per tanggal ada pada file PDF terlampir.\n_Pusaka - SMP Negeri 8 Ciamis_`,
+  },
+  {
+    key: 'monthly_recap_main',
+    title: 'Rekap Bulanan: Keterangan PDF Grup Utama',
+    description: 'Teks yang menyertai file PDF gabungan semua rombel di grup utama sekolah.',
+    variables: [
+      { name: 'periode', sample: '1 November 2026 s/d 30 November 2026', hint: 'Periode rekap' },
+      { name: 'jumlah_kelas', sample: '27', hint: 'Jumlah rombel dalam file' },
+      { name: 'jumlah_siswa', sample: '850', hint: 'Jumlah siswa aktif seluruhnya' },
+      { name: 'rata_hadir', sample: '94%', hint: 'Rata-rata kehadiran seluruh rombel' },
+    ],
+    defaultBody: `📊 *REKAP KEHADIRAN SEMUA ROMBEL*\nPeriode: {{periode}}\n\nJumlah rombel: {{jumlah_kelas}} · Siswa: {{jumlah_siswa}}\nRata-rata kehadiran: *{{rata_hadir}}*\n\nSetiap rombel pada halaman tersendiri di file PDF terlampir.\n_Pusaka - SMP Negeri 8 Ciamis_`,
+  },
+  {
     key: 'sender_autoreply',
     title: 'Nomor Pengirim Tambahan: Balasan Otomatis',
     description: 'Dikirim sekali per 12 jam bila seseorang membalas/chat ke nomor pengirim tambahan. Nomor tambahan hanya mengirim notifikasi, jadi pesannya mengarahkan ke nomor utama.',

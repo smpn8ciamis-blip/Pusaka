@@ -315,6 +315,8 @@ DEFAULT_TEMPLATES.assignment_followup = `⏰ *PENGINGAT BUKTI KUNJUNGAN*\n\nYth.
 DEFAULT_TEMPLATES.parent_points = `⚠️ *POIN PELANGGARAN*\n\nSiswa: *{{nama_siswa}}* ({{kelas}})\nTotal poin: *{{total_poin}}* ({{jumlah_catatan}} catatan)\n\n{{rincian}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.parent_violation_new = `⚠️ *PELANGGARAN BARU*\n\nYth. Bapak/Ibu Orang Tua/Wali,\nAnanda *{{nama_siswa}}* ({{kelas}}) mendapat catatan pelanggaran:\n• Tanggal: {{tanggal}}\n• Pelanggaran: *{{pelanggaran}}* ({{kategori}})\n• Poin: *+{{poin}}*\n• Keterangan: {{keterangan}}\n\nTotal poin ananda saat ini: *{{total_poin}}* ({{jumlah_catatan}} catatan).\nMohon bimbingan Bapak/Ibu di rumah. Ketik *cek poin* untuk melihat rinciannya.\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.parent_attendance = `📅 *REKAP KEHADIRAN*\n\nSiswa: *{{nama_siswa}}* ({{kelas}})\nPeriode: {{periode}} (30 hari terakhir)\n\n✅ Hadir: *{{hadir}}* hari ({{persen}}%)\n⏰ Terlambat: {{terlambat}} hari (sudah termasuk hadir)\n🤒 Sakit: {{sakit}} hari\n📝 Izin: {{izin}} hari\n❌ Alfa: {{alpa}} hari\nTotal hari tercatat: {{total_hari}}\n\n{{rincian}}\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.monthly_recap_class = `📊 *REKAP KEHADIRAN SISWA KELAS {{kelas}}*\nPeriode: {{periode}}\n\nRata-rata kehadiran: *{{rata_hadir}}*\nSiswa: {{jumlah_siswa}} · Hari belajar tercatat: {{hari_efektif}}\n\nRincian per tanggal ada pada file PDF terlampir.\n_Pusaka - SMP Negeri 8 Ciamis_`;
+DEFAULT_TEMPLATES.monthly_recap_main = `📊 *REKAP KEHADIRAN SEMUA ROMBEL*\nPeriode: {{periode}}\n\nJumlah rombel: {{jumlah_kelas}} · Siswa: {{jumlah_siswa}}\nRata-rata kehadiran: *{{rata_hadir}}*\n\nSetiap rombel pada halaman tersendiri di file PDF terlampir.\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.sender_autoreply = `Halo 👋\n\nNomor ini khusus mengirim *notifikasi otomatis* Pusaka (mis. presensi siswa) dan tidak membalas pesan.\n\nUntuk perintah seperti *cek poin*, *absen*, *akun pusaka*, atau *lapor izin*, silakan chat nomor utama:\nhttps://wa.me/{{nomor_utama}}\n\nTerima kasih.\n_SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.invigilator_exam_violation = `🚨 *PELANGGARAN UJIAN (CBT)*\n\nYth. {{nama_pengawas}},\nSiswa di ruang yang Bapak/Ibu awasi melanggar aturan ujian:\n\n• Siswa: *{{nama_siswa}}* ({{kelas}})\n• Ruang: *{{ruang}}*{{meja}}\n• Pelanggaran: *{{pelanggaran}}* ({{jumlah}})\n• Ujian: {{ujian}}\n• Waktu: {{jam}} WIB\n\nMohon dicek ke tempat duduk siswa tersebut.\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
 DEFAULT_TEMPLATES.student_account = `🔐 *AKUN PUSAKA*\n\nNama: *{{nama_siswa}}* ({{kelas}})\n\n• Username: *{{username}}*\n• Password awal: *{{password}}*\n• Alamat: {{alamat}}\n\n⚠️ *Setelah berhasil login, segera ganti password* agar akunmu aman:\nBuka menu *Pengaturan* → *Keamanan*, isi *Password Lama* (password awal di atas) dan *Password Baru*, lalu ketuk *Simpan Password*.\n\nSudah pernah mengganti password lalu lupa? Hubungi wali kelas untuk diatur ulang. Jangan bagikan username dan password kepada siapa pun.\n\n_Pusaka - SMP Negeri 8 Ciamis_`;
@@ -358,7 +360,14 @@ const DEFAULT_BOT_SETTINGS = {
     multi_sender_use_primary: true,    // nomor utama ikut menerima bagian notifikasi presensi (false = nomor utama dikhususkan untuk balasan perintah)
     multi_sender_daily_cap: 500,       // batas kiriman notifikasi per hari untuk tiap nomor tambahan (0 = tanpa batas); nomor baru sebaiknya dipanaskan bertahap
     multi_sender_autoreply: true,      // nomor tambahan membalas chat masuk satu kali per 12 jam dengan arahan ke nomor utama
-    fingerprint_parent_wa_enabled: false // punch mesin fingerprint siswa -> WA presensi ke orang tua (templat parent_presence); bawaan mati agar tidak mengirim massal tanpa disetujui
+    fingerprint_parent_wa_enabled: false, // punch mesin fingerprint siswa -> WA presensi ke orang tua (templat parent_presence); bawaan mati agar tidak mengirim massal tanpa disetujui
+    monthly_recap_enabled: false,      // akhir bulan: kirim rekap kehadiran PDF ke grup kelas + grup utama (bawaan mati)
+    monthly_recap_time: '16:00',       // jam kirim pada hari terakhir bulan (WIB)
+    monthly_recap_class_groups: true,  // PDF tiap kelas -> grup kelasnya (wa_class_groups)
+    monthly_recap_main_group: true,    // PDF gabungan semua rombel -> grup utama (class_recap_group_jid)
+    monthly_recap_paper: 'a4',         // a4 | f4
+    monthly_recap_place: 'Ciamis',     // kota titimangsa tanda tangan wali kelas
+    monthly_recap_holidays: ''         // satu per baris: '2026-11-10 Hari Pahlawan' atau '2026-12-22..2027-01-02 Libur semester'
 };
 const CONFIG_TTL_MS = 30 * 1000;
 let templateCache = { at: 0, rows: new Map() };
@@ -3369,6 +3378,599 @@ app.post('/admin/send-class-group-recaps', requireAdmin, async (req, res) => {
     } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
 });
 
+// ===================== REKAP KEHADIRAN SISWA BULANAN (PDF) =====================
+// Pada hari terakhir tiap bulan (jam diatur), bot mengirim PDF rekap kehadiran bulan itu (tanggal 1 s/d akhir bulan):
+//  - ke grup tiap kelas (wa_class_groups): PDF kelas tersebut;
+//  - ke grup utama (class_recap_group_jid): satu PDF berisi ringkasan + semua rombel.
+// Semua tanggal bulan tampil sebagai kolom; Sabtu/Minggu dan hari libur diarsir abu-abu.
+// Tata letak PDF mengikuti src/lib/homeroomAttendancePdf.ts (rekap wali kelas di aplikasi). Perubahan di salah satunya perlu disalin ke yang lain.
+const MONTHLY_RECAP_STATE_FILE = process.env.MONTHLY_RECAP_STATE_FILE || '/srv/wa-bot/monthly_recap_state.json';
+const MONTHLY_RETRY_MS = 10 * 60 * 1000;   // jeda percobaan ulang bila kirim gagal
+const MONTHLY_MAX_TRIES = 3;               // percobaan otomatis per tujuan per bulan
+const MONTH_NAMES_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+const MONTHLY_PRINT_CREDIT = 'Dicetak dari Pusaka Nedelcis';
+const monthlyInflight = new Set();
+let monthlyRunning = false;
+let monthlyStateLoaded = false;
+let monthlyEnabledSince = null;
+let pdfLibs = null;
+
+function loadPdfLibs() {
+    if (pdfLibs) return pdfLibs;
+    try {
+        const j = require('jspdf');
+        const a = require('jspdf-autotable');
+        const jsPDF = j.jsPDF || j.default || j;
+        const autoTable = a.autoTable || a.default || a;
+        if (typeof jsPDF !== 'function' || typeof autoTable !== 'function') throw new Error('bentuk paket tidak dikenali');
+        pdfLibs = { jsPDF: jsPDF, autoTable: autoTable };
+        return pdfLibs;
+    } catch (e) {
+        throw new Error('Paket PDF belum terpasang di server bot (' + e.message + '). Jalankan: cd /srv/wa-bot && npm install jspdf jspdf-autotable lalu pm2 restart wa-bot --update-env');
+    }
+}
+
+function loadMonthlyState() {
+    try { if (fs.existsSync(MONTHLY_RECAP_STATE_FILE)) { const d = JSON.parse(fs.readFileSync(MONTHLY_RECAP_STATE_FILE, 'utf-8')); if (d && typeof d === 'object') return d; } } catch (e) {}
+    return {};
+}
+function saveMonthlyState(st) {
+    try {
+        Object.keys(st).filter(function(k) { return /^\d{4}-\d{2}$/.test(k); }).sort().slice(0, -12).forEach(function(k) { delete st[k]; });
+        fs.writeFileSync(MONTHLY_RECAP_STATE_FILE, JSON.stringify(st));
+    } catch (e) { console.error('[REKAP BULANAN] gagal menyimpan status:', e.message); }
+}
+function updateMonthlyState(ym, fn) {
+    const st = loadMonthlyState();
+    if (ym) { if (!st[ym]) st[ym] = {}; const m = st[ym]; if (!Array.isArray(m.done)) m.done = []; if (!m.tries) m.tries = {}; if (!m.last) m.last = {}; fn(m, st); } else fn(null, st);
+    saveMonthlyState(st);
+}
+
+function isValidIso(s) { return /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(new Date(s + 'T00:00:00Z').getTime()) && new Date(s + 'T00:00:00Z').toISOString().slice(0, 10) === s; }
+function ymOf(iso) { return iso.slice(0, 7); }
+function monthDates(ym) {
+    const p = ym.split('-'); const n = new Date(Date.UTC(parseInt(p[0], 10), parseInt(p[1], 10), 0)).getUTCDate();
+    const out = []; for (let d = 1; d <= n; d++) out.push(ym + '-' + String(d).padStart(2, '0'));
+    return out;
+}
+function isLastDayOfMonth(iso) { return isoAddDays(iso, 1).slice(8, 10) === '01'; }
+function prevYm(ym) { const p = ym.split('-').map(Number); return p[1] === 1 ? (p[0] - 1) + '-12' : p[0] + '-' + String(p[1] - 1).padStart(2, '0'); }
+function longDateIdn(iso) { const p = iso.split('-'); return parseInt(p[2], 10) + ' ' + MONTH_NAMES_ID[parseInt(p[1], 10) - 1] + ' ' + p[0]; }
+function cleanTxt(v) { return String(v == null ? '' : v).replace(/\s+/g, ' ').trim(); }
+function titleCaseName(n) { return String(n || '').toLowerCase().split(' ').map(function(w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join(' '); }
+function slugFile(s) { return String(s || '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, ''); }
+function pctText(h, t) { return t > 0 ? Math.round((h / t) * 100) + '%' : '-'; }
+
+// Daftar libur (satu per baris): "2026-11-10 Hari Pahlawan" atau rentang "2026-12-22..2027-01-02 Libur semester".
+function parseMonthlyHolidays(text, ym) {
+    const map = new Map();
+    const re = /^(\d{4}-\d{2}-\d{2})(?:\s*(?:\.\.|s\/d|sd|sampai)\s*(\d{4}-\d{2}-\d{2}))?\s*[-:]?\s*(.*)$/i;
+    String(text || '').split(/\r?\n/).forEach(function(line) {
+        const m = line.trim().match(re);
+        if (!m) return;
+        const a = m[1], b = m[2] || m[1];
+        if (!isValidIso(a) || !isValidIso(b) || b < a) return;
+        const label = cleanTxt(m[3]) || 'Libur';
+        let d = a, guard = 0;
+        while (d <= b && guard++ < 400) { if (ymOf(d) === ym) map.set(d, label); d = isoAddDays(d, 1); }
+    });
+    return map;
+}
+
+async function fetchAllRowsRetry(build) {
+    const size = 1000; const out = [];
+    for (let p = 0; p < 200; p++) {
+        let data = null, lastErr = null;
+        for (let t = 0; t < 3; t++) {
+            const r = await build(p * size, p * size + size - 1);
+            if (!r.error) { data = r.data || []; break; }
+            lastErr = r.error; await sleepMs(400 * (t + 1));
+        }
+        if (data === null) throw lastErr;
+        for (const x of data) out.push(x);
+        if (data.length < size) break;
+    }
+    return out;
+}
+
+// Kumpulkan semua data rekap satu bulan. Aturan data sama dengan halaman Absensi Wali Kelas:
+// siswa aktif bukan alumni (urut nama), satu catatan per siswa per tanggal (yang terbaru), % = hadir / jumlah catatan.
+async function collectMonthlyData(ym, cfg, todayIso) {
+    const dates = monthDates(ym);
+    const stRes = await supabase.from('school_settings').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (stRes.error) throw stRes.error;
+    const school = stRes.data ? Object.assign({}, stRes.data) : null;
+    if (school) delete school.teacher_upload_access_code;
+    let cq = supabase.from('classes').select('id, name, academic_year, homeroom_teacher_id');
+    if (school && school.academic_year) cq = cq.eq('academic_year', school.academic_year);
+    const cRes = await cq;
+    if (cRes.error) throw cRes.error;
+    const classRows = (cRes.data || []).slice().sort(function(a, b) { return natCmp(a.name, b.name); });
+    const classIds = classRows.map(function(c) { return c.id; });
+    if (!classIds.length) throw new Error('Tidak ada kelas pada tahun ajaran aktif.');
+
+    const students = await fetchAllRowsRetry(function(from, to) {
+        return supabase.from('students').select('id, class_id, full_name, nisn, nis').in('class_id', classIds)
+            .eq('status', 'aktif').eq('is_alumni', false).order('full_name').order('id').range(from, to);
+    });
+    const studentById = new Map(students.map(function(s) { return [s.id, s]; }));
+
+    const chunks = [];
+    for (let i = 0; i < dates.length; i += 3) chunks.push([dates[i], dates[Math.min(i + 2, dates.length - 1)]]);
+    const newest = new Map();
+    for (let i = 0; i < chunks.length; i += 3) {
+        const part = await Promise.all(chunks.slice(i, i + 3).map(function(c) {
+            return fetchAllRowsRetry(function(from, to) {
+                return supabase.from('attendance').select('student_id, date, status, created_at').gte('date', c[0]).lte('date', c[1])
+                    .order('date').order('id').range(from, to);
+            });
+        }));
+        part.forEach(function(rows) { rows.forEach(function(r) {
+            if (!studentById.has(r.student_id)) return;
+            const key = r.student_id + '|' + r.date;
+            const cur = newest.get(key);
+            if (!cur || String(r.created_at || '') > String(cur.created_at || '')) newest.set(key, r);
+        }); });
+    }
+
+    const CODE = { hadir: 'H', sakit: 'S', izin: 'I', alpa: 'A' };
+    const codeMap = new Map();
+    const dataDates = new Set();
+    const statOf = new Map();
+    newest.forEach(function(r) {
+        codeMap.set(r.student_id + '|' + r.date, CODE[r.status] || 'A');
+        dataDates.add(r.date);
+        let s = statOf.get(r.student_id); if (!s) { s = { hadir: 0, sakit: 0, izin: 0, alpa: 0, total: 0 }; statOf.set(r.student_id, s); }
+        if (s[r.status] !== undefined) s[r.status]++;
+        s.total++;
+    });
+
+    // Wali kelas
+    const tIds = classRows.map(function(c) { return c.homeroom_teacher_id; }).filter(Boolean);
+    const tRes = tIds.length ? await supabase.from('teachers').select('id, user_id, nip').in('id', tIds) : { data: [] };
+    const uIds = (tRes.data || []).map(function(t) { return t.user_id; }).filter(Boolean);
+    const pRes = uIds.length ? await supabase.from('profiles').select('id, full_name').in('id', uIds) : { data: [] };
+    const nameOfUser = new Map((pRes.data || []).map(function(p) { return [p.id, p.full_name]; }));
+    const teacherOf = new Map((tRes.data || []).map(function(t) { return [t.id, { name: nameOfUser.get(t.user_id) || '', nip: t.nip || '' }]; }));
+
+    const classes = classRows.map(function(c) {
+        const list = students.filter(function(s) { return s.class_id === c.id; }).map(function(s) {
+            const st = statOf.get(s.id) || { hadir: 0, sakit: 0, izin: 0, alpa: 0, total: 0 };
+            return { id: s.id, nisn: s.nisn, nis: s.nis, name: s.full_name, hadir: st.hadir, sakit: st.sakit, izin: st.izin, alpa: st.alpa, total: st.total };
+        });
+        const sum = list.reduce(function(a, s) { a.hadir += s.hadir; a.sakit += s.sakit; a.izin += s.izin; a.alpa += s.alpa; a.total += s.total; return a; }, { hadir: 0, sakit: 0, izin: 0, alpa: 0, total: 0 });
+        const t = teacherOf.get(c.homeroom_teacher_id) || { name: '', nip: '' };
+        return { id: c.id, name: c.name, homeroomName: t.name, homeroomNip: t.nip, students: list, sum: sum };
+    }).filter(function(c) { return c.students.length > 0; });
+
+    // Jenis tiap tanggal: data | weekend | libur | kosong (tanggal mendatang tanpa data)
+    const holidays = parseMonthlyHolidays(cfg.monthly_recap_holidays, ym);
+    const days = dates.map(function(d) {
+        const dow = dowOfIso(d);
+        if (dataDates.has(d)) return { date: d, day: parseInt(d.slice(8), 10), kind: 'data' };
+        if (holidays.has(d)) return { date: d, day: parseInt(d.slice(8), 10), kind: 'libur', label: holidays.get(d) };
+        if (dow >= 6) return { date: d, day: parseInt(d.slice(8), 10), kind: 'weekend' };
+        if (d <= todayIso) return { date: d, day: parseInt(d.slice(8), 10), kind: 'libur', label: '', auto: true };
+        return { date: d, day: parseInt(d.slice(8), 10), kind: 'kosong' };
+    });
+    const total = classes.reduce(function(a, c) { a.siswa += c.students.length; a.hadir += c.sum.hadir; a.sakit += c.sum.sakit; a.izin += c.sum.izin; a.alpa += c.sum.alpa; a.total += c.sum.total; return a; }, { siswa: 0, hadir: 0, sakit: 0, izin: 0, alpa: 0, total: 0 });
+    return { ym: ym, from: dates[0], to: dates[dates.length - 1], school: school, classes: classes, days: days, codeMap: codeMap,
+        effective: dataDates.size, total: total, periode: longDateIdn(dates[0]) + ' s/d ' + longDateIdn(dates[dates.length - 1]) };
+}
+
+// Keterangan di bawah legenda: daftar libur yang diisi admin + penjelasan tanggal tanpa data.
+function monthlyHolidayNote(days) {
+    const runs = [];
+    days.forEach(function(d) {
+        if (d.kind !== 'libur' || d.auto) return;
+        const last = runs[runs.length - 1];
+        if (last && last.label === d.label && last.to + 1 === d.day) last.to = d.day; else runs.push({ from: d.day, to: d.day, label: d.label });
+    });
+    const parts = runs.map(function(r) { return (r.from === r.to ? String(r.from) : r.from + '-' + r.to) + ' = ' + r.label; });
+    let text = parts.length ? 'Libur: ' + parts.join('; ') + '.' : '';
+    if (days.some(function(d) { return d.auto; })) text += (text ? ' ' : '') + 'Tanggal hari kerja tanpa data absensi seluruh sekolah dianggap libur.';
+    return text;
+}
+
+// ---------- Gambar kop (logo/watermark) ----------
+let sharpForPdf;
+function getSharpForPdf() { if (sharpForPdf === undefined) { try { sharpForPdf = require('sharp'); } catch (e) { sharpForPdf = null; } } return sharpForPdf; }
+const pdfImageCache = new Map();
+async function loadPdfImage(doc, url) {
+    if (!url) return null;
+    if (pdfImageCache.has(url)) return pdfImageCache.get(url);
+    let out = null;
+    try {
+        const ctl = new AbortController(); const tm = setTimeout(function() { ctl.abort(); }, 15000);
+        let buf;
+        try { const r = await fetch(url, { signal: ctl.signal, redirect: 'follow' }); if (!r.ok) throw new Error('HTTP ' + r.status); buf = Buffer.from(await r.arrayBuffer()); } finally { clearTimeout(tm); }
+        const isPng = buf.length > 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+        const isJpg = buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+        const sh = getSharpForPdf();
+        let fmt = 'PNG';
+        if (sh) { buf = await sh(buf).resize({ width: 800, height: 800, fit: 'inside', withoutEnlargement: true }).png().toBuffer(); }
+        else if (isJpg) fmt = 'JPEG';
+        else if (!isPng) throw new Error('format gambar perlu paket sharp (npm install sharp)');
+        const data = 'data:image/' + (fmt === 'PNG' ? 'png' : 'jpeg') + ';base64,' + buf.toString('base64');
+        const props = doc.getImageProperties(data);
+        out = { data: data, fmt: fmt, width: props.width, height: props.height };
+    } catch (e) { console.error('[REKAP BULANAN] gambar kop dilewati (' + url + '): ' + e.message); }
+    pdfImageCache.set(url, out);
+    if (pdfImageCache.size > 8) pdfImageCache.delete(pdfImageCache.keys().next().value);
+    return out;
+}
+async function loadLetterheadImages(doc, s) {
+    s = s || {};
+    const r = await Promise.all([loadPdfImage(doc, s.logo_url), loadPdfImage(doc, s.right_logo_url), s.watermark_enabled ? loadPdfImage(doc, s.watermark_url) : null]);
+    return { left: r[0], right: r[1], wm: r[2] };
+}
+function pdfDrawImageFit(doc, img, x, y, boxW, boxH) {
+    const ratio = Math.min(boxW / img.width, boxH / img.height);
+    const w = img.width * ratio, h = img.height * ratio;
+    doc.addImage(img.data, img.fmt, x + (boxW - w) / 2, y + (boxH - h) / 2, w, h);
+}
+// Port dari addLetterheadToPDF (src/lib/pdfLetterhead.ts). Mengembalikan Y awal konten.
+function drawMonthlyLetterhead(doc, s, imgs) {
+    s = s || {};
+    const PT = 0.3528;
+    try {
+        if (s.watermark_enabled && imgs.wm) {
+            try {
+                const pwW = doc.internal.pageSize.getWidth(), phH = doc.internal.pageSize.getHeight();
+                const size = s.watermark_size || 100, opacity = (s.watermark_opacity == null ? 10 : s.watermark_opacity) / 100;
+                const ratio = Math.min(size / imgs.wm.width, size / imgs.wm.height);
+                const w = imgs.wm.width * ratio, h = imgs.wm.height * ratio;
+                let x = (pwW - w) / 2, y = (phH - h) / 2;
+                if (s.watermark_position === 'top-left') { x = 20; y = 20; }
+                else if (s.watermark_position === 'top-right') { x = pwW - w - 20; y = 20; }
+                else if (s.watermark_position === 'bottom-left') { x = 20; y = phH - h - 20; }
+                else if (s.watermark_position === 'bottom-right') { x = pwW - w - 20; y = phH - h - 20; }
+                doc.saveGraphicsState();
+                doc.setGState(new doc.GState({ opacity: opacity }));
+                doc.addImage(imgs.wm.data, imgs.wm.fmt, x, y, w, h);
+                doc.restoreGraphicsState();
+            } catch (e) { console.error('[REKAP BULANAN] watermark dilewati:', e.message); }
+        }
+        doc.setTextColor(0, 0, 0); doc.setDrawColor(0, 0, 0);
+        const pageWidth = doc.internal.pageSize.getWidth(), centerX = pageWidth / 2;
+        const margin = pageWidth > 250 ? 20 : 14, gap = 4;
+        const logoWidth = s.logo_width || 20, logoHeight = s.logo_height || 20;
+        const logoX = s.logo_position_x != null ? s.logo_position_x : margin, logoY = s.logo_position_y != null ? s.logo_position_y : 15;
+        const rW = s.right_logo_width || 20, rH = s.right_logo_height || 20;
+        const rXRaw = s.right_logo_position_x != null ? s.right_logo_position_x + (pageWidth - 210) : pageWidth - margin - rW;
+        const rX = Math.max(margin, Math.min(rXRaw, pageWidth - 5 - rW));
+        const rY = s.right_logo_position_y != null ? s.right_logo_position_y : 15;
+        const headerSize = s.header_font_size || 16, headerStyle = s.header_font_style || 'bold', subSize = s.subheader_font_size || 10;
+        const distSize = s.district_font_size || 12, distStyle = s.district_font_style || 'bold';
+        const distSpacing = s.district_line_spacing || 1.2, schoolSpacing = s.school_line_spacing || 1.2;
+        if (imgs.left) pdfDrawImageFit(doc, imgs.left, logoX, logoY, logoWidth, logoHeight);
+        if (imgs.right) pdfDrawImageFit(doc, imgs.right, rX, rY, rW, rH);
+        const tops = [], bottoms = [];
+        if (imgs.left) { tops.push(logoY); bottoms.push(logoY + logoHeight); }
+        if (imgs.right) { tops.push(rY); bottoms.push(rY + rH); }
+        const refTop = tops.length ? Math.min.apply(null, tops) : logoY;
+        const refBottom = bottoms.length ? Math.max.apply(null, bottoms) : logoY;
+        const leftEdge = imgs.left ? logoX + logoWidth + gap : margin;
+        const rightEdge = imgs.right ? rX - gap : pageWidth - margin;
+        const maxTextWidth = Math.max(30, Math.min(centerX - leftEdge, rightEdge - centerX)) * 2;
+        const blocks = [];
+        if (s.district_name) blocks.push({ text: String(s.district_name).toUpperCase(), size: distSize, style: distStyle, spacing: distSpacing, gapAfter: 0.5 });
+        blocks.push({ text: String(s.school_name || 'NAMA SEKOLAH').toUpperCase(), size: headerSize, style: headerStyle, spacing: schoolSpacing, gapAfter: 1.5 });
+        if (s.show_address !== false && s.school_address) blocks.push({ text: s.school_address, size: subSize, style: 'normal', spacing: 1.3, gapAfter: 0.5 });
+        if (s.show_phone !== false && s.school_phone) {
+            const ph = /^telp/i.test(String(s.school_phone).trim()) ? String(s.school_phone).trim() : 'Telp: ' + s.school_phone;
+            blocks.push({ text: ph, size: Math.max(6, subSize - 1), style: 'normal', spacing: 1.3, gapAfter: 0 });
+        }
+        const laid = blocks.map(function(b) {
+            doc.setFont('helvetica', b.style); doc.setFontSize(b.size);
+            return Object.assign({}, b, { lines: doc.splitTextToSize(b.text, maxTextWidth), lineH: b.size * PT * b.spacing });
+        });
+        const blockH = laid.reduce(function(sum, b, i) { return sum + b.lines.length * b.lineH + (i < laid.length - 1 ? b.gapAfter : 0); }, 0);
+        let cursor = refTop + Math.max(0, (refBottom - refTop - blockH) / 2);
+        const textTop = cursor;
+        laid.forEach(function(b) {
+            doc.setFont('helvetica', b.style); doc.setFontSize(b.size);
+            const glyphH = b.size * PT;
+            b.lines.forEach(function(line) {
+                doc.text(line, centerX, cursor + (b.lineH - glyphH) / 2 + glyphH * 0.8, { align: 'center' });
+                cursor += b.lineH;
+            });
+            cursor += b.gapAfter;
+        });
+        const lineY = Math.max(refBottom, textTop + blockH) + 3;
+        doc.setLineWidth(0.6); doc.line(margin, lineY, pageWidth - margin, lineY);
+        doc.setLineWidth(0.2); doc.line(margin, lineY + 1.2, pageWidth - margin, lineY + 1.2);
+        doc.setFont('helvetica', 'normal');
+        return lineY + 6;
+    } catch (e) { console.error('[REKAP BULANAN] kop gagal digambar:', e.message); return 30; }
+}
+
+const MONTHLY_STATUS_FILL = { H: [16, 185, 129], S: [245, 158, 11], I: [59, 130, 246], A: [239, 68, 68] };
+const MONTHLY_OFF_FILL = [229, 231, 235];
+const MONTHLY_OFF_HEAD = [107, 114, 128];
+
+function monthlySetFont(doc, style, size) { doc.setFont('helvetica', style || 'normal'); doc.setFontSize(size || 10); doc.setTextColor(0, 0, 0); }
+
+// Satu rombel (kop, judul, tabel semua tanggal, keterangan, tanda tangan wali kelas) mulai dari halaman aktif.
+function drawMonthlyClassSection(doc, autoTable, ctx, cls) {
+    const pw = doc.internal.pageSize.getWidth(), ph = doc.internal.pageSize.getHeight();
+    const ml = 10, mr = 10, avail = pw - ml - mr, bottomLimit = ph - 13, lineH = 4.6;
+    const D = ctx.data;
+    const startY = drawMonthlyLetterhead(doc, D.school, ctx.imgs);
+    monthlySetFont(doc, 'bold', 12);
+    doc.text('REKAP KEHADIRAN SISWA WALI KELAS', pw / 2, startY, { align: 'center' });
+    monthlySetFont(doc, 'normal', 10);
+    doc.text('Kelas: ' + (cleanTxt(cls.name) || '-'), 14, startY + 8);
+    doc.text('Periode: ' + D.periode, 14, startY + 14);
+
+    const days = D.days, n = days.length;
+    const wNo = 8, wNisn = 20, wTot = 7, wPct = 10, wNameMin = 42, totalsW = wTot * 4 + wPct;
+    const wDay = Math.min(7, Math.floor(((avail - wNo - wNisn - wNameMin - totalsW) / n) * 100) / 100);
+    const wName = Math.min(70, avail - wNo - wNisn - totalsW - n * wDay);
+    const head = ['No', 'NISN', 'Nama Siswa'].concat(days.map(function(d) { return String(d.day); }), ['H', 'S', 'I', 'A', '%']);
+    const body = cls.students.map(function(s, i) {
+        return [String(i + 1), cleanTxt(s.nisn) || cleanTxt(s.nis), titleCaseName(s.name)].concat(
+            days.map(function(d) {
+                if (d.kind === 'weekend' || d.kind === 'libur') return '';
+                return D.codeMap.get(s.id + '|' + d.date) || '-';
+            }),
+            [String(s.hadir), String(s.sakit), String(s.izin), String(s.alpa), pctText(s.hadir, s.total)]);
+    });
+    const columnStyles = { 0: { cellWidth: wNo }, 1: { cellWidth: wNisn }, 2: { cellWidth: wName, halign: 'left' } };
+    for (let i = 0; i < n; i++) columnStyles[3 + i] = { cellWidth: wDay };
+    for (let i = 0; i < 4; i++) columnStyles[3 + n + i] = { cellWidth: wTot };
+    columnStyles[3 + n + 4] = { cellWidth: wPct };
+    autoTable(doc, {
+        startY: startY + 19, head: [head], body: body, theme: 'grid',
+        headStyles: { fillColor: [139, 92, 246], fontSize: 7, halign: 'center' },
+        styles: { fontSize: n > 31 ? 5.5 : 6.5, cellPadding: 1, halign: 'center', lineColor: [150, 150, 150], lineWidth: 0.1 },
+        columnStyles: columnStyles, margin: { left: ml, right: mr, top: 14, bottom: 14 }, rowPageBreak: 'avoid',
+        didParseCell: function(data) {
+            const ci = data.column.index;
+            if (ci < 3 || ci >= 3 + n) return;
+            const day = days[ci - 3];
+            const off = day.kind === 'weekend' || day.kind === 'libur';
+            if (data.section === 'head') { if (off) data.cell.styles.fillColor = MONTHLY_OFF_HEAD; return; }
+            if (data.section !== 'body') return;
+            if (off) { data.cell.styles.fillColor = MONTHLY_OFF_FILL; return; }
+            const fill = MONTHLY_STATUS_FILL[String(data.cell.raw)];
+            if (fill) { data.cell.styles.fillColor = fill; data.cell.styles.textColor = [255, 255, 255]; data.cell.styles.fontStyle = 'bold'; }
+        }
+    });
+
+    // Keterangan + titimangsa + tanda tangan; seluruh blok pindah halaman bila tidak muat.
+    const sigW = 70, sigGap = 16, sx = pw - mr - sigW;
+    const sigH = lineH * 2 + sigGap + lineH * 2 + 1;
+    monthlySetFont(doc, 'italic', 8);
+    const noteMax = Math.max(60, sx - 14 - 6);
+    let noteLines = ctx.note ? doc.splitTextToSize(ctx.note, noteMax) : [];
+    if (noteLines.length > 3) { noteLines = noteLines.slice(0, 3); noteLines[2] = String(noteLines[2]).replace(/.{0,3}$/, '...'); }
+    const legendH = 6 + 3 * 6;
+    const blockH = Math.max(sigH, 38 > legendH + noteLines.length * 3.6 + 3 ? 38 : legendH + noteLines.length * 3.6 + 3);
+    const la = doc.lastAutoTable;
+    let y = (la && typeof la.finalY === 'number' ? la.finalY : null);
+    if (y === null || y + 6 + blockH > bottomLimit) {
+        doc.addPage();
+        monthlySetFont(doc, 'italic', 8); doc.setTextColor(90, 90, 90);
+        doc.text('Lanjutan rekap kehadiran Kelas ' + (cleanTxt(cls.name) || '-'), ml, 10);
+        y = 10;
+    }
+    const top = y + 6;
+    monthlySetFont(doc, 'bold', 9);
+    doc.text('Keterangan:', 14, top + 3);
+    monthlySetFont(doc, 'normal', 8);
+    const legend = [['H', 'Hadir', MONTHLY_STATUS_FILL.H], ['S', 'Sakit', MONTHLY_STATUS_FILL.S], ['I', 'Izin', MONTHLY_STATUS_FILL.I],
+        ['A', 'Alpa', MONTHLY_STATUS_FILL.A], ['', 'Sabtu/Minggu/Libur', MONTHLY_OFF_FILL]];
+    legend.forEach(function(it, i) {
+        const lx = i < 3 ? 14 : 48, ly = top + 6 + (i % 3) * 6;
+        doc.setFillColor(it[2][0], it[2][1], it[2][2]);
+        doc.rect(lx, ly, 5, 5, 'F');
+        doc.setDrawColor(150, 150, 150); doc.rect(lx, ly, 5, 5, 'S');
+        doc.setTextColor(0, 0, 0);
+        doc.text(it[0] ? it[0] + ' = ' + it[1] : it[1], lx + 7, ly + 4);
+    });
+    if (noteLines.length) { monthlySetFont(doc, 'italic', 8); doc.text(noteLines, 14, top + 6 + 3 * 6 + 3); }
+
+    const dots = function(w) { return '.'.repeat(Math.max(3, Math.floor(w / Math.max(0.1, doc.getTextWidth('.'))))); };
+    monthlySetFont(doc, 'normal', 10);
+    const place = cleanTxt(ctx.place);
+    let sy = top + 3;
+    doc.text((place ? place + ', ' : '') + longDateIdn(ctx.signDate), sx, sy); sy += lineH;
+    doc.text('Wali Kelas,', sx, sy); sy += sigGap + lineH;
+    const wali = cleanTxt(cls.homeroomName);
+    if (wali) { monthlySetFont(doc, 'bold', 10); doc.text(wali, sx, sy); monthlySetFont(doc, 'normal', 10); } else doc.text(dots(sigW - 6), sx, sy);
+    sy += lineH;
+    doc.text('NIP. ' + (cleanTxt(cls.homeroomNip) || dots(sigW - 12)), sx, sy);
+}
+
+// Halaman ringkasan semua rombel (hanya untuk PDF gabungan grup utama).
+function drawMonthlySummary(doc, autoTable, ctx) {
+    const pw = doc.internal.pageSize.getWidth();
+    const D = ctx.data;
+    const startY = drawMonthlyLetterhead(doc, D.school, ctx.imgs);
+    monthlySetFont(doc, 'bold', 12);
+    doc.text('REKAP KEHADIRAN SISWA SEMUA ROMBEL', pw / 2, startY, { align: 'center' });
+    monthlySetFont(doc, 'normal', 10);
+    doc.text('Periode: ' + D.periode, 14, startY + 8);
+    doc.text('Hari belajar tercatat: ' + D.effective + ' dari ' + D.days.length + ' hari kalender', 14, startY + 14);
+    const body = D.classes.map(function(c, i) {
+        return [String(i + 1), c.name, titleCaseName(c.homeroomName) || '-', String(c.students.length), String(c.sum.hadir), String(c.sum.sakit), String(c.sum.izin), String(c.sum.alpa), pctText(c.sum.hadir, c.sum.total)];
+    });
+    const t = D.total;
+    body.push(['', 'JUMLAH', '', String(t.siswa), String(t.hadir), String(t.sakit), String(t.izin), String(t.alpa), pctText(t.hadir, t.total)]);
+    autoTable(doc, {
+        startY: startY + 19, head: [['No', 'Kelas', 'Wali Kelas', 'Siswa', 'H', 'S', 'I', 'A', '%']], body: body, theme: 'grid',
+        headStyles: { fillColor: [139, 92, 246], fontSize: 8, halign: 'center' },
+        styles: { fontSize: 7.5, cellPadding: 1.2, halign: 'center', lineColor: [150, 150, 150], lineWidth: 0.1 },
+        columnStyles: { 1: { halign: 'left' }, 2: { halign: 'left' } },
+        margin: { left: 10, right: 10, top: 14, bottom: 14 }, rowPageBreak: 'avoid',
+        didParseCell: function(data) { if (data.section === 'body' && data.row.index === body.length - 1) { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = [243, 244, 246]; } }
+    });
+}
+
+function addMonthlyFooters(doc, signDate) {
+    const pw = doc.internal.pageSize.getWidth(), ph = doc.internal.pageSize.getHeight();
+    const total = doc.getNumberOfPages();
+    const txt = MONTHLY_PRINT_CREDIT + ', ' + longDateIdn(signDate);
+    for (let p = 1; p <= total; p++) {
+        doc.setPage(p);
+        monthlySetFont(doc, 'italic', 8); doc.setTextColor(90, 90, 90);
+        doc.text(txt, 10, ph - 8);
+        if (total > 1) doc.text('Halaman ' + p + ' dari ' + total, pw - 10, ph - 8, { align: 'right' });
+    }
+    doc.setTextColor(0, 0, 0);
+}
+
+// scope: { classId } -> PDF satu kelas; selain itu PDF gabungan (ringkasan + semua rombel). Mengembalikan { buffer, fileName }.
+async function buildMonthlyRecapPdf(data, cfg, signDate, scope) {
+    const libs = loadPdfLibs();
+    const paper = cfg.monthly_recap_paper === 'f4' ? [215, 330] : 'a4';
+    const doc = new libs.jsPDF({ unit: 'mm', format: paper, orientation: 'landscape' });
+    const imgs = await loadLetterheadImages(doc, data.school);
+    const ctx = { data: data, imgs: imgs, place: cfg.monthly_recap_place, signDate: signDate, note: monthlyHolidayNote(data.days) };
+    let fileName;
+    if (scope && scope.classId) {
+        const cls = data.classes.find(function(c) { return c.id === scope.classId; });
+        if (!cls) throw new Error('Kelas tidak ditemukan atau tidak punya siswa aktif.');
+        drawMonthlyClassSection(doc, libs.autoTable, ctx, cls);
+        fileName = 'Rekap-Absensi-' + (slugFile(cls.name) || 'Kelas') + '-' + data.from + '-' + data.to + '.pdf';
+    } else {
+        drawMonthlySummary(doc, libs.autoTable, ctx);
+        for (const cls of data.classes) { doc.addPage(); drawMonthlyClassSection(doc, libs.autoTable, ctx, cls); }
+        fileName = 'Rekap-Absensi-Semua-Rombel-' + data.from + '-' + data.to + '.pdf';
+    }
+    addMonthlyFooters(doc, signDate);
+    return { buffer: Buffer.from(doc.output('arraybuffer')), fileName: fileName };
+}
+
+// opts: { scheduled?, manual?, force?, classId?, testTo? }
+async function sendMonthlyRecap(ym, cfg, opts) {
+    opts = opts || {};
+    loadPdfLibs(); // gagal cepat dengan pesan jelas bila paket belum dipasang
+    const today = wibNow().date;
+    const data = await collectMonthlyData(ym, cfg, today);
+    const result = { periode: data.periode, rombel: data.classes.length, siswa: data.total.siswa, queued: [], already_sent: [], no_group: [], waiting_retry: [], gave_up: [] };
+    if (!data.classes.length) throw new Error('Tidak ada siswa aktif pada kelas tahun ajaran ini.');
+    const avg = pctText(data.total.hadir, data.total.total);
+
+    const items = [];
+    const classItem = function(cls, jid) {
+        return { key: cls.id, label: cls.name, jid: jid,
+            build: function() { return buildMonthlyRecapPdf(data, cfg, today, { classId: cls.id }); },
+            caption: function() { return renderMessage('monthly_recap_class', { kelas: cls.name, periode: data.periode, rata_hadir: pctText(cls.sum.hadir, cls.sum.total), jumlah_siswa: cls.students.length, hari_efektif: data.effective }); } };
+    };
+    const mainItem = function(jid) {
+        return { key: 'main', label: 'Grup utama (semua rombel)', jid: jid,
+            build: function() { return buildMonthlyRecapPdf(data, cfg, today, null); },
+            caption: function() { return renderMessage('monthly_recap_main', { periode: data.periode, jumlah_kelas: data.classes.length, jumlah_siswa: data.total.siswa, rata_hadir: avg }); } };
+    };
+
+    if (opts.testTo) {
+        const raw = String(opts.testTo).trim();
+        const jid = raw.indexOf('@') > 0 ? raw : formatToInternational(raw) + '@s.whatsapp.net';
+        const cls = opts.classId ? data.classes.find(function(c) { return c.id === opts.classId; }) : null;
+        if (opts.classId && !cls) throw new Error('Kelas tidak ditemukan.');
+        items.push(Object.assign(cls ? classItem(cls, jid) : mainItem(jid), { test: true }));
+    } else {
+        if (cfg.monthly_recap_class_groups) {
+            const mapRes = await supabase.from('wa_class_groups').select('class_id, group_jid').eq('enabled', true);
+            if (mapRes.error) throw mapRes.error;
+            const groupOf = new Map((mapRes.data || []).map(function(m) { return [m.class_id, m.group_jid]; }));
+            for (const cls of data.classes) {
+                if (opts.classId && cls.id !== opts.classId) continue;
+                const jid = groupOf.get(cls.id);
+                if (!jid) { result.no_group.push(cls.name); continue; }
+                items.push(classItem(cls, jid));
+            }
+        }
+        if (cfg.monthly_recap_main_group && cfg.class_recap_group_jid && !opts.classId) items.push(mainItem(cfg.class_recap_group_jid));
+    }
+
+    const st0 = (loadMonthlyState()[ym]) || {};
+    const done0 = new Set(st0.done || []);
+    for (const it of items) {
+        const id = ym + '|' + it.key;
+        if (!it.test) {
+            if (monthlyInflight.has(id)) { result.waiting_retry.push(it.label); continue; }
+            if (!opts.force && done0.has(it.key)) { result.already_sent.push(it.label); continue; }
+            if (opts.scheduled) {
+                const tries = (st0.tries && st0.tries[it.key]) || 0;
+                if (tries >= MONTHLY_MAX_TRIES) { result.gave_up.push(it.label); continue; }
+                if (st0.last && st0.last[it.key] && Date.now() - st0.last[it.key] < MONTHLY_RETRY_MS) { result.waiting_retry.push(it.label); continue; }
+            }
+            updateMonthlyState(ym, function(m) { m.tries[it.key] = (m.tries[it.key] || 0) + 1; m.last[it.key] = Date.now(); });
+            monthlyInflight.add(id);
+        }
+        result.queued.push(it.label);
+        enqueueTask(async function() {
+            const kind = it.test ? 'rekap_bulanan_uji' : 'rekap_bulanan';
+            const fail = function(msg) {
+                recordSend({ at: new Date().toISOString(), queued_at: currentTask ? new Date(currentTask.at).toISOString() : null, to: it.jid, kind: kind, status: 'gagal',
+                    error: String(msg).slice(0, 200), preview: '[dokumen] rekap bulanan ' + it.label, wa_id: null });
+                console.error('[REKAP BULANAN GAGAL ' + it.label + ']: ' + msg);
+            };
+            try {
+                if (!sock || !isReady) throw new Error('bot tidak terhubung');
+                const pdf = await it.build();
+                const cap = await it.caption();
+                console.log('[REKAP BULANAN] ' + it.label + ' -> ' + it.jid + ' (' + pdf.fileName + ', ' + Math.round(pdf.buffer.length / 1024) + ' KB)');
+                const sent = await sendSafeMessage(it.jid, { document: pdf.buffer, mimetype: 'application/pdf', fileName: pdf.fileName, caption: cap || '' });
+                if (sent && !it.test) updateMonthlyState(ym, function(m) { if (m.done.indexOf(it.key) < 0) m.done.push(it.key); });
+                else if (!sent) console.error('[REKAP BULANAN] pengiriman tidak berhasil: ' + it.label + ' (lihat riwayat kirim)');
+            } catch (e) { fail(e.message || e); }
+            finally { if (!it.test) monthlyInflight.delete(id); }
+        }, { to: it.jid, kind: it.test ? 'rekap_bulanan_uji' : 'rekap_bulanan' });
+    }
+    return result;
+}
+
+// Dipanggil tiap menit dari tick yang sudah ada. Murah: keluar cepat bila fitur mati / bukan waktunya.
+async function runMonthlyRecap() {
+    if (!isReady || monthlyRunning) return;
+    monthlyRunning = true;
+    try {
+        const cfg = await getBotSettings();
+        if (!monthlyStateLoaded) { monthlyEnabledSince = loadMonthlyState().enabled_since || null; monthlyStateLoaded = true; }
+        const now = wibNow();
+        if (!cfg.monthly_recap_enabled) {
+            if (monthlyEnabledSince) { monthlyEnabledSince = null; updateMonthlyState(null, function(_m, st) { st.enabled_since = null; }); }
+            return;
+        }
+        if (!monthlyEnabledSince) { monthlyEnabledSince = now.date; updateMonthlyState(null, function(_m, st) { st.enabled_since = now.date; }); }
+        let target = null;
+        if (isLastDayOfMonth(now.date)) { if (now.minutes >= hhmmToMin(cfg.monthly_recap_time || '16:00')) target = ymOf(now.date); }
+        else if (parseInt(now.date.slice(8), 10) <= 3) { // susulan: bot mati/terputus pada hari terakhir
+            const p = prevYm(ymOf(now.date));
+            if (monthlyEnabledSince <= monthDates(p)[monthDates(p).length - 1]) target = p;
+        }
+        if (!target) return;
+        const ms = loadMonthlyState()[target] || {};
+        if (ms.complete || (ms.next_check && Date.now() < ms.next_check)) return;
+        const r = await sendMonthlyRecap(target, cfg, { scheduled: true });
+        const pending = r.queued.length + r.waiting_retry.length;
+        updateMonthlyState(target, function(m) {
+            if (pending === 0) m.complete = true;
+            else m.next_check = Date.now() + (r.queued.length ? MONTHLY_RETRY_MS : 2 * 60 * 1000);
+        });
+        console.log('[REKAP BULANAN] ' + target + ' ' + JSON.stringify({ queued: r.queued.length, sudah: r.already_sent.length, tanpa_grup: r.no_group.length, menunggu: r.waiting_retry.length, menyerah: r.gave_up.length }));
+    } catch (e) { console.error('[REKAP BULANAN ERROR]:', e.message); }
+    finally { monthlyRunning = false; }
+}
+
+// Admin: kirim sekarang. body: { month?: 'YYYY-MM' (bawaan bulan ini), force?: bool, class_id?: uuid, test_to?: nomor/JID grup }
+// Tanpa test_to: kirim ke grup sungguhan (dicatat sebagai terkirim sehingga jadwal otomatis tidak mengirim ulang). Dengan test_to: hanya kirim uji.
+app.post('/admin/send-monthly-recap', requireAdmin, async (req, res) => {
+    try {
+        if (!isReady) return res.status(400).json({ status: 'error', message: 'Bot belum terhubung.' });
+        const body = req.body || {};
+        const ym = String(body.month || '').trim() || ymOf(wibNow().date);
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(ym)) return res.status(400).json({ status: 'error', message: 'Format bulan harus YYYY-MM.' });
+        const cfg = await getBotSettings();
+        const r = await sendMonthlyRecap(ym, cfg, { manual: true, force: !!body.force, classId: body.class_id || null, testTo: body.test_to || null });
+        res.json(Object.assign({ status: 'success', month: ym }, r));
+    } catch (e) { console.error('[REKAP BULANAN ADMIN]:', e.message); res.status(500).json({ status: 'error', message: e.message }); }
+});
+
 app.post('/admin/reload-config', requireAdmin, (req, res) => {
     templateCache.at = 0;
     settingsCache.at = 0;
@@ -4656,7 +5258,7 @@ app.listen(PORT, () => {
     setInterval(runSaturdayGreeting, 60 * 1000);
     setInterval(runHomeroomAttendanceReminder, 60 * 1000);
     setInterval(runUnfilledAttendanceGroup, 60 * 1000);
-    setInterval(runWeeklyAbsenceRecap, 60 * 1000);
+    setInterval(function() { runWeeklyAbsenceRecap(); runMonthlyRecap(); }, 60 * 1000); // rekap mingguan + rekap PDF akhir bulan (satu tick)
     scheduleAssignmentFollowup().catch(function(e) { console.error('[BUKTI WA]', e.message); });
     setTimeout(function() { catchUpAssignmentFollowup().catch(function() {}); }, 90 * 1000);
     setInterval(checkBackupSchedule, 60 * 1000);

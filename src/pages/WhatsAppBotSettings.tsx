@@ -20,6 +20,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { WA_TEMPLATES, WaTemplateDef, fillWaTemplate, waAdminFetch } from '@/lib/waBot';
+import { MonthlyRecapTab } from '@/components/whatsapp/MonthlyRecapTab';
 
 interface BotStatus {
   connected: boolean;
@@ -47,6 +48,8 @@ const EXTRA_KIND_LABELS: Record<string, string> = {
   tes_kirim: 'Pesan uji',
   rekap_kelas: 'Rekap absensi ke grup',
   rekap_grup_kelas: 'Rekap grup kelas',
+  rekap_bulanan: 'Rekap bulanan (PDF)',
+  rekap_bulanan_uji: 'Rekap bulanan (uji)',
   langsung: 'Kirim langsung',
   lainnya: 'Lainnya',
 };
@@ -1469,12 +1472,14 @@ export default function WhatsAppBotSettings() {
             <TabsTrigger value="reminder">Pengingat Guru</TabsTrigger>
             <TabsTrigger value="group-recap">Rekap Grup</TabsTrigger>
             <TabsTrigger value="class-groups">Grup Kelas</TabsTrigger>
+            <TabsTrigger value="monthly-recap">Rekap Bulanan</TabsTrigger>
           </TabsList>
           <TabsContent value="connection"><ConnectionTab /></TabsContent>
           <TabsContent value="templates"><TemplatesTab /></TabsContent>
           <TabsContent value="reminder"><ReminderTab /></TabsContent>
           <TabsContent value="group-recap"><GroupRecapTab /></TabsContent>
           <TabsContent value="class-groups"><ClassGroupsTab /></TabsContent>
+          <TabsContent value="monthly-recap"><MonthlyRecapTab /></TabsContent>
         </Tabs>
       </div>
     </DashboardLayout>
