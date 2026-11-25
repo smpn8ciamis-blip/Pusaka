@@ -46,6 +46,9 @@ export interface KomiteSettingsRow {
   batas_waktu: string | null;
   nama_publik: 'lengkap' | 'inisial' | 'anonim';
   tampilkan_rincian: boolean;
+  /** Kolom baru (migrasi 20261126050000); undefined bila migrasi belum dijalankan. */
+  tampilkan_rab?: boolean;
+  tampilkan_penggunaan?: boolean;
 }
 
 export function useKomiteSettings() {

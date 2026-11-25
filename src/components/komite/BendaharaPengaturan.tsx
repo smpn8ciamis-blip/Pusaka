@@ -18,6 +18,10 @@ export function BendaharaPengaturan() {
   const [batas, setBatas] = useState('');
   const [namaPublik, setNamaPublik] = useState<KomiteSettingsRow['nama_publik']>('inisial');
   const [rincian, setRincian] = useState(true);
+  const [tampilRab, setTampilRab] = useState(true);
+  const [tampilPakai, setTampilPakai] = useState(true);
+  // Kolom baru hanya ikut disimpan bila sudah ada di basis data (migrasi sudah dijalankan).
+  const adaKolomAnggaran = !!data && 'tampilkan_rab' in data;
 
   useEffect(() => {
     if (!data) return;
@@ -27,6 +31,8 @@ export function BendaharaPengaturan() {
     setBatas(data.batas_waktu ?? '');
     setNamaPublik(data.nama_publik);
     setRincian(data.tampilkan_rincian);
+    setTampilRab(data.tampilkan_rab ?? true);
+    setTampilPakai(data.tampilkan_penggunaan ?? true);
   }, [data]);
 
   const simpan = async () => {
@@ -35,6 +41,7 @@ export function BendaharaPengaturan() {
       await save.mutateAsync({
         judul: judul.trim(), deskripsi: deskripsi.trim() || null, target: parseRupiahInput(target),
         batas_waktu: batas || null, nama_publik: namaPublik, tampilkan_rincian: rincian,
+        ...(adaKolomAnggaran ? { tampilkan_rab: tampilRab, tampilkan_penggunaan: tampilPakai } : {}),
       });
       toast.success('Pengaturan disimpan');
     } catch (e) {
@@ -71,6 +78,18 @@ export function BendaharaPengaturan() {
         <span>Tampilkan tab <b>Rincian</b> (daftar catatan) di halaman publik</span>
         <Switch checked={rincian} onCheckedChange={setRincian} />
       </label>
+      {adaKolomAnggaran && (
+        <>
+          <label className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm">
+            <span>Tampilkan tab <b>RAB</b> di halaman publik</span>
+            <Switch checked={tampilRab} onCheckedChange={setTampilRab} aria-label="Tampilkan tab RAB" />
+          </label>
+          <label className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm">
+            <span>Tampilkan tab <b>Penggunaan</b> (transaksi belanja dan foto barang) di halaman publik</span>
+            <Switch checked={tampilPakai} onCheckedChange={setTampilPakai} aria-label="Tampilkan tab Penggunaan" />
+          </label>
+        </>
+      )}
       <Button onClick={simpan} disabled={save.isPending}>{save.isPending ? 'Menyimpan…' : 'Simpan Pengaturan'}</Button>
     </div>
   );

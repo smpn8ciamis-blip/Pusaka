@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { CalendarClock, Banknote, Landmark, ShieldCheck } from "lucide-react";
 import { PageHero } from "./Profil";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -7,11 +7,21 @@ import { KomiteSummary } from "@/components/komite/KomiteSummary";
 import { KomitePerRombel } from "@/components/komite/KomitePerRombel";
 import { KomiteRincianTable } from "@/components/komite/KomiteRincianTable";
 import { KomiteRekeningList } from "@/components/komite/KomiteRekeningList";
+import { KomiteRabPublik } from "@/components/komite/KomiteRabPublik";
+import { KomitePenggunaanPublik } from "@/components/komite/KomitePenggunaanPublik";
 import { useKomitePublik } from "@/hooks/useKomite";
+import { useKomiteAnggaranPublik } from "@/hooks/useKomiteAnggaran";
 import { formatTanggal, sisaHari } from "@/lib/komite";
 
 export default function Komite() {
   const { data, isLoading, isError, refetch } = useKomitePublik();
+  const [params, setParams] = useSearchParams();
+  // RAB dan Penggunaan: bila migrasinya belum dijalankan atau disembunyikan di Pengaturan, tabnya tidak tampil.
+  const anggaran = useKomiteAnggaranPublik().data;
+  const adaRab = !!(anggaran?.configured && anggaran.tampilkan_rab);
+  const adaPakai = !!(anggaran?.configured && anggaran.tampilkan_penggunaan);
+  const rawTab = params.get("tab");
+  const tab = rawTab === "rab" && adaRab ? "rab" : rawTab === "penggunaan" && adaPakai ? "penggunaan" : "dana";
 
   const target = Number(data?.target ?? 0);
   const total = Number(data?.total ?? 0);
@@ -42,59 +52,72 @@ export default function Komite() {
 
         {data?.configured && (
           <>
-            <section aria-labelledby="judul-komite" className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
-              <h2 id="judul-komite" className="mb-5 text-lg font-bold text-slate-900 md:text-xl">{data.judul}</h2>
-              <KomiteMainProgress total={total} target={target} />
-
-              <div className="mt-8 grid gap-6 border-t border-slate-100 pt-6 md:grid-cols-2">
-                <div>
-                  <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-600"><Landmark className="h-4 w-4 text-blue-600" aria-hidden /> Sumber dana: Rekening</div>
-                  <KomiteBar label="Masuk lewat rekening" value={Number(data.rekening_total ?? 0)} total={target} color="bg-blue-600" />
-                </div>
-                <div>
-                  <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-600"><Banknote className="h-4 w-4 text-emerald-600" aria-hidden /> Sumber dana: Tunai</div>
-                  <KomiteBar label="Diterima tunai" value={Number(data.tunai_total ?? 0)} total={target} color="bg-emerald-600" />
-                </div>
-              </div>
-
-              <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-slate-500">
-                {data.batas_waktu && (
-                  <span className="inline-flex items-center gap-1.5">
-                    <CalendarClock className="h-3.5 w-3.5" aria-hidden />
-                    Batas waktu {formatTanggal(data.batas_waktu)}
-                    {sisa !== null && (sisa >= 0 ? ` (${sisa} hari lagi)` : " (telah berakhir)")}
-                  </span>
-                )}
-                {data.diperbarui && <span>Diperbarui {formatTanggal(data.diperbarui)}</span>}
-              </div>
-            </section>
-
-            <section aria-labelledby="rekening-komite">
-              <h2 id="rekening-komite" className="mb-3 text-lg font-bold text-slate-900">Informasi Rekening Komite</h2>
-              <KomiteRekeningList rekening={data.rekening ?? []} />
-              <p className="mt-3 flex items-start gap-1.5 text-xs text-slate-500">
-                <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden />
-                Pastikan nama pemilik rekening sesuai sebelum mentransfer. Sumbangan tunai diserahkan melalui koordinator kelas (korlas) atau bendahara komite.
-              </p>
-            </section>
-
-            <section aria-label="Rincian dan ringkasan pendapatan">
-              <Tabs defaultValue="ringkasan">
-                <TabsList className="mb-4">
-                  <TabsTrigger value="ringkasan">Ringkasan</TabsTrigger>
-                  {data.tampilkan_rincian && <TabsTrigger value="rincian">Rincian</TabsTrigger>}
+            <Tabs value={tab} onValueChange={(v) => setParams(v === "dana" ? {} : { tab: v }, { replace: true })}>
+              {(adaRab || adaPakai) && (
+                <TabsList className="mb-6 h-auto flex-wrap justify-start" aria-label="Bagian halaman Komite">
+                  <TabsTrigger value="dana">Penggalangan Dana</TabsTrigger>
+                  {adaRab && <TabsTrigger value="rab">RAB</TabsTrigger>}
+                  {adaPakai && <TabsTrigger value="penggunaan">Penggunaan</TabsTrigger>}
                 </TabsList>
-                <TabsContent value="ringkasan">
-                  <KomiteSummary data={data} />
-                  <KomitePerRombel rows={data.per_rombel ?? []} />
-                </TabsContent>
-                {data.tampilkan_rincian && (
-                  <TabsContent value="rincian">
-                    <KomiteRincianTable rows={data.rincian ?? []} namaMode={data.nama_publik} />
-                  </TabsContent>
-                )}
-              </Tabs>
-            </section>
+              )}
+              <TabsContent value="dana" className="mt-0 space-y-8">
+                <section aria-labelledby="judul-komite" className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+                  <h2 id="judul-komite" className="mb-5 text-lg font-bold text-slate-900 md:text-xl">{data.judul}</h2>
+                  <KomiteMainProgress total={total} target={target} />
+
+                  <div className="mt-8 grid gap-6 border-t border-slate-100 pt-6 md:grid-cols-2">
+                    <div>
+                      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-600"><Landmark className="h-4 w-4 text-blue-600" aria-hidden /> Sumber dana: Rekening</div>
+                      <KomiteBar label="Masuk lewat rekening" value={Number(data.rekening_total ?? 0)} total={target} color="bg-blue-600" />
+                    </div>
+                    <div>
+                      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-600"><Banknote className="h-4 w-4 text-emerald-600" aria-hidden /> Sumber dana: Tunai</div>
+                      <KomiteBar label="Diterima tunai" value={Number(data.tunai_total ?? 0)} total={target} color="bg-emerald-600" />
+                    </div>
+                  </div>
+
+                  <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-slate-500">
+                    {data.batas_waktu && (
+                      <span className="inline-flex items-center gap-1.5">
+                        <CalendarClock className="h-3.5 w-3.5" aria-hidden />
+                        Batas waktu {formatTanggal(data.batas_waktu)}
+                        {sisa !== null && (sisa >= 0 ? ` (${sisa} hari lagi)` : " (telah berakhir)")}
+                      </span>
+                    )}
+                    {data.diperbarui && <span>Diperbarui {formatTanggal(data.diperbarui)}</span>}
+                  </div>
+                </section>
+
+                <section aria-labelledby="rekening-komite">
+                  <h2 id="rekening-komite" className="mb-3 text-lg font-bold text-slate-900">Informasi Rekening Komite</h2>
+                  <KomiteRekeningList rekening={data.rekening ?? []} />
+                  <p className="mt-3 flex items-start gap-1.5 text-xs text-slate-500">
+                    <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden />
+                    Pastikan nama pemilik rekening sesuai sebelum mentransfer. Sumbangan tunai diserahkan melalui koordinator kelas (korlas) atau bendahara komite.
+                  </p>
+                </section>
+
+                <section aria-label="Rincian dan ringkasan pendapatan">
+                  <Tabs defaultValue="ringkasan">
+                    <TabsList className="mb-4">
+                      <TabsTrigger value="ringkasan">Ringkasan</TabsTrigger>
+                      {data.tampilkan_rincian && <TabsTrigger value="rincian">Rincian</TabsTrigger>}
+                    </TabsList>
+                    <TabsContent value="ringkasan">
+                      <KomiteSummary data={data} />
+                      <KomitePerRombel rows={data.per_rombel ?? []} />
+                    </TabsContent>
+                    {data.tampilkan_rincian && (
+                      <TabsContent value="rincian">
+                        <KomiteRincianTable rows={data.rincian ?? []} namaMode={data.nama_publik} />
+                      </TabsContent>
+                    )}
+                  </Tabs>
+                </section>
+              </TabsContent>
+              {adaRab && anggaran && <TabsContent value="rab" className="mt-0"><KomiteRabPublik data={anggaran} /></TabsContent>}
+              {adaPakai && anggaran && <TabsContent value="penggunaan" className="mt-0"><KomitePenggunaanPublik data={anggaran} /></TabsContent>}
+            </Tabs>
 
             <p className="text-center text-xs text-slate-400">
               Pengurus komite: <Link to="/auth" className="underline hover:text-slate-600">masuk ke dashboard</Link>
