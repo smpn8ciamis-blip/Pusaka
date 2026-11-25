@@ -7,6 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Drawer, DrawerContent } from '@/components/ui/drawer';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -16,11 +20,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, ClipboardCheck, Filter, Printer, Download, BarChart3, Users, UserX, FileText,
   Search, CheckCircle2, XCircle, Clock, Stethoscope, User, TrendingUp, Calendar,
-  ArrowUpDown, ChevronLeft, ChevronRight, Info, X,
+  ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown, CalendarDays, Info, X,
 } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { DuplicateAttendanceManager } from '@/components/DuplicateAttendanceManager';
 import { AttendanceInfographicDialog } from '@/components/attendance/AttendanceInfographicDialog';
+import {
+  UI_STATUSES, STATUS_UI, lazyRowStyle, StatusPill, Avatar, StatTile, RateRing, SectionCard, StatusRadioGroup,
+  type UiStatus,
+} from '@/components/attendance/AttendanceUi';
 import type { InfoRecord } from '@/lib/attendanceInfographic';
 import {
   useAttendanceDaySettings,
@@ -709,28 +717,6 @@ const Attendance = () => {
     });
     return stats;
   }, [students, attendanceData]);
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Hadir': return 'bg-green-500 hover:bg-green-600';
-      case 'Terlambat': return 'bg-orange-500 hover:bg-orange-600';
-      case 'Sakit': return 'bg-amber-500 hover:bg-amber-600';
-      case 'Izin': return 'bg-blue-500 hover:bg-blue-600';
-      case 'Alpa': return 'bg-red-500 hover:bg-red-600';
-      default: return 'bg-gray-500 hover:bg-gray-600';
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'Hadir': return <CheckCircle2 className="w-5 h-5" />;
-      case 'Terlambat': return <Clock className="w-5 h-5" />;
-      case 'Sakit': return <Stethoscope className="w-5 h-5" />;
-      case 'Izin': return <Clock className="w-5 h-5" />;
-      case 'Alpa': return <XCircle className="w-5 h-5" />;
-      default: return <User className="w-5 h-5" />;
-    }
-  };
 
   const quickMarkAll = (status: string) => {
     if (!students) return;
@@ -1648,532 +1634,332 @@ const Attendance = () => {
     toast.success('Laporan berhasil dicetak dengan QR verifikasi aman');
   };
 
-  const getStatusBadgeClass = (status: string) => {
-    switch (status) {
-      case 'hadir': return 'badge-hadir';
-      case 'terlambat': return 'bg-orange-500/10 text-orange-600 border border-orange-500/20';
-      case 'sakit': return 'badge-sakit';
-      case 'izin': return 'badge-izin';
-      case 'alpa': return 'badge-alpa';
-      default: return 'bg-gray-500/10 text-gray-600 border border-gray-500/20';
-    }
-  };
-
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'hadir': return 'Hadir';
-      case 'terlambat': return 'Terlambat';
-      case 'sakit': return 'Sakit';
-      case 'izin': return 'Izin';
-      case 'alpa': return 'Alpa';
-      default: return status;
-    }
-  };
-
   const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
   const currentYearNum = new Date().getFullYear();
 
+  // ---------- Nilai turunan & potongan JSX untuk tampilan ----------
+  const totalRecords = stats.hadir + stats.izin + stats.sakit + stats.alpa;
+  const ratePct = totalRecords > 0 ? (stats.hadir / totalRecords) * 100 : null;
+  const periodText =
+    filterStartDate === filterEndDate
+      ? formatTanggalID(filterStartDate)
+      : `${formatTanggalID(filterStartDate)} – ${formatTanggalID(filterEndDate)}`;
+  const canFillAttendance = userRole === 'teacher' || userRole === 'guru_piket' || userRole === 'kesiswaan' || userRole === 'admin';
+  const resetDialog = () => {
+    setIsDialogOpen(false);
+    setAttendanceData({});
+    setSelectedSchedule('');
+    setSearchQuery('');
+  };
+  const openFillDialog = () => {
+    if (!isDayAllowed && !isFullAccessRole) {
+      toast.error(`Absensi tidak dapat diisi pada hari ini. Hari yang diizinkan: ${activeDayNames.join(', ')}`);
+      return;
+    }
+    setIsDialogOpen(true);
+  };
+
+  const recordTypeBadge = (record: any) => {
+    const notes: string = record.notes || '';
+    if (notes.includes('[Override dari')) return <Badge className="bg-purple-500 hover:bg-purple-600">Override</Badge>;
+    if (notes.includes('[Default Wali Kelas')) return <Badge variant="secondary">Default WK</Badge>;
+    if (notes.includes('[Absensi Pertama]')) return <Badge variant="outline" className="border-green-500 text-green-700 dark:text-green-400">Pertama</Badge>;
+    return <Badge variant="outline">Manual</Badge>;
+  };
+  const recordCleanNotes = (record: any) => {
+    const raw: string = record.notes || '';
+    if (!raw) return '-';
+    return (
+      raw
+        .replace(/\[Absensi Pertama\]/g, '')
+        .replace(/\[Default Wali Kelas[^\]]*\]/g, '')
+        .replace(/\[Override dari[^\]]*\]/g, '')
+        .trim() || '-'
+    );
+  };
+
+  /** Isi formulir absensi: dipakai bersama oleh Drawer (ponsel) dan Dialog (desktop). */
+  const attendanceFormBody = (
+    <div className="space-y-4">
+      <Alert className="border-primary/20 bg-primary/5">
+        <Info className="h-4 w-4 text-primary" />
+        <AlertDescription className="text-sm">
+          <strong>Sistem Hybrid:</strong> guru yang mengabsen pertama menjadi data default; status bisa diubah bila berbeda.
+          Siswa yang tap RFID terlambat otomatis tercatat "Terlambat" (dihitung Hadir).
+        </AlertDescription>
+      </Alert>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label className="text-sm font-semibold">Jadwal Pelajaran</Label>
+          <ScheduleCombobox schedules={(schedules ?? []) as any} value={selectedSchedule} onChange={setSelectedSchedule} placeholder="Pilih jadwal pelajaran" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="att-date" className="text-sm font-semibold">Tanggal</Label>
+          <Input id="att-date" type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="h-10" />
+        </div>
+      </div>
+
+      {selectedSchedule && students && students.length > 0 && (
+        <>
+          {existingAttendance && existingAttendance.length > 0 && (
+            <div className="flex items-start gap-3 rounded-xl border border-blue-500/30 bg-blue-500/10 p-3" role="status">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-500 text-white">
+                <ClipboardCheck className="h-4 w-4" />
+              </span>
+              <div className="text-sm">
+                <p className="font-semibold">Data absensi ditemukan</p>
+                <p className="text-muted-foreground">
+                  {existingAttendance.length} siswa sudah punya data untuk tanggal {selectedDate}; dimuat sebagai default.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6" role="status" aria-live="polite">
+            <div className="rounded-lg bg-muted/60 px-2 py-2 text-center">
+              <div className="text-lg font-bold tabular-nums">{attendanceStatsDialog.total}</div>
+              <div className="text-[11px] text-muted-foreground">Total</div>
+            </div>
+            {UI_STATUSES.map((s) => (
+              <div key={s} className={`rounded-lg px-2 py-2 text-center ${STATUS_UI[s].bg}`}>
+                <div className={`text-lg font-bold tabular-nums ${STATUS_UI[s].text}`}>
+                  {attendanceStatsDialog[s.toLowerCase() as 'hadir' | 'terlambat' | 'sakit' | 'izin' | 'alpa']}
+                </div>
+                <div className="text-[11px] text-muted-foreground">{STATUS_UI[s].label}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex snap-x gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]">
+            {UI_STATUSES.map((s) => {
+              const Icon = STATUS_UI[s].icon;
+              return (
+                <Button key={s} size="sm" variant="outline" onClick={() => quickMarkAll(s)} className="h-9 shrink-0 snap-start gap-1.5">
+                  <Icon className={`h-3.5 w-3.5 ${STATUS_UI[s].text}`} aria-hidden="true" />
+                  Semua {STATUS_UI[s].label}
+                </Button>
+              );
+            })}
+          </div>
+
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <Input
+              type="search"
+              inputMode="search"
+              placeholder="Cari nama atau NIS siswa…"
+              aria-label="Cari siswa"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-10 pl-9"
+            />
+          </div>
+
+          <ul className="grid gap-2 lg:grid-cols-2">
+            {filteredStudents.map((student, idx) => {
+              const cur = attendanceData[student.id]?.status || 'Hadir';
+              const curUi = (UI_STATUSES as string[]).includes(cur) ? STATUS_UI[cur as UiStatus] : null;
+              return (
+                <li key={student.id} style={lazyRowStyle(112)} className="space-y-2 rounded-xl border bg-card p-3 shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <Avatar name={student.full_name} tone={curUi ? `${curUi.solid} text-white` : undefined} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold">{toTitleCase(student.full_name)}</p>
+                      <p className="text-xs text-muted-foreground">NIS {student.nis}</p>
+                    </div>
+                    <span className="text-xs tabular-nums text-muted-foreground">{idx + 1}</span>
+                  </div>
+                  <StatusRadioGroup
+                    name={`status-${student.id}`}
+                    label={`Status kehadiran ${toTitleCase(student.full_name)}`}
+                    value={cur}
+                    onChange={(s) => updateAttendanceStatus(student.id, s)}
+                  />
+                  {cur !== 'Hadir' && cur !== 'Terlambat' && (
+                    <Input
+                      placeholder="Catatan (opsional)"
+                      aria-label={`Catatan ${toTitleCase(student.full_name)}`}
+                      value={attendanceData[student.id]?.notes || ''}
+                      onChange={(e) => updateAttendanceNotes(student.id, e.target.value)}
+                      className="h-9 text-sm"
+                    />
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          {filteredStudents.length === 0 && (
+            <div className="py-10 text-center">
+              <Search className="mx-auto mb-2 h-10 w-10 text-muted-foreground" aria-hidden="true" />
+              <p className="text-sm text-muted-foreground">Tidak ada siswa yang cocok dengan pencarian</p>
+            </div>
+          )}
+        </>
+      )}
+
+      {selectedSchedule && (!students || students.length === 0) && (
+        <div className="rounded-xl bg-muted/30 py-10 text-center">
+          <Users className="mx-auto mb-2 h-10 w-10 text-muted-foreground" aria-hidden="true" />
+          <p className="text-sm text-muted-foreground">Tidak ada siswa dalam kelas ini</p>
+        </div>
+      )}
+      {!selectedSchedule && (
+        <div className="rounded-xl border-2 border-dashed border-primary/30 bg-primary/5 py-10 text-center">
+          <TrendingUp className="mx-auto mb-2 h-10 w-10 text-primary" aria-hidden="true" />
+          <p className="font-semibold text-balance">Pilih jadwal untuk memulai</p>
+          <p className="mx-auto max-w-xs text-xs text-muted-foreground text-balance">Pilih jadwal pelajaran dan tanggal, lalu isi status tiap siswa.</p>
+        </div>
+      )}
+    </div>
+  );
+
+  const attendanceFooter = (
+    <div className="flex flex-col gap-2 border-t bg-background p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:flex-row sm:items-center sm:justify-between md:p-4">
+      <p className="hidden text-sm text-muted-foreground sm:block" aria-live="polite">
+        {selectedSchedule && students
+          ? `${attendanceStatsDialog.hadir} hadir, ${attendanceStatsDialog.terlambat} terlambat dari ${attendanceStatsDialog.total} siswa`
+          : ''}
+      </p>
+      <div className="flex gap-2">
+        <Button variant="outline" onClick={resetDialog} className="flex-1 sm:flex-none">
+          Batal
+        </Button>
+        <Button
+          onClick={handleSubmitAttendance}
+          disabled={!selectedSchedule || !students || students.length === 0 || createAttendanceMutation.isPending}
+          className="flex-1 gap-2 bg-gradient-primary sm:min-w-36 sm:flex-none"
+        >
+          {createAttendanceMutation.isPending ? (
+            <>
+              <span className="h-4 w-4 animate-spin rounded-full border-b-2 border-white motion-reduce:animate-none" aria-hidden="true" />
+              Menyimpan…
+            </>
+          ) : (
+            <>
+              <ClipboardCheck className="h-4 w-4" aria-hidden="true" />
+              Simpan Absensi
+            </>
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+
   return (
     <DashboardLayout>
-      <div className="space-y-6 animate-fade-in">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">Absensi</h1>
-            <p className="text-sm md:text-base text-muted-foreground">
-              {isFullAccessRole ? 'Pantau absensi semua kelas' : 'Isi absensi siswa'}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {isFullAccessRole && <DuplicateAttendanceManager />}
-            <Button variant="outline" onClick={handlePrint} className="gap-2" size="sm">
-              <Printer className="h-4 w-4" />
-              <span className="hidden sm:inline">Cetak</span>
-            </Button>
-            <Button variant="outline" onClick={handlePrintAbsent} className="gap-2" size="sm">
-              <UserX className="h-4 w-4" />
-              <span className="hidden sm:inline">Tidak Hadir</span>
-            </Button>
-            <Button variant="outline" onClick={handleExportPDF} className="gap-2" size="sm">
-              <FileText className="h-4 w-4" />
-              <span className="hidden sm:inline">PDF</span>
-            </Button>
-            <Button variant="outline" onClick={handleExportRekapPDF} className="gap-2" size="sm">
-              <FileText className="h-4 w-4" />
-              <span className="hidden sm:inline">Rekap</span>
-            </Button>
-            <Button variant="outline" onClick={handleExport} className="gap-2" size="sm">
-              <Download className="h-4 w-4" />
-              <span className="hidden sm:inline">CSV</span>
-            </Button>
-            <Button variant="outline" onClick={() => setInfographicOpen(true)} className="gap-2" size="sm">
-              <BarChart3 className="h-4 w-4" />
-              <span className="hidden sm:inline">Infografis</span>
-            </Button>
-            {(userRole === 'teacher' || userRole === 'guru_piket' || userRole === 'kesiswaan' || userRole === 'admin') && (
-              <>
-                <Button
-                  className="bg-gradient-primary gap-2"
-                  onClick={() => {
-                    if (!isDayAllowed && !isFullAccessRole) {
-                      toast.error(`Absensi tidak dapat diisi pada hari ini. Hari yang diizinkan: ${activeDayNames.join(', ')}`);
-                      return;
-                    }
-                    setIsDialogOpen(true);
-                  }}
-                >
-                  <Plus className="h-4 w-4" />
-                  <span className="hidden sm:inline">Isi Absensi</span>
-                  <span className="sm:hidden">Absen</span>
-                </Button>
+      <div className="space-y-4 motion-safe:animate-fade-in md:space-y-6">
+        {/* HEADER */}
+        <header className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-primary/10 via-background to-primary/5 p-4 md:p-6">
+          <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-primary/10 blur-3xl" aria-hidden="true" />
+          <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-4">
+              <span className="hidden h-12 w-12 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-sm sm:grid">
+                <ClipboardCheck className="h-6 w-6" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-xs font-medium uppercase tracking-wide text-primary">{isFullAccessRole ? 'Pantau semua kelas' : 'Guru mata pelajaran'}</p>
+                <h1 className="text-xl font-bold text-balance md:text-3xl">Absensi Siswa</h1>
+                <p className="mt-2 inline-flex items-center gap-1.5 rounded-full border bg-background/70 px-2.5 py-1 text-xs md:text-sm">
+                  <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                  {periodText}
+                </p>
+              </div>
+            </div>
 
-                {isMobile ? (
-                  <Drawer open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                    <DrawerContent className="max-h-[90vh] mx-auto">
-                      <div className="flex items-center justify-between px-4 py-3 border-b bg-background">
-                        <div className="flex items-center gap-2">
-                          <Calendar className="w-5 h-5 text-primary" />
-                          <span className="font-bold text-base">Isi Absensi</span>
-                        </div>
-                        <Button variant="ghost" size="sm" onClick={() => setIsDialogOpen(false)}>
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      <div className="flex-1 overflow-y-auto px-4 py-3 max-h-[calc(90vh-140px)]">
-                        <div className="space-y-3">
-                          <div className="space-y-3">
-                            <div className="space-y-1.5">
-                              <Label className="text-sm font-semibold">Jadwal Pelajaran</Label>
-                              <ScheduleCombobox schedules={(schedules ?? []) as any} value={selectedSchedule} onChange={setSelectedSchedule} placeholder="Pilih jadwal pelajaran" />
+            <div className="flex flex-wrap items-center gap-4 sm:gap-6">
+              <div className="flex items-center gap-3">
+                <RateRing pct={ratePct} />
+                <div className="text-xs text-muted-foreground">
+                  <p className="font-medium text-foreground">Tingkat kehadiran</p>
+                  <p className="tabular-nums">{totalRecords} catatan</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {isFullAccessRole && <DuplicateAttendanceManager />}
+                <Button variant="outline" size="sm" onClick={() => setInfographicOpen(true)} className="gap-2">
+                  <BarChart3 className="h-4 w-4" aria-hidden="true" />
+                  <span className="hidden sm:inline">Infografis</span>
+                  <span className="sr-only sm:hidden">Infografis</span>
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="gap-2">
+                      <Download className="h-4 w-4" aria-hidden="true" />
+                      <span className="hidden sm:inline">Cetak &amp; Ekspor</span>
+                      <span className="sr-only sm:hidden">Cetak dan ekspor</span>
+                      <ChevronDown className="h-3.5 w-3.5 opacity-60" aria-hidden="true" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuItem onSelect={() => setTimeout(handlePrint, 200)}><Printer className="mr-2 h-4 w-4" /> Cetak</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={handlePrintAbsent}><UserX className="mr-2 h-4 w-4" /> Cetak Tidak Hadir</DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={handleExportPDF}><FileText className="mr-2 h-4 w-4" /> PDF Detail</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={handleExportRekapPDF}><FileText className="mr-2 h-4 w-4" /> PDF Rekap</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={handleExport}><Download className="mr-2 h-4 w-4" /> CSV</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {canFillAttendance && (
+                  <>
+                    <Button className="gap-2 bg-gradient-primary shadow-sm" size="sm" onClick={openFillDialog}>
+                      <Plus className="h-4 w-4" aria-hidden="true" />
+                      <span className="hidden sm:inline">Isi Absensi</span>
+                      <span className="sm:hidden">Absen</span>
+                    </Button>
+
+                    {isMobile ? (
+                      <Drawer open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                        <DrawerContent className="mx-auto flex max-h-[92dvh] flex-col">
+                          <div className="flex items-center justify-between border-b bg-background px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <Calendar className="h-5 w-5 text-primary" aria-hidden="true" />
+                              <span className="text-base font-bold">Isi Absensi</span>
                             </div>
-                            <div className="space-y-1.5">
-                              <Label className="text-sm font-semibold">Tanggal</Label>
-                              <input
-                                type="date"
-                                value={selectedDate}
-                                onChange={(e) => setSelectedDate(e.target.value)}
-                                className="flex h-11 w-full rounded-md border-2 border-input bg-background px-3 py-2 text-sm"
-                              />
-                            </div>
+                            <Button variant="ghost" size="sm" onClick={() => setIsDialogOpen(false)} aria-label="Tutup">
+                              <X className="h-4 w-4" />
+                            </Button>
                           </div>
-                          {selectedSchedule && students && students.length > 0 && (
-                            <>
-                              <div className="grid grid-cols-5 gap-2">
-                                <div className="bg-muted/50 rounded-lg p-2 text-center">
-                                  <p className="text-lg font-bold">{attendanceStatsDialog.total}</p>
-                                  <p className="text-[10px] text-muted-foreground">Total</p>
-                                </div>
-                                <div className="bg-green-50 border border-green-200 rounded-lg p-2 text-center">
-                                  <p className="text-lg font-bold text-green-700">{attendanceStatsDialog.hadir}</p>
-                                  <p className="text-[10px] text-green-700">Hadir</p>
-                                </div>
-                                <div className="bg-orange-50 border border-orange-200 rounded-lg p-2 text-center">
-                                  <p className="text-lg font-bold text-orange-700">{attendanceStatsDialog.terlambat}</p>
-                                  <p className="text-[10px] text-orange-700">Tlmt</p>
-                                </div>
-                                <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-center">
-                                  <p className="text-lg font-bold text-amber-700">{attendanceStatsDialog.sakit}</p>
-                                  <p className="text-[10px] text-amber-700">Sakit</p>
-                                </div>
-                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-center">
-                                  <p className="text-lg font-bold text-blue-700">{attendanceStatsDialog.izin}</p>
-                                  <p className="text-[10px] text-blue-700">Izin</p>
-                                </div>
-                              </div>
-                              <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4">
-                                <Button size="sm" variant="outline" onClick={() => quickMarkAll('Hadir')} className="shrink-0 gap-1 h-9">
-                                  <CheckCircle2 className="w-3 h-3" /> Semua Hadir
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => quickMarkAll('Terlambat')} className="shrink-0 gap-1 h-9">
-                                  <Clock className="w-3 h-3" /> Semua Tlmt
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => quickMarkAll('Sakit')} className="shrink-0 gap-1 h-9">
-                                  <Stethoscope className="w-3 h-3" /> Semua Sakit
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => quickMarkAll('Izin')} className="shrink-0 gap-1 h-9">
-                                  <Clock className="w-3 h-3" /> Semua Izin
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => quickMarkAll('Alpa')} className="shrink-0 gap-1 h-9">
-                                  <XCircle className="w-3 h-3" /> Semua Alpa
-                                </Button>
-                              </div>
-                              <div className="relative">
-                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                                <input
-                                  placeholder="Cari siswa..."
-                                  value={searchQuery}
-                                  onChange={(e) => setSearchQuery(e.target.value)}
-                                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 pl-9 text-sm"
-                                />
-                              </div>
-                              <div className="space-y-3">
-                                {filteredStudents.map((student) => {
-                                  const currentStatus = attendanceData[student.id]?.status || 'Hadir';
-                                  return (
-                                    <Card key={student.id} className="border shadow-sm">
-                                      <CardContent className="p-3 space-y-3">
-                                        <div className="flex items-center gap-3">
-                                          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${getStatusColor(currentStatus)}`}>
-                                            {toTitleCase(student.full_name).charAt(0)}
-                                          </div>
-                                          <div className="flex-1 min-w-0">
-                                            <h3 className="font-medium text-sm truncate">{toTitleCase(student.full_name)}</h3>
-                                            <p className="text-xs text-muted-foreground">NIS: {student.nis}</p>
-                                          </div>
-                                        </div>
-                                        <div className="grid grid-cols-5 gap-1.5">
-                                          {['Hadir', 'Terlambat', 'Sakit', 'Izin', 'Alpa'].map((status) => (
-                                            <Button
-                                              key={status}
-                                              size="sm"
-                                              variant={currentStatus === status ? 'default' : 'outline'}
-                                              className={`h-9 text-xs px-1 ${currentStatus === status ? `${getStatusColor(status)} text-white border-0` : ''}`}
-                                              onClick={() => updateAttendanceStatus(student.id, status)}
-                                            >
-                                              {status === 'Hadir' && 'H'}
-                                              {status === 'Terlambat' && 'T'}
-                                              {status === 'Sakit' && 'S'}
-                                              {status === 'Izin' && 'I'}
-                                              {status === 'Alpa' && 'A'}
-                                            </Button>
-                                          ))}
-                                        </div>
-                                        {currentStatus !== 'Hadir' && currentStatus !== 'Terlambat' && (
-                                          <input
-                                            placeholder="Catatan..."
-                                            value={attendanceData[student.id]?.notes || ''}
-                                            onChange={(e) => updateAttendanceNotes(student.id, e.target.value)}
-                                            className="flex h-8 w-full rounded border border-input bg-background px-2 py-1 text-xs"
-                                          />
-                                        )}
-                                      </CardContent>
-                                    </Card>
-                                  );
-                                })}
-                              </div>
-                              {filteredStudents.length === 0 && (
-                                <div className="text-center py-8">
-                                  <Search className="w-10 h-10 mx-auto text-muted-foreground mb-2" />
-                                  <p className="text-sm text-muted-foreground">Tidak ada siswa ditemukan</p>
-                                </div>
-                              )}
-                            </>
-                          )}
-                          {selectedSchedule && (!students || students.length === 0) && (
-                            <div className="text-center py-8 bg-muted/30 rounded-lg">
-                              <Users className="h-10 w-10 mx-auto text-muted-foreground mb-2" />
-                              <p className="text-sm text-muted-foreground">Tidak ada siswa dalam kelas ini</p>
-                            </div>
-                          )}
-                          {!selectedSchedule && (
-                            <div className="text-center py-8 bg-gradient-to-br from-primary/5 to-primary/10 rounded-lg border-2 border-dashed border-primary/30">
-                              <TrendingUp className="h-12 w-12 mx-auto text-primary mb-2" />
-                              <p className="font-semibold mb-1">Pilih Jadwal</p>
-                              <p className="text-xs text-muted-foreground">Pilih jadwal pelajaran untuk mulai absensi</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="p-4 border-t bg-background sticky bottom-0">
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            onClick={() => {
-                              setIsDialogOpen(false);
-                              setAttendanceData({});
-                              setSelectedSchedule('');
-                              setSearchQuery('');
-                            }}
-                            className="flex-1"
-                          >
-                            Batal
-                          </Button>
-                          <Button
-                            onClick={handleSubmitAttendance}
-                            disabled={!selectedSchedule || !students || students.length === 0 || createAttendanceMutation.isPending}
-                            className="flex-1 bg-gradient-primary"
-                          >
-                            {createAttendanceMutation.isPending ? (
-                              <>
-                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                                Menyimpan...
-                              </>
-                            ) : (
-                              <>
-                                <ClipboardCheck className="mr-2 h-4 w-4" />
-                                Simpan
-                              </>
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                    </DrawerContent>
-                  </Drawer>
-                ) : (
-                  <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                    <DialogContent className="max-w-7xl max-h-[95vh] overflow-hidden flex flex-col p-0">
-                      <DialogHeader className="p-6 pb-4 border-b">
-                        <DialogTitle className="text-2xl font-bold flex items-center gap-2">
-                          <Calendar className="w-6 h-6 text-primary" />
-                          Isi Absensi Siswa
-                        </DialogTitle>
-                      </DialogHeader>
-                      <div className="flex-1 overflow-y-auto px-6">
-                        <div className="space-y-6 py-4">
-                          <Alert className="bg-blue-50 border-blue-200">
-                            <Info className="h-4 w-4 text-blue-600" />
-                            <AlertDescription className="text-sm text-blue-800">
-                              <strong>Sistem Hybrid:</strong> Guru yang mengabsen pertama kali akan menjadi data default. Status dapat diubah jika berbeda. Siswa yang tap RFID terlambat akan otomatis tercatat sebagai "Terlambat" (dihitung sebagai Hadir).
-                            </AlertDescription>
-                          </Alert>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                              <Label className="text-sm font-semibold">Jadwal Pelajaran</Label>
-                              <ScheduleCombobox schedules={(schedules ?? []) as any} value={selectedSchedule} onChange={setSelectedSchedule} placeholder="Pilih jadwal pelajaran" />
-                            </div>
-                            <div className="space-y-2">
-                              <Label className="text-sm font-semibold">Tanggal</Label>
-                              <input
-                                type="date"
-                                value={selectedDate}
-                                onChange={(e) => setSelectedDate(e.target.value)}
-                                className="flex h-12 w-full rounded-md border-2 border-input bg-background px-3 py-2 text-sm"
-                              />
-                            </div>
-                          </div>
-                          {selectedSchedule && students && students.length > 0 && (
-                            <>
-                              {existingAttendance && existingAttendance.length > 0 && (
-                                <Card className="bg-blue-50 border-blue-200">
-                                  <CardContent className="p-4">
-                                    <div className="flex items-start gap-3">
-                                      <div className="bg-blue-500 p-2 rounded-lg">
-                                        <ClipboardCheck className="w-5 h-5 text-white" />
-                                      </div>
-                                      <div className="flex-1">
-                                        <h3 className="font-semibold text-blue-900 mb-2">Data Absensi Ditemukan</h3>
-                                        <p className="text-sm text-blue-700 mb-2">
-                                          Ada absensi yang sudah diinput untuk tanggal {selectedDate}. Data akan dimuat sebagai default.
-                                        </p>
-                                        <div className="text-xs text-blue-600">
-                                          {existingAttendance.length} siswa sudah memiliki data absensi
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </CardContent>
-                                </Card>
-                              )}
-                              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                                <Card className="bg-muted/50 border-none">
-                                  <CardContent className="p-4 flex items-center justify-between">
-                                    <div>
-                                      <p className="text-xs text-muted-foreground">Total</p>
-                                      <p className="text-2xl font-bold">{attendanceStatsDialog.total}</p>
-                                    </div>
-                                    <User className="w-8 h-8 text-muted-foreground" />
-                                  </CardContent>
-                                </Card>
-                                <Card className="bg-green-50 border-green-200 border">
-                                  <CardContent className="p-4 flex items-center justify-between">
-                                    <div>
-                                      <p className="text-xs text-green-700">Hadir</p>
-                                      <p className="text-2xl font-bold text-green-700">{attendanceStatsDialog.hadir}</p>
-                                    </div>
-                                    <CheckCircle2 className="w-8 h-8 text-green-600" />
-                                  </CardContent>
-                                </Card>
-                                <Card className="bg-orange-50 border-orange-200 border">
-                                  <CardContent className="p-4 flex items-center justify-between">
-                                    <div>
-                                      <p className="text-xs text-orange-700">Terlambat</p>
-                                      <p className="text-2xl font-bold text-orange-700">{attendanceStatsDialog.terlambat}</p>
-                                    </div>
-                                    <Clock className="w-8 h-8 text-orange-600" />
-                                  </CardContent>
-                                </Card>
-                                <Card className="bg-amber-50 border-amber-200 border">
-                                  <CardContent className="p-4 flex items-center justify-between">
-                                    <div>
-                                      <p className="text-xs text-amber-700">Sakit</p>
-                                      <p className="text-2xl font-bold text-amber-700">{attendanceStatsDialog.sakit}</p>
-                                    </div>
-                                    <Stethoscope className="w-8 h-8 text-amber-600" />
-                                  </CardContent>
-                                </Card>
-                                <Card className="bg-blue-50 border-blue-200 border">
-                                  <CardContent className="p-4 flex items-center justify-between">
-                                    <div>
-                                      <p className="text-xs text-blue-700">Izin</p>
-                                      <p className="text-2xl font-bold text-blue-700">{attendanceStatsDialog.izin}</p>
-                                    </div>
-                                    <Clock className="w-8 h-8 text-blue-600" />
-                                  </CardContent>
-                                </Card>
-                              </div>
-                              <div className="flex flex-wrap gap-2 p-4 bg-muted/30 rounded-lg">
-                                <p className="text-sm font-semibold w-full mb-2">Quick Actions:</p>
-                                <Button size="sm" variant="outline" onClick={() => quickMarkAll('Hadir')} className="gap-2">
-                                  <CheckCircle2 className="w-4 h-4" /> Semua Hadir
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => quickMarkAll('Terlambat')} className="gap-2">
-                                  <Clock className="w-4 h-4" /> Semua Terlambat
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => quickMarkAll('Sakit')} className="gap-2">
-                                  <Stethoscope className="w-4 h-4" /> Semua Sakit
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => quickMarkAll('Izin')} className="gap-2">
-                                  <Clock className="w-4 h-4" /> Semua Izin
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => quickMarkAll('Alpa')} className="gap-2">
-                                  <XCircle className="w-4 h-4" /> Semua Alpa
-                                </Button>
-                              </div>
-                              <div className="relative">
-                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                                <input
-                                  placeholder="Cari nama atau NIS siswa..."
-                                  value={searchQuery}
-                                  onChange={(e) => setSearchQuery(e.target.value)}
-                                  className="flex h-12 w-full rounded-md border-2 border-input bg-background px-3 py-2 pl-10 text-sm"
-                                />
-                              </div>
-                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {filteredStudents.map((student, index) => {
-                                  const currentStatus = attendanceData[student.id]?.status || 'Hadir';
-                                  return (
-                                    <Card
-                                      key={student.id}
-                                      className="card-hover border-2 transition-all duration-300 animate-scale-in"
-                                      style={{ animationDelay: `${index * 30}ms` }}
-                                    >
-                                      <CardContent className="p-4 space-y-3">
-                                        <div className="flex items-start gap-3">
-                                          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg ${getStatusColor(currentStatus)}`}>
-                                            {toTitleCase(student.full_name).charAt(0).toUpperCase()}
-                                          </div>
-                                          <div className="flex-1 min-w-0">
-                                            <h3 className="font-semibold text-base truncate">{toTitleCase(student.full_name)}</h3>
-                                            <p className="text-sm text-muted-foreground">NIS: {student.nis}</p>
-                                          </div>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-2">
-                                          {['Hadir', 'Terlambat', 'Sakit', 'Izin', 'Alpa'].map((status) => (
-                                            <Button
-                                              key={status}
-                                              size="sm"
-                                              variant={currentStatus === status ? 'default' : 'outline'}
-                                              className={`gap-2 transition-all ${currentStatus === status ? `${getStatusColor(status)} text-white` : 'hover:border-primary'}`}
-                                              onClick={() => updateAttendanceStatus(student.id, status)}
-                                            >
-                                              {getStatusIcon(status)}
-                                              {status}
-                                            </Button>
-                                          ))}
-                                        </div>
-                                        {currentStatus !== 'Hadir' && currentStatus !== 'Terlambat' && (
-                                          <input
-                                            placeholder="Catatan (opsional)"
-                                            value={attendanceData[student.id]?.notes || ''}
-                                            onChange={(e) => updateAttendanceNotes(student.id, e.target.value)}
-                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm animate-fade-in"
-                                          />
-                                        )}
-                                      </CardContent>
-                                    </Card>
-                                  );
-                                })}
-                              </div>
-                              {filteredStudents.length === 0 && (
-                                <div className="text-center py-12">
-                                  <Search className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
-                                  <p className="text-muted-foreground">Tidak ada siswa yang cocok dengan pencarian</p>
-                                </div>
-                              )}
-                            </>
-                          )}
-                          {selectedSchedule && (!students || students.length === 0) && (
-                            <div className="text-center py-12 bg-muted/30 rounded-lg">
-                              <Users className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
-                              <p className="text-muted-foreground">Tidak ada siswa dalam kelas ini</p>
-                            </div>
-                          )}
-                          {!selectedSchedule && (
-                            <div className="text-center py-12 bg-gradient-to-br from-primary/5 to-primary/10 rounded-lg border-2 border-dashed border-primary/30">
-                              <TrendingUp className="h-16 w-16 mx-auto text-primary mb-3" />
-                              <p className="text-lg font-semibold mb-2">Pilih Jadwal untuk Memulai</p>
-                              <p className="text-sm text-muted-foreground">Pilih jadwal pelajaran dan tanggal untuk mulai mengisi absensi</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between p-6 border-t bg-muted/30">
-                        <div className="text-sm text-muted-foreground">
-                          {selectedSchedule && students && (
-                            <span className="flex items-center gap-2">
-                              <TrendingUp className="w-4 h-4" />
-                              {attendanceStatsDialog.hadir} hadir, {attendanceStatsDialog.terlambat} terlambat dari {attendanceStatsDialog.total} siswa
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex gap-3">
-                          <Button variant="outline" onClick={() => {
-                            setIsDialogOpen(false);
-                            setAttendanceData({});
-                            setSelectedSchedule('');
-                            setSearchQuery('');
-                          }}>
-                            Batal
-                          </Button>
-                          <Button
-                            onClick={handleSubmitAttendance}
-                            disabled={!selectedSchedule || !students || students.length === 0 || createAttendanceMutation.isPending}
-                            className="bg-gradient-primary min-w-32"
-                          >
-                            {createAttendanceMutation.isPending ? (
-                              <>
-                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                                Menyimpan...
-                              </>
-                            ) : (
-                              <>
-                                <ClipboardCheck className="mr-2 h-4 w-4" />
-                                Simpan Absensi
-                              </>
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
+                          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">{attendanceFormBody}</div>
+                          {attendanceFooter}
+                        </DrawerContent>
+                      </Drawer>
+                    ) : (
+                      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                        <DialogContent className="flex max-h-[92dvh] max-w-5xl flex-col gap-0 overflow-hidden p-0">
+                          <DialogHeader className="border-b p-4 text-left md:p-6">
+                            <DialogTitle className="flex items-center gap-2 text-xl">
+                              <Calendar className="h-5 w-5 text-primary" aria-hidden="true" />
+                              Isi Absensi Siswa
+                            </DialogTitle>
+                          </DialogHeader>
+                          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 md:p-6">{attendanceFormBody}</div>
+                          {attendanceFooter}
+                        </DialogContent>
+                      </Dialog>
+                    )}
+                  </>
                 )}
-              </>
-            )}
+              </div>
+            </div>
           </div>
-        </div>
+        </header>
 
-        {/* Filter Section */}
-        <Card className="card-hover border-none shadow-md">
-          <CardHeader className="pb-2 md:pb-6">
-            <CardTitle className="flex items-center gap-2 text-sm md:text-base">
-              <Filter className="h-4 w-4 md:h-5 md:w-5 text-primary" />
-              Filter Data
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-3 md:p-6 pt-0">
-            <div className="space-y-2 md:space-y-4">
-              <div className="flex flex-wrap gap-1.5 md:gap-2">
-                <Button variant="outline" size="sm" onClick={handleThisWeek} className="gap-1 h-8 text-[11px] px-2 md:h-9 md:text-sm md:px-3">
-                  <Calendar className="h-3 w-3 md:h-3.5 md:w-3.5" /> Minggu Ini
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleThisMonth} className="gap-1 h-8 text-[11px] px-2 md:h-9 md:text-sm md:px-3">
-                  <Calendar className="h-3 w-3 md:h-3.5 md:w-3.5" /> Bulan Ini
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleSchoolYear} className="gap-1 h-8 text-[11px] px-2 md:h-9 md:text-sm md:px-3">
-                  <Calendar className="h-3 w-3 md:h-3.5 md:w-3.5" /> Tahun Pelajaran{selectedYear ? ` ${selectedYear}` : ''}
-                </Button>
+        {/* FILTER */}
+        <SectionCard title="Filter Data" icon={<Filter className="h-4 w-4 text-primary md:h-5 md:w-5" aria-hidden="true" />}>
+          <div className="space-y-3">
+            <div className="flex snap-x gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]">
+              <Button variant="secondary" size="sm" onClick={handleThisWeek} className="h-9 shrink-0 snap-start rounded-full">Minggu Ini</Button>
+              <Button variant="secondary" size="sm" onClick={handleThisMonth} className="h-9 shrink-0 snap-start rounded-full">Bulan Ini</Button>
+              <Button variant="secondary" size="sm" onClick={handleSchoolYear} className="h-9 shrink-0 snap-start rounded-full">
+                Tahun Pelajaran{selectedYear ? ` ${selectedYear}` : ''}
+              </Button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+              <div className="space-y-1">
+                <Label className="text-xs">Bulan</Label>
                 <Select value={selectedMonth} onValueChange={handleMonthSelect}>
-                  <SelectTrigger className="w-[110px] md:w-[180px] h-8 md:h-9 text-[11px] md:text-sm">
-                    <SelectValue placeholder="Pilih Bulan" />
-                  </SelectTrigger>
+                  <SelectTrigger className="h-10"><SelectValue placeholder="Pilih bulan" /></SelectTrigger>
                   <SelectContent>
                     {monthNames.map((month, idx) => (
                       <SelectItem key={month} value={`${currentYearNum}-${String(idx + 1).padStart(2, '0')}`}>
@@ -2183,393 +1969,280 @@ const Attendance = () => {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-2 md:gap-4">
-                <div className="grid grid-cols-2 gap-2 md:contents">
-                  <div className="space-y-1">
-                    <Label className="text-[11px] md:text-sm">Tanggal Mulai</Label>
-                    <input
-                      type="date"
-                      value={filterStartDate}
-                      onChange={(e) => { setFilterStartDate(e.target.value); setSelectedMonth(''); setCurrentPage(1); }}
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs md:text-sm"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] md:text-sm">Tanggal Akhir</Label>
-                    <input
-                      type="date"
-                      value={filterEndDate}
-                      onChange={(e) => { setFilterEndDate(e.target.value); setSelectedMonth(''); setCurrentPage(1); }}
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs md:text-sm"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2 md:contents">
-                  <div className="space-y-1">
-                    <Label className="text-[11px] md:text-sm">Kelas</Label>
-                    <Select value={filterClass} onValueChange={(v) => { setFilterClass(v); setCurrentPage(1); }}>
-                      <SelectTrigger className="h-9 text-xs md:text-sm">
-                        <SelectValue placeholder="Semua Kelas" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Semua Kelas</SelectItem>
-                        {classes?.map((cls: any) => (
-                          <SelectItem key={cls.id} value={cls.id}>{cls.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] md:text-sm">Mata Pelajaran</Label>
-                    <Select value={filterSubject} onValueChange={(v) => { setFilterSubject(v); setCurrentPage(1); }}>
-                      <SelectTrigger className="h-9 text-xs md:text-sm">
-                        <SelectValue placeholder="Semua Mapel" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Semua Mapel</SelectItem>
-                        {subjects?.map((subject: any) => (
-                          <SelectItem key={subject} value={subject}>{subject}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
+              <div className="space-y-1">
+                <Label htmlFor="f-start" className="text-xs">Tanggal Mulai</Label>
+                <Input id="f-start" type="date" className="h-10" value={filterStartDate}
+                  onChange={(e) => { setFilterStartDate(e.target.value); setSelectedMonth(''); setCurrentPage(1); }} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="f-end" className="text-xs">Tanggal Akhir</Label>
+                <Input id="f-end" type="date" className="h-10" value={filterEndDate}
+                  onChange={(e) => { setFilterEndDate(e.target.value); setSelectedMonth(''); setCurrentPage(1); }} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Kelas</Label>
+                <Select value={filterClass} onValueChange={(v) => { setFilterClass(v); setCurrentPage(1); }}>
+                  <SelectTrigger className="h-10"><SelectValue placeholder="Semua Kelas" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Semua Kelas</SelectItem>
+                    {classes?.map((cls: any) => (<SelectItem key={cls.id} value={cls.id}>{cls.name}</SelectItem>))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="col-span-2 space-y-1 lg:col-span-1">
+                <Label className="text-xs">Mata Pelajaran</Label>
+                <Select value={filterSubject} onValueChange={(v) => { setFilterSubject(v); setCurrentPage(1); }}>
+                  <SelectTrigger className="h-10"><SelectValue placeholder="Semua Mapel" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Semua Mapel</SelectItem>
+                    {subjects?.map((subject: any) => (<SelectItem key={subject} value={subject}>{subject}</SelectItem>))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
 
-        {/* Statistics Cards */}
-        <div className="grid grid-cols-2 gap-3 md:gap-6 md:grid-cols-5">
-          <Card className="card-hover border-none shadow-md">
-            <CardContent className="p-4 md:pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs md:text-sm text-muted-foreground">Hadir</p>
-                  <p className="text-xl md:text-3xl font-bold text-green-600">{stats.hadir}</p>
-                  <p className="text-[9px] md:text-[10px] text-muted-foreground mt-1">Termasuk terlambat</p>
-                </div>
-                <div className="badge-hadir w-8 h-8 md:w-12 md:h-12 rounded-lg flex items-center justify-center text-sm md:text-lg font-bold">H</div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="card-hover border-none shadow-md">
-            <CardContent className="p-4 md:pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs md:text-sm text-muted-foreground">Terlambat</p>
-                  <p className="text-xl md:text-3xl font-bold text-orange-600">{stats.terlambat}</p>
-                  <p className="text-[9px] md:text-[10px] text-muted-foreground mt-1">Dihitung sebagai hadir</p>
-                </div>
-                <div className="w-8 h-8 md:w-12 md:h-12 rounded-lg flex items-center justify-center text-sm md:text-lg font-bold bg-orange-500/10 text-orange-600 border border-orange-500/20">T</div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="card-hover border-none shadow-md">
-            <CardContent className="p-4 md:pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs md:text-sm text-muted-foreground">Izin</p>
-                  <p className="text-xl md:text-3xl font-bold text-blue-600">{stats.izin}</p>
-                </div>
-                <div className="badge-izin w-8 h-8 md:w-12 md:h-12 rounded-lg flex items-center justify-center text-sm md:text-lg font-bold">I</div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="card-hover border-none shadow-md">
-            <CardContent className="p-4 md:pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs md:text-sm text-muted-foreground">Sakit</p>
-                  <p className="text-xl md:text-3xl font-bold text-yellow-600">{stats.sakit}</p>
-                </div>
-                <div className="badge-sakit w-8 h-8 md:w-12 md:h-12 rounded-lg flex items-center justify-center text-sm md:text-lg font-bold">S</div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="card-hover border-none shadow-md">
-            <CardContent className="p-4 md:pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs md:text-sm text-muted-foreground">Alpa</p>
-                  <p className="text-xl md:text-3xl font-bold text-red-600">{stats.alpa}</p>
-                </div>
-                <div className="badge-alpa w-8 h-8 md:w-12 md:h-12 rounded-lg flex items-center justify-center text-sm md:text-lg font-bold">A</div>
-              </div>
-            </CardContent>
-          </Card>
+        {/* STATISTIK */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:gap-4 lg:grid-cols-5">
+          <div className="col-span-2 sm:col-span-1">
+            <StatTile kind="Hadir" value={stats.hadir} total={totalRecords} note="Termasuk terlambat" />
+          </div>
+          <StatTile kind="Terlambat" value={stats.terlambat} total={totalRecords} note="Dihitung sebagai hadir" />
+          <StatTile kind="Izin" value={stats.izin} total={totalRecords} />
+          <StatTile kind="Sakit" value={stats.sakit} total={totalRecords} />
+          <StatTile kind="Alpa" value={stats.alpa} total={totalRecords} />
         </div>
 
-        {/* Charts */}
-        <div className="grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-2">
-          <Card className="card-hover border-none shadow-md">
-            <CardHeader className="pb-2 md:pb-6">
-              <CardTitle className="flex items-center gap-2 text-sm md:text-base">
-                <BarChart3 className="h-4 w-4 md:h-5 md:w-5 text-primary" /> Grafik Kehadiran
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-2 md:p-6">
-              <ResponsiveContainer width="100%" height={200} className="md:!h-[300px]">
-                <BarChart data={barChartData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="status" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip />
-                  <Bar dataKey="jumlah" fill="hsl(var(--primary))" />
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-          <Card className="card-hover border-none shadow-md">
-            <CardHeader className="pb-2 md:pb-6">
-              <CardTitle className="flex items-center gap-2 text-sm md:text-base">
-                <Users className="h-4 w-4 md:h-5 md:w-5 text-primary" /> Distribusi Kehadiran
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-2 md:p-6">
-              <ResponsiveContainer width="100%" height={200} className="md:!h-[300px]">
-                <PieChart>
-                  <Pie
-                    data={chartData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={(entry: any) => `${entry.name}: ${entry.value}`}
-                    outerRadius={60}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
-                    {chartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Grafik Kehadiran per Kelas */}
-        <Card className="card-hover border-none shadow-md">
-          <CardHeader className="pb-2 md:pb-6">
-            <CardTitle className="flex items-center gap-2 text-sm md:text-base">
-              <BarChart3 className="h-4 w-4 md:h-5 md:w-5 text-primary" /> Kehadiran per Kelas
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-2 md:p-6">
-            {classChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={Math.max(220, classChartData.length * 36 + 60)}>
-                <BarChart data={classChartData} layout="vertical" margin={{ left: 8, right: 16 }}>
-                  <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <YAxis type="category" dataKey="kelas" width={70} tick={{ fontSize: 12 }} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="Hadir" stackId="a" fill={COLORS.Hadir} />
-                  <Bar dataKey="Terlambat" stackId="a" fill={COLORS.Terlambat} />
-                  <Bar dataKey="Izin" stackId="a" fill={COLORS.Izin} />
-                  <Bar dataKey="Sakit" stackId="a" fill={COLORS.Sakit} />
-                  <Bar dataKey="Alpa" stackId="a" fill={COLORS.Alpa} />
-                </BarChart>
-              </ResponsiveContainer>
+        {/* GRAFIK */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">
+          <SectionCard title="Grafik Kehadiran" icon={<BarChart3 className="h-4 w-4 text-primary md:h-5 md:w-5" aria-hidden="true" />}>
+            {totalRecords === 0 ? (
+              <p className="py-12 text-center text-sm text-muted-foreground">Belum ada data pada periode ini.</p>
             ) : (
-              <p className="text-sm text-muted-foreground text-center py-8">Tidak ada data</p>
+              <div className="h-52 md:h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={barChartData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-muted" />
+                    <XAxis dataKey="status" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.5)' }} />
+                    <Bar dataKey="jumlah" radius={[8, 8, 0, 0]} maxBarSize={48} isAnimationActive={false}>
+                      {barChartData.map((d) => (<Cell key={d.status} fill={COLORS[d.status as keyof typeof COLORS]} />))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             )}
-          </CardContent>
-        </Card>
+          </SectionCard>
 
-        {/* Absent Students List */}
-        <div className="grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-3">
-          <Card className="card-hover border-none shadow-md">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <UserX className="h-5 w-5 text-blue-600" /> Siswa Izin ({absentByReason.izin.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {absentByReason.izin.length > 0 ? (
-                  absentByReason.izin.map((record) => (
-                    <div key={record.id} className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
-                      <div>
-                        <p className="font-medium text-sm">{toTitleCase(record.students?.full_name || '')}</p>
-                        <p className="text-xs text-muted-foreground">{shortClass(record.students?.classes?.name)}</p>
-                      </div>
-                      <span className="badge-izin px-2 py-1 text-xs font-bold rounded">I</span>
+          <SectionCard title="Distribusi Kehadiran" icon={<Users className="h-4 w-4 text-primary md:h-5 md:w-5" aria-hidden="true" />}>
+            {totalRecords === 0 ? (
+              <p className="py-12 text-center text-sm text-muted-foreground">Belum ada data pada periode ini.</p>
+            ) : (
+              <div className="flex flex-col items-center gap-4 sm:flex-row">
+                <div className="relative h-44 w-44 shrink-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={chartData.filter((d) => d.value > 0)} cx="50%" cy="50%" innerRadius={52} outerRadius={78}
+                        paddingAngle={3} cornerRadius={4} dataKey="value" stroke="none" isAnimationActive={false}>
+                        {chartData.filter((d) => d.value > 0).map((entry) => (<Cell key={entry.name} fill={entry.color} />))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
+                    <div>
+                      <div className="text-2xl font-bold tabular-nums">{totalRecords}</div>
+                      <div className="text-[11px] text-muted-foreground">catatan</div>
                     </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-muted-foreground text-center py-4">Tidak ada siswa izin</p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="card-hover border-none shadow-md">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <UserX className="h-5 w-5 text-yellow-600" /> Siswa Sakit ({absentByReason.sakit.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {absentByReason.sakit.length > 0 ? (
-                  absentByReason.sakit.map((record) => (
-                    <div key={record.id} className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg">
-                      <div>
-                        <p className="font-medium text-sm">{toTitleCase(record.students?.full_name || '')}</p>
-                        <p className="text-xs text-muted-foreground">{shortClass(record.students?.classes?.name)}</p>
-                      </div>
-                      <span className="badge-sakit px-2 py-1 text-xs font-bold rounded">S</span>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-muted-foreground text-center py-4">Tidak ada siswa sakit</p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="card-hover border-none shadow-md">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <UserX className="h-5 w-5 text-red-600" /> Siswa Alpa ({absentByReason.alpa.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {absentByReason.alpa.length > 0 ? (
-                  absentByReason.alpa.map((record) => (
-                    <div key={record.id} className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
-                      <div>
-                        <p className="font-medium text-sm">{toTitleCase(record.students?.full_name || '')}</p>
-                        <p className="text-xs text-muted-foreground">{shortClass(record.students?.classes?.name)}</p>
-                      </div>
-                      <span className="badge-alpa px-2 py-1 text-xs font-bold rounded">A</span>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-muted-foreground text-center py-4">Tidak ada siswa alpa</p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Attendance Table */}
-        <Card className="card-hover border-none shadow-md">
-          <CardHeader className="pb-2 md:pb-6">
-            <CardTitle className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-              <div className="flex items-center gap-2 text-sm md:text-base">
-                <ClipboardCheck className="h-4 w-4 md:h-5 md:w-5 text-primary" /> Rekap Detail Absensi
-              </div>
-              <p className="text-xs md:text-sm text-muted-foreground font-normal">
-                {attendanceFetching
-                  ? `Memuat data… ${loadProgress ? `${Math.round((loadProgress.done / Math.max(1, loadProgress.total)) * 100)}% (${loadProgress.done}/${loadProgress.total} potongan)` : ''}`
-                  : `Menampilkan ${paginatedRecords.length} dari ${sortedRecords.length} data`}
-              </p>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-2 md:p-6">
-            <div className="space-y-4 overflow-x-auto">
-              <Table className="min-w-[700px] md:min-w-full">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>
-                      <Button variant="ghost" size="sm" onClick={() => handleSort('date')} className="flex items-center gap-1 -ml-4 hover:bg-transparent">
-                        Tanggal <ArrowUpDown className="h-4 w-4" />
-                      </Button>
-                    </TableHead>
-                    <TableHead>NIS</TableHead>
-                    <TableHead>
-                      <Button variant="ghost" size="sm" onClick={() => handleSort('name')} className="flex items-center gap-1 -ml-4 hover:bg-transparent">
-                        Nama <ArrowUpDown className="h-4 w-4" />
-                      </Button>
-                    </TableHead>
-                    <TableHead>
-                      <Button variant="ghost" size="sm" onClick={() => handleSort('class')} className="flex items-center gap-1 -ml-4 hover:bg-transparent">
-                        Kelas <ArrowUpDown className="h-4 w-4" />
-                      </Button>
-                    </TableHead>
-                    <TableHead>Mata Pelajaran</TableHead>
-                    <TableHead>
-                      <Button variant="ghost" size="sm" onClick={() => handleSort('status')} className="flex items-center gap-1 -ml-4 hover:bg-transparent">
-                        Status <ArrowUpDown className="h-4 w-4" />
-                      </Button>
-                    </TableHead>
-                    <TableHead>Tipe</TableHead>
-                    <TableHead>Catatan</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {paginatedRecords && paginatedRecords.length > 0 ? (
-                    paginatedRecords.map((record) => {
-                      const isFirstRecord = record.notes?.includes('[Absensi Pertama]');
-                      const isDefault = record.notes?.includes('[Default Wali Kelas');
-                      const isOverride = record.notes?.includes('[Override dari');
-                      let cleanNotes = record.notes || '-';
-                      if (cleanNotes !== '-') {
-                        cleanNotes = cleanNotes
-                          .replace(/\[Absensi Pertama\]/g, '')
-                          .replace(/\[Default Wali Kelas[^\]]*\]/g, '')
-                          .replace(/\[Override dari[^\]]*\]/g, '')
-                          .trim() || '-';
-                      }
-                      return (
-                        <TableRow key={`${record.student_id}-${record.students?.class_id}-${record.date}`}>
-                          <TableCell>{formatTanggalID(record.date)}</TableCell>
-                          <TableCell>{record.students?.nis}</TableCell>
-                          <TableCell className="font-medium">{toTitleCase(record.students?.full_name || '')}</TableCell>
-                          <TableCell>{shortClass(record.students?.classes?.name)}</TableCell>
-                          <TableCell className="text-sm text-muted-foreground">{record.schedules?.subject || record.sched_subject || '-'}</TableCell>
-                          <TableCell>
-                            <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${getStatusBadgeClass(record.status)}`}>
-                              {getStatusLabel(record.status)}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            {isOverride ? (
-                              <Badge variant="default" className="bg-purple-500 hover:bg-purple-600">Override</Badge>
-                            ) : isDefault ? (
-                              <Badge variant="secondary">Default WK</Badge>
-                            ) : isFirstRecord ? (
-                              <Badge variant="outline" className="border-green-500 text-green-700">Pertama</Badge>
-                            ) : (
-                              <Badge variant="outline">Manual</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell className="max-w-xs truncate">{cleanNotes}</TableCell>
-                        </TableRow>
-                      );
-                    })
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
-                        Tidak ada data absensi
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-              {totalPages > 1 && (
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between pt-4">
-                  <p className="text-xs md:text-sm text-muted-foreground text-center md:text-left">
-                    Halaman {currentPage} dari {totalPages}
-                  </p>
-                  <div className="flex gap-2 justify-center">
-                    <Button variant="outline" size="sm" onClick={() => setCurrentPage(Math.max(1, currentPage - 1))} disabled={currentPage === 1} className="gap-1">
-                      <ChevronLeft className="h-4 w-4" />
-                      <span className="hidden sm:inline">Sebelumnya</span>
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages} className="gap-1">
-                      <span className="hidden sm:inline">Selanjutnya</span>
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
                   </div>
                 </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+                <ul className="w-full space-y-2 text-sm">
+                  {chartData.map((d) => (
+                    <li key={d.name} className="flex items-center justify-between gap-3">
+                      <span className="inline-flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ background: d.color }} aria-hidden="true" />
+                        {d.name}
+                      </span>
+                      <span className="tabular-nums text-muted-foreground">
+                        <b className="text-foreground">{d.value}</b>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </SectionCard>
+        </div>
+
+        {/* KEHADIRAN PER KELAS */}
+        <SectionCard title="Kehadiran per Kelas" icon={<BarChart3 className="h-4 w-4 text-primary md:h-5 md:w-5" aria-hidden="true" />}>
+          {classChartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={Math.max(220, classChartData.length * 36 + 60)}>
+              <BarChart data={classChartData} layout="vertical" margin={{ left: 8, right: 16 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} className="stroke-muted" />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="kelas" width={70} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.5)' }} />
+                <Legend />
+                <Bar dataKey="Hadir" stackId="a" fill={COLORS.Hadir} isAnimationActive={false} />
+                <Bar dataKey="Terlambat" stackId="a" fill={COLORS.Terlambat} isAnimationActive={false} />
+                <Bar dataKey="Izin" stackId="a" fill={COLORS.Izin} isAnimationActive={false} />
+                <Bar dataKey="Sakit" stackId="a" fill={COLORS.Sakit} isAnimationActive={false} />
+                <Bar dataKey="Alpa" stackId="a" fill={COLORS.Alpa} radius={[0, 6, 6, 0]} isAnimationActive={false} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="py-8 text-center text-sm text-muted-foreground">Tidak ada data</p>
+          )}
+        </SectionCard>
+
+        {/* SISWA TIDAK HADIR */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3 md:gap-6">
+          {([
+            { key: 'izin', ui: 'Izin', empty: 'Tidak ada siswa izin' },
+            { key: 'sakit', ui: 'Sakit', empty: 'Tidak ada siswa sakit' },
+            { key: 'alpa', ui: 'Alpa', empty: 'Tidak ada siswa alpa' },
+          ] as const).map(({ key, ui, empty }) => {
+            const list = absentByReason[key];
+            const m = STATUS_UI[ui];
+            return (
+              <SectionCard
+                key={key}
+                title={`Siswa ${m.label}`}
+                icon={<UserX className={`h-4 w-4 md:h-5 md:w-5 ${m.text}`} aria-hidden="true" />}
+                action={<span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold tabular-nums ${m.bg} ${m.text}`}>{list.length}</span>}
+              >
+                <ul className="max-h-64 space-y-2 overflow-y-auto overscroll-contain">
+                  {list.length > 0 ? (
+                    list.map((record) => (
+                      <li key={record.id} style={lazyRowStyle(60)} className="flex items-center gap-3 rounded-lg border p-2.5">
+                        <Avatar name={record.students?.full_name || ''} tone={`${m.bg} ${m.text}`} size="h-8 w-8" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">{toTitleCase(record.students?.full_name || '')}</p>
+                          <p className="text-xs text-muted-foreground">{shortClass(record.students?.classes?.name)}</p>
+                        </div>
+                        <StatusPill status={ui} />
+                      </li>
+                    ))
+                  ) : (
+                    <li className="py-4 text-center text-sm text-muted-foreground">{empty}</li>
+                  )}
+                </ul>
+              </SectionCard>
+            );
+          })}
+        </div>
+
+        {/* REKAP DETAIL */}
+        <SectionCard
+          title="Rekap Detail Absensi"
+          icon={<ClipboardCheck className="h-4 w-4 text-primary md:h-5 md:w-5" aria-hidden="true" />}
+          description={
+            attendanceFetching
+              ? `Memuat data… ${loadProgress ? `${Math.round((loadProgress.done / Math.max(1, loadProgress.total)) * 100)}% (${loadProgress.done}/${loadProgress.total} potongan)` : ''}`
+              : `Menampilkan ${paginatedRecords.length} dari ${sortedRecords.length} data`
+          }
+        >
+          {/* Ponsel: kartu */}
+          <ul className="space-y-2 md:hidden">
+            {paginatedRecords && paginatedRecords.length > 0 ? (
+              paginatedRecords.map((record) => (
+                <li key={`${record.student_id}-${record.students?.class_id}-${record.date}`} style={lazyRowStyle(96)} className="rounded-xl border p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{toTitleCase(record.students?.full_name || '')}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {shortClass(record.students?.classes?.name)} · {record.schedules?.subject || record.sched_subject || '-'}
+                      </p>
+                    </div>
+                    <StatusPill status={record.status} />
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span>{formatTanggalID(record.date)}</span>
+                    {recordTypeBadge(record)}
+                  </div>
+                  {recordCleanNotes(record) !== '-' && <p className="mt-1.5 text-xs">{recordCleanNotes(record)}</p>}
+                </li>
+              ))
+            ) : (
+              <li className="py-8 text-center text-sm text-muted-foreground">Tidak ada data absensi</li>
+            )}
+          </ul>
+
+          {/* Layar lebar: tabel */}
+          <div className="hidden overflow-x-auto rounded-xl border md:block">
+            <Table>
+              <TableHeader className="bg-muted/40">
+                <TableRow>
+                  <TableHead aria-sort={undefined}>
+                    <Button variant="ghost" size="sm" onClick={() => handleSort('date')} className="-ml-3 gap-1 hover:bg-transparent">
+                      Tanggal <ArrowUpDown className="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                  </TableHead>
+                  <TableHead>NIS</TableHead>
+                  <TableHead>
+                    <Button variant="ghost" size="sm" onClick={() => handleSort('name')} className="-ml-3 gap-1 hover:bg-transparent">
+                      Nama <ArrowUpDown className="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                  </TableHead>
+                  <TableHead>
+                    <Button variant="ghost" size="sm" onClick={() => handleSort('class')} className="-ml-3 gap-1 hover:bg-transparent">
+                      Kelas <ArrowUpDown className="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                  </TableHead>
+                  <TableHead>Mata Pelajaran</TableHead>
+                  <TableHead>
+                    <Button variant="ghost" size="sm" onClick={() => handleSort('status')} className="-ml-3 gap-1 hover:bg-transparent">
+                      Status <ArrowUpDown className="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                  </TableHead>
+                  <TableHead>Tipe</TableHead>
+                  <TableHead>Catatan</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {paginatedRecords && paginatedRecords.length > 0 ? (
+                  paginatedRecords.map((record) => (
+                    <TableRow key={`${record.student_id}-${record.students?.class_id}-${record.date}`} className="hover:bg-muted/40">
+                      <TableCell className="whitespace-nowrap text-sm">{formatTanggalID(record.date)}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{record.students?.nis}</TableCell>
+                      <TableCell className="text-sm font-medium">{toTitleCase(record.students?.full_name || '')}</TableCell>
+                      <TableCell className="text-sm">{shortClass(record.students?.classes?.name)}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{record.schedules?.subject || record.sched_subject || '-'}</TableCell>
+                      <TableCell><StatusPill status={record.status} /></TableCell>
+                      <TableCell>{recordTypeBadge(record)}</TableCell>
+                      <TableCell className="max-w-xs truncate text-sm text-muted-foreground" title={recordCleanNotes(record)}>{recordCleanNotes(record)}</TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">Tidak ada data absensi</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {totalPages > 1 && (
+            <nav aria-label="Halaman rekap" className="flex flex-col gap-3 pt-4 md:flex-row md:items-center md:justify-between">
+              <p className="text-center text-xs text-muted-foreground md:text-left md:text-sm">Halaman {currentPage} dari {totalPages}</p>
+              <div className="flex justify-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setCurrentPage(Math.max(1, currentPage - 1))} disabled={currentPage === 1} className="gap-1">
+                  <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                  <span className="hidden sm:inline">Sebelumnya</span>
+                  <span className="sr-only sm:hidden">Sebelumnya</span>
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages} className="gap-1">
+                  <span className="hidden sm:inline">Selanjutnya</span>
+                  <span className="sr-only sm:hidden">Selanjutnya</span>
+                  <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                </Button>
+              </div>
+            </nav>
+          )}
+        </SectionCard>
       </div>
       <AttendanceInfographicDialog
         open={infographicOpen}
