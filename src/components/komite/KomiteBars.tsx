@@ -51,7 +51,7 @@ export function KomiteMainProgress({ total, target, className = '' }: { total: n
         </div>
         <div className="sm:text-right">
           <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Target</div>
-          <div className="text-lg font-semibold text-slate-700 tabular-nums md:text-xl">{target > 0 ? formatRupiah(target) : 'Belum ditetapkan'}</div>
+          <div className="text-lg font-semibold text-slate-700 tabular-nums md:text-xl">{target > 0 ? formatRupiah(target) : 'Tidak ditetapkan'}</div>
         </div>
       </div>
       <div
@@ -70,7 +70,7 @@ export function KomiteMainProgress({ total, target, className = '' }: { total: n
         </div>
       </div>
       <div className="mt-2 flex flex-wrap justify-between gap-2 text-sm text-slate-600">
-        <span>{target > 0 ? `${persenTeks(total, target)} dari target` : 'Target belum ditetapkan'}</span>
+        <span>{target > 0 ? `${persenTeks(total, target)} dari target` : 'Target tidak ditetapkan'}</span>
         <span>
           {target > 0 && (lewat ? 'Target tercapai 🎉' : `Kurang ${formatRupiah(target - total)}`)}
         </span>
