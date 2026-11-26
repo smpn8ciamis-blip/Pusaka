@@ -21,6 +21,7 @@ import { TurnstileWidget, type TurnstileHandle } from '@/components/TurnstileWid
 import { TURNSTILE_SITE_KEY } from '@/config/turnstile';
 import { useCaptchaConfig } from '@/hooks/useCaptchaConfig';
 import { cn } from '@/lib/utils';
+import { completeLogin } from '@/lib/singleDevice';
 
 const TwoFactorVerify = lazy(() =>
   import('@/components/TwoFactorVerify').then((m) => ({ default: m.TwoFactorVerify })),
@@ -331,6 +332,7 @@ export default function Auth() {
       if (!currentUser) { toast.error('Sesi tidak valid'); resetCaptcha(); return; }
       const needsMfa = await checkMfaRequired(currentUser.id);
       if (needsMfa) { setShowMfaVerify(true); setPendingAuthCheck(false); return; }
+      await completeLogin(); // perangkat ini menjadi satu-satunya perangkat aktif akun
       setPendingAuthCheck(false); resetCaptcha();
       toast.success('Login berhasil!');
       navigate(await routeForRole(currentUser.id));
@@ -342,6 +344,7 @@ export default function Auth() {
   }, [isSystemLocked, captchaEnabled, captchaToken, signIn, checkMfaRequired, resetCaptcha, routeForRole, navigate]);
 
   const handleMfaVerified = useCallback(async () => {
+    await completeLogin(); // 2FA lolos: perangkat ini menjadi satu-satunya perangkat aktif akun
     setShowMfaVerify(false); toast.success('Login berhasil!');
     const { data: { user: u } } = await supabase.auth.getUser();
     if (u) navigate(await routeForRole(u.id));
