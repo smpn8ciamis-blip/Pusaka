@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, Trash2, Search, FileDown, Calendar as CalendarIcon, X, ExternalLink, Eye, Download, Pencil, Lock } from "lucide-react";
+import { Plus, Trash2, Search, FileDown, Calendar as CalendarIcon, X, ExternalLink, Eye, Download, Pencil, Lock, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { useSpjGuard, SPJ_LOCK_QUERY_KEY } from "@/hooks/useSpjLock";
 import { cn, toTitleCase } from "@/lib/utils";
@@ -28,6 +28,13 @@ import { z } from "zod";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DataPagination } from "@/components/ui/data-pagination";
 import { usePagination } from "@/hooks/usePagination";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { KepsekLetterSettingsDialog } from "@/components/letters/KepsekLetterSettingsDialog";
+import { fetchKepsekLetterSettings, KEPSEK_SETTINGS_KEY, useKepsekLetterSettings } from "@/hooks/useSuratTugasKepsek";
+import { isKepsekExecutor, kepsekPerson, nextKepsekNumber, type HeadmasterInfo } from "@/lib/suratTugasKepsek";
+import { buildKepsekLetterPdf, loadKabLogo } from "@/lib/suratTugasKepsekPdf";
+
+type LetterKind = "guru" | "kepsek";
 
 interface ManualExecutor {
   id?: string;
@@ -82,6 +89,7 @@ export default function AssignmentLetters() {
   });
   const [formData, setFormData] = useState({
     letter_number: "",
+    kepsek_letter_number: "",
     letter_date: format(new Date(), "yyyy-MM-dd"),
     dasar_surat_tugas: "",
     tanggal_dasar_surat_tugas: format(new Date(), "yyyy-MM-dd"),
@@ -91,6 +99,8 @@ export default function AssignmentLetters() {
     start_date: format(new Date(), "yyyy-MM-dd"),
     end_date: format(new Date(), "yyyy-MM-dd"),
   });
+  const [kepsekNumberTouched, setKepsekNumberTouched] = useState(false);
+  const [previewKind, setPreviewKind] = useState<LetterKind>("guru");
 
   const { data: teachers, isLoading: isLoadingTeachers } = useQuery({
     queryKey: ["teachers-for-assignment"],
@@ -149,6 +159,36 @@ export default function AssignmentLetters() {
     },
   });
 
+  const { data: schoolSettings } = useQuery({
+    queryKey: ["school-settings-for-assignment"],
+    queryFn: async () => {
+      const { data } = await supabase.from("school_settings").select("*").limit(1).maybeSingle();
+      return data as any;
+    },
+  });
+  const headmaster: HeadmasterInfo = {
+    name: schoolSettings?.headmaster_name,
+    nip: schoolSettings?.headmaster_nip,
+    position: schoolSettings?.headmaster_position,
+  };
+  const { data: kepsekCfg } = useKepsekLetterSettings();
+
+  const isKepsek = (e: { full_name?: string | null; nip?: string | null; jabatan?: string | null }) => isKepsekExecutor(e, headmaster);
+
+  /** Pelaksana surat tersimpan (guru + manual) dalam bentuk ringkas, tanpa query tambahan. */
+  const executorsOfAssignment = (assignment: any) => [
+    ...(assignment.assignment_letter_teachers || []).map((at: any) => {
+      const t = teachersData?.find((x: any) => x.id === at.teacher_id);
+      return { full_name: t?.profile?.full_name, nip: t?.nip, jabatan: t?.jabatan || t?.subject || "Guru" };
+    }),
+    ...(assignment.assignment_letter_manual_executors || []).map((me: any) => ({ full_name: me.full_name, nip: me.nip, jabatan: me.jabatan })),
+  ];
+  const kindsOf = (assignment: any) => {
+    const list = executorsOfAssignment(assignment);
+    const kepsek = list.filter(isKepsek).length;
+    return { kepsek, guru: list.length - kepsek };
+  };
+
   const buildExecutorOrderFromAssignment = (assignment: any): UnifiedExecutor[] => {
     const teachers = [...(assignment.assignment_letter_teachers || [])]
       .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0));
@@ -198,9 +238,20 @@ export default function AssignmentLetters() {
     },
   });
 
+  /** Nomor surat guru dan nomor surat kepsek. Bila hanya kepsek/Plt yang ditugaskan, satu nomor saja. */
+  const resolveNumbers = (data: { letter_number: string; kepsek_letter_number: string; executors: UnifiedExecutor[] }) => {
+    const hasKepsek = data.executors.some(isKepsek);
+    const hasGuru = data.executors.some((e) => !isKepsek(e));
+    const kepsekNumber = hasKepsek ? data.kepsek_letter_number.trim() : "";
+    if (hasKepsek && !kepsekNumber) throw new Error("Nomor surat tugas kepala sekolah wajib diisi");
+    const letterNumber = hasGuru || !hasKepsek ? data.letter_number.trim() : kepsekNumber;
+    return { hasKepsek, hasGuru, kepsekNumber, letterNumber };
+  };
+
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData & { executors: UnifiedExecutor[] }) => {
-      assignmentSchema.parse(data);
+      const nomor = resolveNumbers(data);
+      assignmentSchema.parse({ ...data, letter_number: nomor.letterNumber });
 
       if (data.executors.length === 0) {
         throw new Error("Minimal 1 pelaksana harus dipilih atau dimasukkan manual");
@@ -209,7 +260,8 @@ export default function AssignmentLetters() {
       const { data: letter, error: letterError } = await supabase
         .from("assignment_letters")
         .insert({
-          letter_number: data.letter_number,
+          ...(nomor.kepsekNumber ? { kepsek_letter_number: nomor.kepsekNumber } : {}),
+          letter_number: nomor.letterNumber,
           letter_date: data.letter_date,
           dasar_surat_tugas: data.dasar_surat_tugas,
           tanggal_dasar_surat_tugas: data.tanggal_dasar_surat_tugas,
@@ -219,7 +271,7 @@ export default function AssignmentLetters() {
           start_date: data.start_date,
           end_date: data.end_date,
           created_by: user?.id!,
-        })
+        } as any)
         .select()
         .single();
 
@@ -257,17 +309,22 @@ export default function AssignmentLetters() {
         if (error) throw error;
       }
 
+      const suratKeluarRows = [
+        // Bila hanya kepala sekolah/Plt yang ditugaskan, nomor surat = nomor surat kepsek (satu catatan saja).
+        ...(nomor.hasGuru ? [{ nomor: nomor.letterNumber, perihal: `Surat Tugas - ${data.assignment_type}: ${data.description}` }] : []),
+        ...(nomor.kepsekNumber ? [{ nomor: nomor.kepsekNumber, perihal: `Surat Tugas Kepala Sekolah - ${data.assignment_type}: ${data.description}` }] : []),
+      ];
       const { error: suratKeluarError } = await supabase
         .from("surat_keluar")
-        .insert({
-          nomor_surat: data.letter_number,
+        .insert(suratKeluarRows.map((r) => ({
+          nomor_surat: r.nomor,
           tanggal_surat: data.letter_date,
           tujuan: data.location,
-          perihal: `Surat Tugas - ${data.assignment_type}: ${data.description}`,
+          perihal: r.perihal,
           kategori: 'kepegawaian',
-          catatan: `Otomatis tercatat dari Surat Tugas No. ${data.letter_number}`,
+          catatan: `Otomatis tercatat dari Surat Tugas No. ${r.nomor}`,
           created_by: user?.id!,
-        });
+        })));
 
       if (suratKeluarError) {
         console.warn('Gagal mencatat ke surat keluar:', suratKeluarError);
@@ -283,6 +340,8 @@ export default function AssignmentLetters() {
     onError: (error: any) => {
       if (error instanceof z.ZodError) {
         toast.error(error.errors[0].message);
+      } else if (String(error?.message).includes("uq_assignment_letters_kepsek_number")) {
+        toast.error("Nomor surat tugas kepala sekolah sudah dipakai. Ubah nomornya.");
       } else {
         toast.error(error.message || "Gagal membuat surat tugas");
       }
@@ -291,8 +350,9 @@ export default function AssignmentLetters() {
 
   const updateMutation = useMutation({
     mutationFn: async (data: typeof formData & { executors: UnifiedExecutor[]; id: string }) => {
+      const nomor = resolveNumbers(data);
       assignmentSchema.parse({
-        letter_number: data.letter_number,
+        letter_number: nomor.letterNumber,
         letter_date: data.letter_date,
         dasar_surat_tugas: data.dasar_surat_tugas,
         tanggal_dasar_surat_tugas: data.tanggal_dasar_surat_tugas,
@@ -310,7 +370,10 @@ export default function AssignmentLetters() {
       const { error: letterError } = await supabase
         .from("assignment_letters")
         .update({
-          letter_number: data.letter_number,
+          ...(nomor.kepsekNumber
+            ? { kepsek_letter_number: nomor.kepsekNumber }
+            : assignments?.find((a: any) => a.id === data.id)?.kepsek_letter_number ? { kepsek_letter_number: null } : {}),
+          letter_number: nomor.letterNumber,
           letter_date: data.letter_date,
           dasar_surat_tugas: data.dasar_surat_tugas,
           tanggal_dasar_surat_tugas: data.tanggal_dasar_surat_tugas,
@@ -319,7 +382,7 @@ export default function AssignmentLetters() {
           location: data.location,
           start_date: data.start_date,
           end_date: data.end_date,
-        })
+        } as any)
         .eq("id", data.id);
 
       if (letterError) throw letterError;
@@ -368,6 +431,8 @@ export default function AssignmentLetters() {
     onError: (error: any) => {
       if (error instanceof z.ZodError) {
         toast.error(error.errors[0].message);
+      } else if (String(error?.message).includes("uq_assignment_letters_kepsek_number")) {
+        toast.error("Nomor surat tugas kepala sekolah sudah dipakai. Ubah nomornya.");
       } else {
         toast.error(error.message || "Gagal memperbarui surat tugas");
       }
@@ -390,8 +455,10 @@ export default function AssignmentLetters() {
   });
 
   const resetForm = () => {
+    setKepsekNumberTouched(false);
     setFormData({
       letter_number: "",
+      kepsek_letter_number: "",
       letter_date: format(new Date(), "yyyy-MM-dd"),
       dasar_surat_tugas: "",
       tanggal_dasar_surat_tugas: format(new Date(), "yyyy-MM-dd"),
@@ -423,8 +490,10 @@ export default function AssignmentLetters() {
   const openEditAssignment = (assignment: any) => {
     setIsEditMode(true);
     setEditingId(assignment.id);
+    setKepsekNumberTouched(false);
     setFormData({
       letter_number: assignment.letter_number,
+      kepsek_letter_number: assignment.kepsek_letter_number || "",
       letter_date: assignment.letter_date,
       dasar_surat_tugas: assignment.dasar_surat_tugas || "",
       tanggal_dasar_surat_tugas: assignment.tanggal_dasar_surat_tugas || format(new Date(), "yyyy-MM-dd"),
@@ -513,11 +582,147 @@ export default function AssignmentLetters() {
     setExecutorOrder((prev) => prev.filter((e) => e.key !== key));
   };
 
+  const hasKepsekInForm = executorOrder.some(isKepsek);
+  const hasGuruInForm = executorOrder.some((e) => !isKepsek(e));
+
+  /** Menambahkan kepala sekolah/Plt dengan data dari Pengaturan Sekolah (pangkat dari data guru bila ada). */
+  const addKepsek = () => {
+    if (!headmaster.name) {
+      toast.error("Data kepala sekolah belum diisi di Pengaturan Sekolah");
+      return;
+    }
+    const nipDigits = String(headmaster.nip ?? "").replace(/\D/g, "");
+    const sebagaiGuru = nipDigits.length >= 8
+      ? teachersData?.find((t: any) => String(t.nip ?? "").replace(/\D/g, "") === nipDigits)
+      : undefined;
+    setExecutorOrder((prev) => [
+      ...prev,
+      {
+        key: `kepsek-${Date.now()}`,
+        type: 'manual',
+        full_name: headmaster.name!,
+        nip: headmaster.nip || "",
+        pangkat_golongan: sebagaiGuru?.pangkat_golongan || kepsekCfg?.kepsek_pangkat || "",
+        jabatan: headmaster.position || "Kepala Sekolah",
+      },
+    ]);
+  };
+
+  const formYear = Number(String(formData.letter_date).slice(0, 4)) || new Date().getFullYear();
+  const { data: suratKeluarNomor } = useQuery({
+    queryKey: ["surat-keluar-nomor", formYear],
+    enabled: isDialogOpen && hasKepsekInForm,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("surat_keluar")
+        .select("nomor_surat")
+        .gte("tanggal_surat", `${formYear}-01-01`)
+        .lte("tanggal_surat", `${formYear}-12-31`)
+        .limit(5000);
+      return ((data as any[]) || []).map((r) => r.nomor_surat as string);
+    },
+  });
+
+  // Nomor surat kepala sekolah terisi otomatis (urutan berikutnya menurut pola) selama belum diubah manual.
+  useEffect(() => {
+    if (!isDialogOpen || !hasKepsekInForm || kepsekNumberTouched) return;
+    if (isEditMode && formData.kepsek_letter_number) return;
+    const pola = kepsekCfg?.pattern;
+    if (!pola) return;
+    const nomor = nextKepsekNumber(
+      pola,
+      [
+        ...(assignments || []).flatMap((a: any) => [a.letter_number, a.kepsek_letter_number]),
+        formData.letter_number,
+        ...(suratKeluarNomor || []),
+      ],
+      new Date(`${formData.letter_date}T00:00:00`),
+    );
+    if (nomor && nomor !== formData.kepsek_letter_number) {
+      setFormData((f) => ({ ...f, kepsek_letter_number: nomor }));
+    }
+  }, [isDialogOpen, hasKepsekInForm, kepsekNumberTouched, isEditMode, kepsekCfg?.pattern, assignments, suratKeluarNomor, formData.letter_number, formData.letter_date, formData.kepsek_letter_number]);
+
   const isTeacherSelected = (teacherId: string) =>
     executorOrder.some((e) => e.type === 'teacher' && e.teacher_id === teacherId);
 
+  /** Pelaksana surat (guru + manual) lengkap dengan data guru, sudah urut sesuai urutan cetak. */
+  const collectExecutors = async (assignment: any) => {
+    const assignmentTeachers = assignment.assignment_letter_teachers || [];
+    const manualExecs = assignment.assignment_letter_manual_executors || [];
+
+    const teachersData = await Promise.all(
+      assignmentTeachers.map(async (at: any) => {
+        const { data: teacher } = await supabase.from("teachers").select("*").eq("id", at.teacher_id).single();
+        if (!teacher) return null;
+        const { data: profile } = await supabase
+          .from("profiles_public").select("full_name").eq("id", teacher.user_id).maybeSingle();
+        return { ...teacher, profile, isManual: false, order_index: at.order_index ?? 0 };
+      })
+    );
+
+    return [
+      ...teachersData.filter(Boolean).map((t: any) => ({
+        profile: { full_name: t.profile?.full_name },
+        nip: t.nip,
+        pangkat_golongan: t.pangkat_golongan,
+        jabatan: t.jabatan || t.subject || "Guru",
+        subject: t.subject,
+        order_index: t.order_index,
+      })),
+      ...manualExecs.map((me: any, idx: number) => ({
+        profile: { full_name: me.full_name },
+        nip: me.nip,
+        pangkat_golongan: me.pangkat_golongan,
+        jabatan: me.jabatan || "Pelaksana",
+        subject: me.jabatan || "Pelaksana",
+        order_index: me.order_index ?? (1000 + idx),
+      })),
+    ].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
+  };
+
+  const headmasterOf = (settings: any): HeadmasterInfo => ({
+    name: settings?.headmaster_name,
+    nip: settings?.headmaster_nip,
+    position: settings?.headmaster_position,
+  });
+
+  /** Surat tugas Kepala Sekolah/Plt: format Dinas (ditandatangani Kabid), terpisah dari surat guru. */
+  const generateKepsekPDF = async (assignment: any): Promise<jsPDF> => {
+    const { data: settings } = await supabase.from("school_settings").select("*").limit(1).maybeSingle();
+    const hm = headmasterOf(settings);
+    const kepsekList = (await collectExecutors(assignment)).filter((e) =>
+      isKepsekExecutor({ full_name: e.profile?.full_name, nip: e.nip, jabatan: e.jabatan }, hm));
+    if (kepsekList.length === 0) throw new Error("Surat ini tidak memuat kepala sekolah/Plt");
+
+    const cfg = await queryClient.fetchQuery({ queryKey: KEPSEK_SETTINGS_KEY, queryFn: fetchKepsekLetterSettings, staleTime: 60_000 });
+    if (!cfg.penerbit_nama.trim()) {
+      throw new Error('Isi dulu nama pejabat penandatangan di tombol "Format Surat Kepsek"');
+    }
+    const logo = await loadKabLogo();
+    return buildKepsekLetterPdf(
+      {
+        nomor: assignment.kepsek_letter_number || assignment.letter_number,
+        tanggal: assignment.letter_date,
+        maksud: assignment.description,
+        lokasi: assignment.location,
+        mulai: assignment.start_date,
+        selesai: assignment.end_date,
+        pelaksana: kepsekList.map((e) =>
+          kepsekPerson(
+            { full_name: e.profile?.full_name, nip: e.nip, jabatan: e.jabatan, pangkat_golongan: e.pangkat_golongan },
+            hm,
+            cfg.kepsek_pangkat,
+          )),
+      },
+      cfg,
+      logo,
+    );
+  };
+
   const generatePDF = async (assignment: any): Promise<jsPDF> => {
     const { data: settings } = await supabase.from("school_settings").select("*").single();
+    const hmGuru = headmasterOf(settings);
 
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [210, 330] });
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -563,37 +768,10 @@ export default function AssignmentLetters() {
     doc.setFont("helvetica", "normal");
 
     yPos += 10;
-    const assignmentTeachers = assignment.assignment_letter_teachers || [];
-    const manualExecs = assignment.assignment_letter_manual_executors || [];
-
-    const teachersData = await Promise.all(
-      assignmentTeachers.map(async (at: any) => {
-        const { data: teacher } = await supabase.from("teachers").select("*").eq("id", at.teacher_id).single();
-        if (!teacher) return null;
-        const { data: profile } = await supabase
-          .from("profiles_public").select("full_name").eq("id", teacher.user_id).maybeSingle();
-        return { ...teacher, profile, isManual: false, order_index: at.order_index ?? 0 };
-      })
-    );
-
-    const allExecutors = [
-      ...teachersData.filter(Boolean).map((t: any) => ({
-        profile: { full_name: t.profile?.full_name },
-        nip: t.nip,
-        pangkat_golongan: t.pangkat_golongan,
-        jabatan: t.jabatan || t.subject || "Guru",
-        subject: t.subject,
-        order_index: t.order_index,
-      })),
-      ...manualExecs.map((me: any, idx: number) => ({
-        profile: { full_name: me.full_name },
-        nip: me.nip,
-        pangkat_golongan: me.pangkat_golongan,
-        jabatan: me.jabatan || "Pelaksana",
-        subject: me.jabatan || "Pelaksana",
-        order_index: me.order_index ?? (1000 + idx),
-      })),
-    ].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
+    // Kepala sekolah/Plt memakai surat tersendiri (format Dinas); surat ini hanya untuk pelaksana lain.
+    const allExecutors = (await collectExecutors(assignment)).filter((e) =>
+      !isKepsekExecutor({ full_name: e.profile?.full_name, nip: e.nip, jabatan: e.jabatan }, hmGuru));
+    if (allExecutors.length === 0) throw new Error("Surat ini hanya memuat kepala sekolah/Plt");
 
     doc.text("Kepada", 20, yPos);
     doc.text(":", 40, yPos);
@@ -675,27 +853,35 @@ export default function AssignmentLetters() {
     return sortExecutors(data);
   };
 
-  const handlePreview = async (assignment: any) => {
+  const buildPdf = (assignment: any, kind: LetterKind) =>
+    kind === "kepsek" ? generateKepsekPDF(assignment) : generatePDF(assignment);
+  const pdfFileName = (assignment: any, kind: LetterKind) =>
+    kind === "kepsek"
+      ? `Surat-Tugas-Kepsek-${assignment.kepsek_letter_number || assignment.letter_number}.pdf`.replace(/[\\/]/g, "-")
+      : `Surat-Tugas-${assignment.letter_number}.pdf`.replace(/[\\/]/g, "-");
+
+  const handlePreview = async (assignment: any, kind: LetterKind = "guru") => {
     try {
       const completeAssignment = await fetchCompleteAssignment(assignment.id);
-      const doc = await generatePDF(completeAssignment);
+      const doc = await buildPdf(completeAssignment, kind);
       const pdfBlob = doc.output('blob');
       const pdfUrl = URL.createObjectURL(pdfBlob);
 
       setPreviewPdfUrl(pdfUrl);
       setPreviewAssignment(completeAssignment);
+      setPreviewKind(kind);
       setPreviewOpen(true);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error generating preview:", error);
-      toast.error("Gagal membuat preview PDF");
+      toast.error(error?.message?.startsWith("Isi dulu") ? error.message : "Gagal membuat preview PDF");
     }
   };
 
   const handleDownloadFromPreview = async () => {
     if (previewAssignment) {
       try {
-        const doc = await generatePDF(previewAssignment);
-        doc.save(`Surat-Tugas-${previewAssignment.letter_number}.pdf`);
+        const doc = await buildPdf(previewAssignment, previewKind);
+        doc.save(pdfFileName(previewAssignment, previewKind));
         toast.success("PDF berhasil diunduh");
       } catch (error) {
         console.error("Error downloading PDF:", error);
@@ -711,15 +897,15 @@ export default function AssignmentLetters() {
     setPreviewAssignment(null);
   };
 
-  const exportPDF = async (assignment: any) => {
+  const exportPDF = async (assignment: any, kind: LetterKind = "guru") => {
     try {
       const completeAssignment = await fetchCompleteAssignment(assignment.id);
-      const doc = await generatePDF(completeAssignment);
-      doc.save(`Surat-Tugas-${completeAssignment.letter_number}.pdf`);
+      const doc = await buildPdf(completeAssignment, kind);
+      doc.save(pdfFileName(completeAssignment, kind));
       toast.success("PDF berhasil diunduh");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error generating PDF:", error);
-      toast.error("Gagal membuat PDF");
+      toast.error(error?.message?.startsWith("Isi dulu") ? error.message : "Gagal membuat PDF");
     }
   };
 
@@ -727,6 +913,7 @@ export default function AssignmentLetters() {
     const searchLower = searchQuery.toLowerCase();
     const matchesSearch = searchQuery === "" ||
       assignment.letter_number.toLowerCase().includes(searchLower) ||
+      (assignment.kepsek_letter_number || "").toLowerCase().includes(searchLower) ||
       assignment.assignment_type.toLowerCase().includes(searchLower) ||
       assignment.location.toLowerCase().includes(searchLower) ||
       assignment.assignment_letter_teachers?.some((at: any) => {
@@ -764,6 +951,8 @@ export default function AssignmentLetters() {
               <h1 className="text-2xl md:text-3xl font-bold text-foreground">Surat Tugas</h1>
               <p className="text-muted-foreground">Kelola surat tugas untuk guru</p>
             </div>
+            <div className="flex flex-wrap gap-2">
+            <KepsekLetterSettingsDialog />
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
               <DialogTrigger asChild>
                 <Button onClick={resetForm}>
@@ -786,9 +975,12 @@ export default function AssignmentLetters() {
                         id="letter_number"
                         value={formData.letter_number}
                         onChange={(e) => setFormData({ ...formData, letter_number: e.target.value })}
-                        placeholder="Contoh: 001/ST/2024"
-                        required
+                        placeholder={hasKepsekInForm && !hasGuruInForm ? "Kosongkan: memakai nomor surat kepala sekolah" : "Contoh: 001/ST/2024"}
+                        required={!(hasKepsekInForm && !hasGuruInForm)}
                       />
+                      {hasKepsekInForm && hasGuruInForm && (
+                        <p className="text-xs text-muted-foreground">Nomor surat tugas untuk guru/pelaksana lain.</p>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="letter_date">Tanggal Surat *</Label>
@@ -801,6 +993,21 @@ export default function AssignmentLetters() {
                       />
                     </div>
                   </div>
+
+                  {hasKepsekInForm && (
+                    <div className="space-y-2 rounded-md border border-primary/30 bg-primary/5 p-3">
+                      <Label htmlFor="kepsek_letter_number">Nomor Surat Tugas Kepala Sekolah/Plt *</Label>
+                      <Input
+                        id="kepsek_letter_number"
+                        value={formData.kepsek_letter_number}
+                        onChange={(e) => { setKepsekNumberTouched(true); setFormData({ ...formData, kepsek_letter_number: e.target.value }); }}
+                        required
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Terisi otomatis menurut pola nomor (ubah di tombol Format Surat Kepsek). Kepala sekolah/Plt mendapat surat tugas format Dinas yang terpisah dari surat guru.
+                      </p>
+                    </div>
+                  )}
 
                   <div className="space-y-2">
                     <Label htmlFor="dasar_surat_tugas">Dasar Surat Tugas *</Label>
@@ -965,6 +1172,17 @@ export default function AssignmentLetters() {
                   </div>
 
                   <div className="space-y-2">
+                    <Label>Kepala Sekolah / Plt</Label>
+                    <div>
+                      <Button type="button" variant="outline" size="sm" onClick={addKepsek} disabled={hasKepsekInForm}>
+                        <UserCheck className="mr-2 h-4 w-4" />
+                        {hasKepsekInForm ? "Kepala sekolah/Plt sudah ditambahkan" : `Tambahkan ${headmaster.position || "Kepala Sekolah"}${headmaster.name ? ` (${headmaster.name})` : ""}`}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Data diambil otomatis dari Pengaturan Sekolah.</p>
+                  </div>
+
+                  <div className="space-y-2">
                     <Label>Pelaksana Manual (jika tidak ada di database)</Label>
 
                     <div className="border rounded-md p-4 space-y-3 bg-muted/10">
@@ -1031,7 +1249,7 @@ export default function AssignmentLetters() {
                               {executor.nip && <span className="text-muted-foreground"> - NIP: {executor.nip}</span>}
                               {executor.jabatan && <span className="text-muted-foreground"> ({executor.jabatan})</span>}
                               <Badge variant="outline" className="ml-2 text-xs">
-                                {executor.type === 'teacher' ? 'Guru' : 'Manual'}
+                                {isKepsek(executor) ? 'Kepsek/Plt: surat terpisah' : executor.type === 'teacher' ? 'Guru' : 'Manual'}
                               </Badge>
                             </div>
                             <Button
@@ -1064,6 +1282,7 @@ export default function AssignmentLetters() {
                 </form>
               </DialogContent>
             </Dialog>
+            </div>
           </div>
 
           <Card>
@@ -1172,10 +1391,19 @@ export default function AssignmentLetters() {
                           const allNames = [...teacherExecs, ...manualExecs]
                             .sort((a, b) => a.order_index - b.order_index);
 
+                          const kinds = kindsOf(assignment);
+
                           return (
                             <TableRow key={assignment.id}>
                               <TableCell>{actualIndex}</TableCell>
-                              <TableCell className="font-medium">{assignment.letter_number}</TableCell>
+                              <TableCell className="font-medium">
+                                {kinds.guru > 0 || !assignment.kepsek_letter_number ? assignment.letter_number : null}
+                                {assignment.kepsek_letter_number && (
+                                  <div className={kinds.guru > 0 ? "text-xs font-normal text-muted-foreground" : ""}>
+                                    {kinds.guru > 0 ? "Kepsek/Plt: " : ""}{assignment.kepsek_letter_number}
+                                  </div>
+                                )}
+                              </TableCell>
                               <TableCell>{format(new Date(assignment.letter_date), "dd/MM/yyyy")}</TableCell>
                               <TableCell>{assignment.assignment_type}</TableCell>
                               <TableCell>{assignment.location}</TableCell>
@@ -1205,22 +1433,47 @@ export default function AssignmentLetters() {
                                       </TooltipTrigger>
                                       <TooltipContent><p>{isLetterLocked(assignment.id) ? "Edit surat tugas (terkunci SPJ, perlu kode hapus)" : "Edit surat tugas"}</p></TooltipContent>
                                     </Tooltip>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <Button variant="outline" size="icon" onClick={() => handlePreview(assignment)}>
-                                          <Eye className="h-4 w-4" />
-                                        </Button>
-                                      </TooltipTrigger>
-                                      <TooltipContent><p>Preview surat tugas sebelum cetak</p></TooltipContent>
-                                    </Tooltip>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <Button variant="default" size="icon" onClick={() => exportPDF(assignment)}>
-                                          <FileDown className="h-4 w-4" />
-                                        </Button>
-                                      </TooltipTrigger>
-                                      <TooltipContent><p>Unduh dan cetak surat tugas dalam format PDF</p></TooltipContent>
-                                    </Tooltip>
+                                    {kinds.guru > 0 && kinds.kepsek > 0 ? (
+                                      <>
+                                        <DropdownMenu>
+                                          <DropdownMenuTrigger asChild>
+                                            <Button variant="outline" size="icon" aria-label="Preview surat tugas"><Eye className="h-4 w-4" /></Button>
+                                          </DropdownMenuTrigger>
+                                          <DropdownMenuContent align="end">
+                                            <DropdownMenuItem onClick={() => handlePreview(assignment, "guru")}>Preview surat guru</DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handlePreview(assignment, "kepsek")}>Preview surat Kepala Sekolah/Plt</DropdownMenuItem>
+                                          </DropdownMenuContent>
+                                        </DropdownMenu>
+                                        <DropdownMenu>
+                                          <DropdownMenuTrigger asChild>
+                                            <Button variant="default" size="icon" aria-label="Unduh surat tugas"><FileDown className="h-4 w-4" /></Button>
+                                          </DropdownMenuTrigger>
+                                          <DropdownMenuContent align="end">
+                                            <DropdownMenuItem onClick={() => exportPDF(assignment, "guru")}>Unduh surat guru</DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => exportPDF(assignment, "kepsek")}>Unduh surat Kepala Sekolah/Plt</DropdownMenuItem>
+                                          </DropdownMenuContent>
+                                        </DropdownMenu>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <Button variant="outline" size="icon" onClick={() => handlePreview(assignment, kinds.kepsek > 0 ? "kepsek" : "guru")}>
+                                              <Eye className="h-4 w-4" />
+                                            </Button>
+                                          </TooltipTrigger>
+                                          <TooltipContent><p>{kinds.kepsek > 0 ? "Preview surat tugas Kepala Sekolah/Plt" : "Preview surat tugas sebelum cetak"}</p></TooltipContent>
+                                        </Tooltip>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <Button variant="default" size="icon" onClick={() => exportPDF(assignment, kinds.kepsek > 0 ? "kepsek" : "guru")}>
+                                              <FileDown className="h-4 w-4" />
+                                            </Button>
+                                          </TooltipTrigger>
+                                          <TooltipContent><p>{kinds.kepsek > 0 ? "Unduh surat tugas Kepala Sekolah/Plt (PDF)" : "Unduh dan cetak surat tugas dalam format PDF"}</p></TooltipContent>
+                                        </Tooltip>
+                                      </>
+                                    )}
                                     <Tooltip>
                                       <TooltipTrigger asChild>
                                         <Button variant="destructive" size="icon" onClick={() => handleDelete(assignment.id)}>
@@ -1260,9 +1513,9 @@ export default function AssignmentLetters() {
         <Sheet open={previewOpen} onOpenChange={handleClosePreview}>
           <SheetContent side="right" className="w-full sm:max-w-4xl overflow-y-auto">
             <SheetHeader>
-              <SheetTitle>Preview Surat Tugas</SheetTitle>
+              <SheetTitle>{previewKind === "kepsek" ? "Preview Surat Tugas Kepala Sekolah/Plt" : "Preview Surat Tugas"}</SheetTitle>
               <SheetDescription>
-                {previewAssignment && `Nomor: ${previewAssignment.letter_number}`}
+                {previewAssignment && `Nomor: ${previewKind === "kepsek" ? previewAssignment.kepsek_letter_number || previewAssignment.letter_number : previewAssignment.letter_number}`}
               </SheetDescription>
             </SheetHeader>
 
