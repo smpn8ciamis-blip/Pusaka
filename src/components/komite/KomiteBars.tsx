@@ -38,7 +38,7 @@ export function KomiteBar({ label, value, total, color = 'bg-emerald-500', heigh
   );
 }
 
-/** Bar utama penggalangan dana: terkumpul vs target. */
+/** Bar utama penggalangan dana: terkumpul vs rencana kebutuhan. */
 export function KomiteMainProgress({ total, target, className = '' }: { total: number; target: number; className?: string }) {
   const p = persen(total, target);
   const lewat = target > 0 && total >= target;
@@ -50,7 +50,7 @@ export function KomiteMainProgress({ total, target, className = '' }: { total: n
           <div className="text-3xl font-bold text-slate-900 tabular-nums md:text-4xl">{formatRupiah(total)}</div>
         </div>
         <div className="sm:text-right">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Target</div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Rencana Kebutuhan</div>
           <div className="text-lg font-semibold text-slate-700 tabular-nums md:text-xl">{target > 0 ? formatRupiah(target) : 'Tidak ditetapkan'}</div>
         </div>
       </div>
@@ -70,9 +70,9 @@ export function KomiteMainProgress({ total, target, className = '' }: { total: n
         </div>
       </div>
       <div className="mt-2 flex flex-wrap justify-between gap-2 text-sm text-slate-600">
-        <span>{target > 0 ? `${persenTeks(total, target)} dari target` : 'Target tidak ditetapkan'}</span>
+        <span>{target > 0 ? `${persenTeks(total, target)} dari rencana kebutuhan` : 'Rencana kebutuhan tidak ditetapkan'}</span>
         <span>
-          {target > 0 && (lewat ? 'Target tercapai 🎉' : `Kurang ${formatRupiah(target - total)}`)}
+          {target > 0 && (lewat ? 'Rencana kebutuhan terpenuhi 🎉' : `Kurang ${formatRupiah(target - total)}`)}
         </span>
       </div>
     </div>

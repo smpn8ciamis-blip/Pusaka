@@ -30,7 +30,7 @@ export default function KomiteBendahara() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold text-foreground">Dashboard Bendahara Komite</h1>
-            <p className="text-muted-foreground">Kelola target, rekening, pendapatan, koordinator kelas, RAB, dan penggunaan dana.</p>
+            <p className="text-muted-foreground">Kelola rencana kebutuhan, rekening, pendapatan, koordinator kelas, RAB, dan penggunaan dana.</p>
           </div>
           <Button variant="outline" asChild>
             <Link to="/website/komite" target="_blank"><ExternalLink className="mr-1.5 h-4 w-4" /> Lihat halaman publik</Link>
