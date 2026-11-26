@@ -4,6 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
 import { ACTIVITY_KEY, effectiveLastActivity, idleMinutesLeft, idleState, isIdleRole } from '@/lib/idleSession';
+import { beginLogin, cancelLogin, completeLogin, isLoggingIn, otherDeviceActive } from '@/lib/singleDevice';
 
 interface AuthContextType {
   user: User | null;
@@ -124,11 +125,60 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [user, userRole, toast, navigate]);
 
+  // Satu akun = satu perangkat: bila akun ini sudah login di perangkat lain (login terakhir menang),
+  // perangkat ini keluar. Dicek saat halaman dibuka, saat kembali difokuskan, dan tiap 1 menit.
+  // Keluar memakai scope 'local' agar sesi di perangkat yang baru login tidak ikut dicabut.
+  useEffect(() => {
+    if (!user) return;
+    let stopped = false;
+    let busy = false;
+    let lastCheck = 0;
+    const verify = async () => {
+      if (stopped || busy || isLoggingIn()) return;
+      const now = Date.now();
+      if (now - lastCheck < 10_000) return;
+      lastCheck = now;
+      busy = true;
+      try {
+        const other = await otherDeviceActive();
+        if (!other || stopped || isLoggingIn()) return;
+        stopped = true;
+        const waktu = other.loggedInAt
+          ? new Date(other.loggedInAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+          : '';
+        toast({
+          variant: 'destructive',
+          title: 'Anda keluar dari perangkat ini',
+          description: `Akun ini baru saja login di perangkat lain${other.label ? ` (${other.label}${waktu ? `, ${waktu}` : ''})` : ''}. Satu akun hanya bisa dipakai di satu perangkat.`,
+          duration: 15000,
+        });
+        try { localStorage.removeItem(ACTIVITY_KEY); } catch { /* abaikan */ }
+        await supabase.auth.signOut({ scope: 'local' });
+        setUser(null);
+        setSession(null);
+        setUserRole(null);
+        setSchoolId(null);
+        navigate('/auth');
+      } finally { busy = false; }
+    };
+    verify();
+    const timer = setInterval(() => { if (document.visibilityState === 'visible') verify(); }, 60 * 1000);
+    const onVisible = () => { if (document.visibilityState === 'visible') verify(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', verify);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', verify);
+    };
+  }, [user?.id, toast, navigate]);
+
   useEffect(() => {
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        if (event === 'SIGNED_OUT') { try { localStorage.removeItem(ACTIVITY_KEY); } catch { /* abaikan */ } }
+        if (event === 'SIGNED_OUT') { cancelLogin(); try { localStorage.removeItem(ACTIVITY_KEY); } catch { /* abaikan */ } }
         setSession(session);
         setUser(session?.user ?? null);
         
@@ -160,18 +210,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signIn = useCallback(async (email: string, password: string, captchaToken?: string) => {
     // captchaToken (Cloudflare Turnstile) hanya diperiksa server bila GoTrue captcha diaktifkan; selain itu diabaikan.
+    // Pemeriksaan satu-perangkat ditunda sampai login selesai penuh (Auth.tsx memanggil completeLogin setelah 2FA).
+    beginLogin();
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
       ...(captchaToken ? { options: { captchaToken } } : {}),
     });
+    if (error) cancelLogin();
     return { error };
   }, []);
 
   const signUp = useCallback(async (email: string, password: string, fullName: string, captchaToken?: string) => {
     const redirectUrl = `${window.location.origin}/`;
     
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -182,6 +235,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         },
       },
     });
+    if (!error && data?.session) await completeLogin(); // pendaftaran langsung masuk: perangkat ini jadi perangkat aktif
     return { error };
   }, []);
 
