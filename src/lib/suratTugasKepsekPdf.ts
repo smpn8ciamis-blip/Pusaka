@@ -49,6 +49,18 @@ export function buildKepsekLetterPdf(
   logo: { data: string; w: number; h: number } | null,
 ): jsPDF {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [210, 330] });
+  drawKepsekLetter(doc, d, cfg, logo);
+  return doc;
+}
+
+/** Menggambar surat tugas pada halaman aktif `doc` (boleh dipakai sebagai halaman pertama paket SPPD). */
+export function drawKepsekLetter(
+  doc: jsPDF,
+  d: KepsekLetterData,
+  cfg: KepsekLetterSettings,
+  logo: { data: string; w: number; h: number } | null,
+): void {
+  doc.setTextColor(0, 0, 0).setDrawColor(0, 0, 0);
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
   const center = W / 2;
@@ -142,6 +154,4 @@ export function buildKepsekLetterPdf(
   doc.text(`Pangkat. ${cfg.penerbit_pangkat || '-'}`, sx, y);
   y += 5;
   doc.text(`NIP. ${cfg.penerbit_nip || '-'}`, sx, y);
-
-  return doc;
 }

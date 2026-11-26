@@ -42,6 +42,13 @@ const GROUPS: { title: string; fields: Field[] }[] = [
       { key: 'kepsek_pangkat', label: 'Pangkat / Gol (dipakai bila tidak ada di data guru)', hint: 'Nama, NIP, dan jabatan diambil otomatis dari Pengaturan Sekolah.' },
     ],
   },
+  {
+    title: 'SPD Kepala Sekolah / Plt',
+    fields: [
+      { key: 'spd_alat_angkut', label: 'Alat angkut bawaan', hint: 'Dipakai bila kolom Alat Angkutan pada SPD dikosongkan.' },
+      { key: 'spd_tingkat_biaya', label: 'Tingkat biaya perjalanan dinas' },
+    ],
+  },
 ];
 
 /** Tombol + dialog pengaturan format surat tugas Kepala Sekolah/Plt. */

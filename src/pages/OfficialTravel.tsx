@@ -23,6 +23,8 @@ import { id as idLocale } from "date-fns/locale";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { addLetterheadToPDF } from "@/lib/pdfLetterhead";
+import { buildSppdKepsekPdf, collectSppdExecutors, collectSppdStudents, isKepsekSppd } from "@/lib/sppdKepsekPdf";
+import { fetchKepsekLetterSettings, fetchKepsekSuratForTravel } from "@/hooks/useSuratTugasKepsek";
 import { z } from "zod";
 import { SPDPreviewDialog } from "@/components/spd/SPDPreviewDialog";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -889,6 +891,24 @@ export default function OfficialTravel() {
       const headName = toTitleCase(settings?.headmaster_name) || "";
       const headNip = settings?.headmaster_nip || "";
       const city = (settings as any)?.city || "Ciamis";
+
+      // Kepala sekolah/Plt sebagai pelaksana utama: paket SPPD format Dinas (Kabid menandatangani)
+      const kepsekExecs = collectSppdExecutors(travel);
+      if (settings && isKepsekSppd(kepsekExecs, settings)) {
+        const [cfg, surat] = await Promise.all([fetchKepsekLetterSettings(), fetchKepsekSuratForTravel(travel)]);
+        const kdoc = await buildSppdKepsekPdf({
+          travel,
+          schoolSettings: settings,
+          cfg,
+          executors: kepsekExecs,
+          students: collectSppdStudents(travel),
+          fonts: { title: fontSizeTitle, body: fontSizeBody, table: fontSizeTable, signature: fontSizeSignature },
+          surat,
+        });
+        kdoc.save(`SPPD-Kepsek-${travel.letter_number}.pdf`.replace(/[\\/]/g, "-"));
+        toast.success("PDF berhasil diunduh");
+        return;
+      }
 
       const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: [210, 330] });
       const pageWidth = doc.internal.pageSize.getWidth();
