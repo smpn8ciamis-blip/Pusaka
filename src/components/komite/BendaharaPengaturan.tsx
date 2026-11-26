@@ -58,7 +58,7 @@ export function BendaharaPengaturan() {
       <div><Label htmlFor="ps-desk">Deskripsi / tujuan (tampil di bagian atas halaman publik)</Label><Textarea id="ps-desk" rows={3} value={deskripsi} onChange={(e) => setDeskripsi(e.target.value)} /></div>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <Label htmlFor="ps-target">Target (Rp)</Label>
+          <Label htmlFor="ps-target">Rencana Kebutuhan (Rp)</Label>
           <Input id="ps-target" inputMode="numeric" value={target} placeholder="0"
             onChange={(e) => { const n = parseRupiahInput(e.target.value); setTarget(n ? n.toLocaleString('id-ID') : ''); }} />
         </div>

@@ -16,7 +16,7 @@ export function KomiteDashboardSummary({ korlas = false }: { korlas?: boolean })
   if (isLoading) return <div className="h-48 animate-pulse rounded-2xl bg-muted" />;
   if (isError || !data) return <p className="text-sm text-destructive">Ringkasan belum dapat dimuat.</p>;
   if (!data.configured) {
-    return <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">Penggalangan dana belum dibuka oleh bendahara komite (target belum diatur).</p>;
+    return <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">Penggalangan dana belum dibuka oleh bendahara komite (rencana kebutuhan belum diatur).</p>;
   }
 
   const target = Number(data.target ?? 0);
