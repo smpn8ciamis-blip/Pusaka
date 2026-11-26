@@ -18,6 +18,9 @@ export interface KepsekLetterSettings {
   penerbit_jabatan: string;
   /** Pangkat/golongan kepsek/Plt bila tidak ada di data guru. */
   kepsek_pangkat: string;
+  /** Bawaan kolom "Alat angkut" dan "Tingkat biaya" pada SPD kepsek bila SPD tidak mengisinya. */
+  spd_alat_angkut: string;
+  spd_tingkat_biaya: string;
 }
 
 export const DEFAULT_KEPSEK_SETTINGS: KepsekLetterSettings = {
@@ -31,6 +34,8 @@ export const DEFAULT_KEPSEK_SETTINGS: KepsekLetterSettings = {
   penerbit_pangkat: '',
   penerbit_jabatan: 'Kepala Bidang Pembinaan SMP',
   kepsek_pangkat: '',
+  spd_alat_angkut: 'Kendaraan Umum',
+  spd_tingkat_biaya: 'BOS',
 };
 
 /** Menggabungkan isi tersimpan dengan bawaan; isian kosong memakai bawaan (kecuali data pejabat). */

@@ -14,6 +14,8 @@ import { id as idLocale } from "date-fns/locale";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { addLetterheadToPDF } from "@/lib/pdfLetterhead";
+import { buildSppdKepsekPdf, collectSppdExecutors, collectSppdStudents, isKepsekSppd } from "@/lib/sppdKepsekPdf";
+import { fetchKepsekLetterSettings, fetchKepsekSuratForTravel } from "@/hooks/useSuratTugasKepsek";
 import {
   Download, Save, RotateCcw, Eye, EyeOff, FileText,
   Type, Settings2, Menu, ChevronUp, ChevronDown, X,
@@ -120,6 +122,24 @@ export function SPDPreviewDialog({ open, onOpenChange, travel }: SPDPreviewDialo
   const generatePDF = useMemo(() => {
     return async (): Promise<jsPDF | null> => {
       if (!travel) return null;
+
+      // Kepala sekolah/Plt sebagai pelaksana utama: paket SPPD format Dinas (Kabid menandatangani)
+      const kepsekExecs = collectSppdExecutors(travel);
+      if (schoolSettings && isKepsekSppd(kepsekExecs, schoolSettings)) {
+        const [cfg, surat] = await Promise.all([fetchKepsekLetterSettings(), fetchKepsekSuratForTravel(travel)]);
+        return buildSppdKepsekPdf({
+          travel,
+          schoolSettings,
+          cfg,
+          executors: kepsekExecs,
+          students: collectSppdStudents(travel),
+          fonts: {
+            title: settings.fontSizeTitle, body: settings.fontSizeBody,
+            table: settings.fontSizeTable, signature: settings.fontSizeSignature,
+          },
+          surat,
+        });
+      }
 
       const {
         marginTop, marginLeft, marginRight,
