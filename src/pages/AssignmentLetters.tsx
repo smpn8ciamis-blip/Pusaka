@@ -729,16 +729,8 @@ export default function AssignmentLetters() {
 
     let yPos = 15;
     if (settings) {
-      yPos = await addLetterheadToPDF(doc, {
-        school_name: settings.school_name,
-        district_name: settings.district_name,
-        school_address: settings.school_address,
-        school_phone: settings.school_phone,
-        logo_url: settings.logo_url,
-        right_logo_url: settings.right_logo_url,
-        show_address: settings.show_address,
-        show_phone: settings.show_phone,
-      });
+      // Seluruh pengaturan kop diteruskan (ukuran/posisi logo, font, watermark) agar sama dengan kop di Pengaturan Sekolah.
+      yPos = await addLetterheadToPDF(doc, settings as any);
     }
 
     yPos += 8;
