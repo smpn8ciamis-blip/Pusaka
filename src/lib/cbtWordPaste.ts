@@ -173,7 +173,24 @@ type Block =
   | { type: 'table'; html: string };
 
 const IMG_CH = '￼';
-const itemsText = (items: Item[]): string => items.map((i) => (i.k === 't' ? i.s : i.k === 'img' ? IMG_CH : ' ')).join('');
+/**
+ * Teks untuk PENCOCOKAN pola (nomor soal, huruf pilihan, kunci). Panjangnya sama persis dengan teks aslinya
+ * (posisi potong tidak bergeser), tetapi:
+ *  - tanda arah teks Word (RLM/LRM/embedding) menjadi spasi, jadi "‏A." di awal baris tetap dikenali;
+ *  - angka Arab (٣) dan Persia (۳) menjadi angka biasa;
+ *  - huruf pilihan Arab (أ ب ج د هـ, atau أ ب ت ث) di awal/ setelah spasi dan diikuti titik/kurung menjadi A–E.
+ * Isi soal yang disimpan tidak diubah.
+ */
+const BIDI_RE = /[\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069]/g;
+const ARAB_OPT: Record<string, string> = { 'أ': 'A', 'ا': 'A', 'إ': 'A', 'آ': 'A', 'ب': 'B', 'ج': 'C', 'ت': 'C', 'د': 'D', 'ث': 'D', 'ه': 'E' };
+export function normForMatch(t: string): string {
+  return t
+    .replace(BIDI_RE, ' ')
+    .replace(/[\u0660-\u0669]/g, (c) => String(c.charCodeAt(0) - 0x660))
+    .replace(/[\u06f0-\u06f9]/g, (c) => String(c.charCodeAt(0) - 0x6f0))
+    .replace(/(?<=^|[\s(])([أاإآبجتدثه])(\u0640?)(?=\s*[.)])/g, (_m, c: string, tat: string) => ARAB_OPT[c] + (tat ? ' ' : ''));
+}
+const itemsText = (items: Item[]): string => normForMatch(items.map((i) => (i.k === 't' ? i.s : i.k === 'img' ? IMG_CH : ' ')).join(''));
 
 function trimItems(items: Item[]): Item[] {
   const a = items.slice();
@@ -198,6 +215,7 @@ function pushParagraphs(items: Item[], blocks: Block[]) {
 
 const alphaMarker = (n: number, upper: boolean, t: string): string => {
   const a = String.fromCharCode((upper ? 65 : 97) + ((n - 1) % 26));
+  if (/abjad|arabic-alpha/.test(t)) return (['أ', 'ب', 'ج', 'د', 'هـ'][n - 1] ?? String(n)) + '.';
   return t === 'a' || t === 'A' ? a + '.' : n + '.';
 };
 
@@ -226,7 +244,7 @@ function walkBlocks(parent: Node, ctx: Ctx, blocks: Block[], list?: { ordered: b
       const hasBlockChild = Array.from(el.children).some((c) => BLOCK_TAGS.has(c.tagName.toLowerCase()) && !/^(p|div)$/.test(c.tagName.toLowerCase()));
       const items: Item[] = [];
       if (list?.ordered) {
-        const type = /alpha/.test(list.type) ? (/upper/.test(list.type) ? 'A' : 'a') : list.type;
+        const type = /abjad|arabic-alpha/.test(list.type) ? list.type : /alpha/.test(list.type) ? (/upper/.test(list.type) ? 'A' : 'a') : list.type;
         items.push({ k: 't', s: alphaMarker(list.n, type === 'A', type) + ' ', ...NOFMT });
       }
       if (hasBlockChild) {
@@ -364,7 +382,7 @@ function splitOptions(items: Item[], expect: number): OptSeg[] | null {
   return starts.map((s, k) => {
     const to = k + 1 < starts.length ? starts[k + 1].at : Infinity;
     const marker = sliceItems(items, s.at, s.end);
-    return { letter: s.letter, items: trimItems(sliceItems(items, s.end, to)), markerRed: marker.some((i) => i.k === 't' && i.red && /[A-Ea-e]/.test(i.s)) };
+    return { letter: s.letter, items: trimItems(sliceItems(items, s.end, to)), markerRed: marker.some((i) => i.k === 't' && i.red && /[A-Ea-eأابتجثدهإآ]/.test(i.s)) };
   });
 }
 
