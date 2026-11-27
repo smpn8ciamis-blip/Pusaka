@@ -180,16 +180,8 @@ export async function generateVisitEvidencePDF(opts: EvidencePrintOptions): Prom
   const pageHeight = doc.internal.pageSize.getHeight();
   const marginLeft = 20;
 
-  let y = await addLetterheadToPDF(doc, {
-    school_name: s.school_name,
-    district_name: s.district_name,
-    school_address: s.school_address,
-    school_phone: s.school_phone,
-    logo_url: s.logo_url,
-    right_logo_url: s.right_logo_url,
-    show_address: s.show_address,
-    show_phone: s.show_phone,
-  });
+  // Teruskan seluruh pengaturan kop (ukuran/posisi logo, font, jarak baris, watermark) agar sama dengan surat lain.
+  let y = await addLetterheadToPDF(doc, s);
 
   y += 10;
   doc.setFont("helvetica", "bold");
